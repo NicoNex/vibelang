@@ -697,44 +697,65 @@ fn quote(s: &str) -> String {
 
 // --------------------------------------------------------------- comments
 
-/// Put the comments back into a canonical rendering.
+/// Put the comments back into a rendering.
 ///
-/// The canonical projection reproduces the file line for line, and the lexer
-/// drops a comment-only line entirely, so the rendered lines line up with the
-/// source lines that are not comment-only. Walking the two together puts every
-/// comment back where it was, at the column it was written in.
+/// The lexer throws comments away — they carry no meaning — but it records how
+/// many real tokens preceded each one. Newlines are not real tokens, so that
+/// index means the same thing in the file and in any re-rendering of it, and
+/// the comment can be placed again without either side agreeing on layout.
 ///
-/// ponytail: the alignment is the whole mechanism, so it is also the whole
-/// ceiling — if the two ever disagree on how many lines there are, the file was
-/// not canonical to begin with and this hands back the rendering untouched
-/// rather than guessing. Only `--canon` round-trips; `--explicit` and `--flow`
-/// rewrite the program, and a comment has no line to come back to.
-pub fn reattach(rendered: &str, src: &str, comments: &[Comment]) -> String {
+/// That matters more than it used to. Whitespace is free now, so `vibe view`
+/// is routinely asked to reformat a file whose layout is nothing like the
+/// canonical one. An earlier version lined the two up by line number and gave
+/// up when the counts disagreed, which quietly deleted every comment in exactly
+/// that case.
+///
+/// ponytail: an own-line comment is placed before the token it preceded and a
+/// trailing one after the line holding the token before it, which is the whole
+/// model. A comment written in the middle of an expression that the projection
+/// then rewraps can move to the start of that line; it is never lost.
+pub fn reattach(rendered: &str, comments: &[Comment]) -> String {
     if comments.is_empty() {
         return rendered.to_string();
     }
-    let ends_nl = rendered.ends_with('\n');
-    let mut lines = rendered.lines();
-    let mut out: Vec<String> = Vec::new();
-    for n in 1..=src.lines().count() {
-        match comments.iter().find(|c| c.line == n) {
-            Some(c) if c.own_line => out.push(format!("{}{}", sp(c.col), c.text)),
-            here => {
-                let Some(l) = lines.next() else { return rendered.to_string() };
-                match here {
-                    // never let a trailing comment touch the code, even if the
-                    // rendering grew past the column it was written at
-                    Some(c) => out.push(format!("{}{}", pad(l, c.col.max(l.len() + 1)), c.text)),
-                    None => out.push(l.to_string()),
-                }
-            }
+    let Ok(toks) = lexer::lex(rendered, 0) else {
+        return rendered.to_string();
+    };
+    // line number of each real token, in the same counting the lexer used
+    let lines: Vec<usize> = toks
+        .iter()
+        .filter(|t| !matches!(t.tok, lexer::Tok::Newline | lexer::Tok::Eof))
+        .map(|t| t.span.line)
+        .collect();
+    let body: Vec<&str> = rendered.lines().collect();
+    let mut before: Vec<Vec<&str>> = vec![Vec::new(); body.len() + 1];
+    let mut after: Vec<Vec<&str>> = vec![Vec::new(); body.len() + 1];
+    for c in comments {
+        if c.own_line {
+            let at = lines.get(c.after).copied().unwrap_or(body.len() + 1);
+            before[(at - 1).min(body.len())].push(&c.text);
+        } else {
+            let at = c.after.checked_sub(1).and_then(|i| lines.get(i).copied()).unwrap_or(1);
+            after[(at - 1).min(body.len().saturating_sub(1))].push(&c.text);
         }
     }
-    if lines.next().is_some() {
-        return rendered.to_string(); // not a canonical file: leave it alone
+    let mut out: Vec<String> = Vec::with_capacity(body.len() + comments.len());
+    for (i, line) in body.iter().enumerate() {
+        let indent = line.len() - line.trim_start().len();
+        for c in &before[i] {
+            out.push(format!("{}{}", sp(indent), c));
+        }
+        let mut l = line.to_string();
+        for c in &after[i] {
+            l = format!("{} {}", l.trim_end(), c);
+        }
+        out.push(l);
+    }
+    for c in before.last().into_iter().flatten() {
+        out.push(c.to_string());
     }
     let mut s = out.join("\n");
-    if ends_nl {
+    if rendered.ends_with('\n') {
         s.push('\n');
     }
     s

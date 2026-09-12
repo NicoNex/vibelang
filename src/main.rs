@@ -181,7 +181,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         // Only the canonical projection lines up with the file, so only it can
         // put the comments back; the others rewrite the program (§13.1).
         let r = match o.view {
-            view::Mode::Canon => view::reattach(&r, &src, &comments),
+            view::Mode::Canon => view::reattach(&r, &comments),
             _ => r,
         };
         print!("{r}");

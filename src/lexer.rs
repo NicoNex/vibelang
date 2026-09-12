@@ -122,9 +122,11 @@ pub struct Lexer<'a> {
 /// keeps them on the side rather than in the token stream.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comment {
-    pub line: usize,
-    /// 0-based byte column of the `;`.
-    pub col: usize,
+    /// How many real tokens precede it. Newlines do not count, so this index
+    /// means the same thing in the file and in any re-rendering of it — which
+    /// is what lets `vibe view` put the comment back without depending on
+    /// either layout.
+    pub after: usize,
     /// `true` when nothing but whitespace precedes it on its line.
     pub own_line: bool,
     /// The comment itself, `;;` included, newline excluded.
@@ -184,10 +186,8 @@ impl<'a> Lexer<'a> {
                         while self.peek() != b'\n' && self.pos < self.src.len() {
                             self.pos += 1;
                         }
-                        let col = start - self.line_start;
                         self.comments.push(Comment {
-                            line: self.line,
-                            col,
+                            after: out.iter().filter(|t| t.tok != Tok::Newline).count(),
                             own_line: self.src[self.line_start..start]
                                 .iter()
                                 .all(|b| b.is_ascii_whitespace()),

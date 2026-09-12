@@ -88,3 +88,28 @@ fn comments_survive_the_round_trip() {
     assert!(out.contains(";; measure inferred: k decreases at the only recursive call"), "{out}");
     assert!(out.contains(";; not recursive: nothing to prove"), "{out}");
 }
+
+/// Comments are anchored to tokens, not to lines, so reformatting a file whose
+/// layout is nothing like the canonical one keeps them. Losing them here would
+/// be data loss with no error, which is the worst shape a bug can take.
+#[test]
+fn reformatting_a_ragged_file_keeps_its_comments() {
+    let dir = std::env::temp_dir().join("vibe-view-tests");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let f = dir.join("wide.vibe");
+    std::fs::write(
+        &f,
+        "mod Wide\n\n;; keep me\nf (n:U64) : U64 =\n  n\n  +\n  1   ;; and me\n\ng (n:U64) : U64 = n\n",
+    )
+    .expect("write");
+    let o = std::process::Command::new(VIBE)
+        .args(["view", f.to_str().expect("utf-8")])
+        .output()
+        .expect("vibe runs");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    // the body collapses onto one line, so the two files do not agree on how
+    // many lines there are — which is exactly the case that used to drop them
+    assert!(out.contains("f (n:U64) : U64 = n + 1 ;; and me"), "{out}");
+    assert!(out.contains(";; keep me"), "{out}");
+}

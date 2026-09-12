@@ -1,5 +1,4 @@
 mod RefineOk
-;; every obligation here follows from the signature
 
 ;; every obligation here follows from the signature
 safe_div (a:U64) (b:U64, b!=0) : U64 = a / b
