@@ -1,0 +1,8 @@
+mod App
+
+;; `Money.vat` is the entire import system: no `import` line, no alias, no
+;; search path. The name says which file it comes from (spec §9).
+gross (euro:F64) : I64 = Money.vat (Money.cents euro) 22
+
+main : E! Unit =
+  out (fmt "gross={}\n" (gross 10.0))

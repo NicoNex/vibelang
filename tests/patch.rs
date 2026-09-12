@@ -17,12 +17,14 @@ fn vibe(args: &[&str]) -> (bool, String) {
 }
 
 /// A private copy of the reference program, so a patch test never edits the
-/// example the other tests read.
+/// example the other tests read. The copy keeps the name `ledger.vibe`: a file
+/// name has to match its `mod` line (spec §9), which is what makes a qualified
+/// name resolvable without a search path.
 fn scratch(name: &str) -> PathBuf {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/ledger.vibe");
-    let dir = std::env::temp_dir().join("vibe-patch-tests");
+    let dir = std::env::temp_dir().join("vibe-patch-tests").join(name);
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let p = dir.join(format!("{name}.vibe"));
+    let p = dir.join("ledger.vibe");
     std::fs::copy(&src, &p).expect("copy the reference program");
     p
 }

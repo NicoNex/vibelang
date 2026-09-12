@@ -62,7 +62,7 @@ fn every_file_round_trips_byte_for_byte() {
     // these two exist to be rejected, so they never reach the projection
     let broken = ["bad.vibe", "blank.vibe"];
     let mut seen = 0;
-    for dir in ["examples", "tests"] {
+    for dir in ["examples", "examples/shop", "tests"] {
         for e in std::fs::read_dir(root.join(dir)).expect("the directory exists") {
             let p = e.expect("readable entry").path();
             if p.extension().is_none_or(|x| x != "vibe") {

@@ -154,6 +154,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - the projection views: `vibe view` (canonical form, byte-identical on every `.vibe` file in the repository, comments included), `--sig-only`, `--explicit`, `--flow`
 - `arena a in ...` blocks, which release everything they allocated when they end
 - refinements of values bound by a constructor pattern: an arm learns the constructor tag, the payload's length, and the payload's record invariant
+- multi-file programs: `Money.cents` is the whole import system, resolved by loading `money.vibe` next to the file that names it, with a flat namespace and a clash reported rather than shadowed (§9)
 - the spec's Appendix A reference program compiles and runs
 
 **Partial**
@@ -163,9 +164,8 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 
 **Not yet**
 
-- a full borrow checker, and escape analysis for closures
+- escape analysis for closures, which is what would let a captured value be owned rather than read
 - freeing memory outside an `arena` block
-- a module system beyond a single file
 
 Several of these are being worked on in parallel, so this list moves faster than the prose above it.
 
@@ -305,6 +305,22 @@ exp c mean, total
 Be clear about why it compiles *today*, though: refinements are type-checked and then asserted at run time, so no proof is being performed. This program is the target that keeps the pipeline honest — not evidence that the proof exists.
 
 One deviation from the published spec: the draft writes `u32` and `f64` as parsing conversions overloaded on strings. Vibelang has no overloading — a language principle, not an implementation gap — so string parsing is `parse_u32` / `parse_f64` : `&Str -> Opt U32` / `&Str -> Opt F64`. The code above is the corrected form.
+
+---
+
+## Modules
+
+One file, one module, and the name is the import:
+
+```
+mod App
+
+gross (euro:F64) : I64 = Money.vat (Money.cents euro) 22
+```
+
+`Money.vat` resolves by loading `money.vibe` from the same directory. There is no `import` line, no alias and no search path, which removes a construct and, more to the point, a place for a generator to guess. Spec §9 gives v0.1 no visibility system at all, so the loaded modules are flattened into one unit and a name declared twice is a `mod.duplicate` error rather than a silent shadow. Diagnostics keep the module that owns the code, so an obligation raised inside `Money` is still addressed as `Money.half.body/0` from a run rooted at `App`.
+
+This does not scale past a small project, and the spec says so itself. It is the smallest thing that makes two files work.
 
 ---
 

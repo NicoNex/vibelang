@@ -18,6 +18,7 @@ mod codegen;
 mod diag;
 mod infer;
 mod lexer;
+mod load;
 mod own;
 mod parser;
 mod patch;
@@ -158,18 +159,17 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         return Err(Fail::Driver(USAGE.to_string()));
     }
 
-    let src = std::fs::read_to_string(&o.file)
-        .map_err(|e| format!("cannot read {}: {e}", o.file.display()))?;
     let mut files = Files::new();
-    let fid = files.add(&o.file.display().to_string(), &src);
-
-    let (toks, comments) =
-        lexer::lex_full(&src, fid).map_err(|d| Fail::Diags(diags(&[d], &files, o.fmt)))?;
-    let module = parser::parse(toks).map_err(|d| Fail::Diags(diags(&[d], &files, o.fmt)))?;
+    // `Ledger.total` is the whole import system (§9): loading follows the
+    // qualified names and hands the checker one flattened unit.
+    let prog =
+        load::program(&o.file, &mut files).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
+    let (module, src, comments) = (prog.flat, prog.root_src, prog.root_comments);
+    let root = prog.root;
     let checked = infer::check(&module).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
     // A projection is a reading tool: it works on code that does not yet prove.
     if o.cmd == "view" {
-        let r = view::render(&module, &checked, o.view);
+        let r = view::render(&root, &checked, o.view);
         // Only the canonical projection lines up with the file, so only it can
         // put the comments back; the others rewrite the program (§13.1).
         let r = match o.view {
@@ -180,7 +180,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         return Ok(ExitCode::SUCCESS);
     }
     if o.cmd == "deps" {
-        print!("{}", patch::deps(&module));
+        print!("{}", patch::deps(&root));
         return Ok(ExitCode::SUCCESS);
     }
     if o.cmd == "proof" {
@@ -188,7 +188,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         return Ok(ExitCode::SUCCESS);
     }
     if o.cmd == "patch" {
-        return do_patch(&o, &module, &src);
+        return do_patch(&o, &root, &src);
     }
     let mut semantic = own::check(&module, &checked);
     semantic.append(&mut total::check(&module));

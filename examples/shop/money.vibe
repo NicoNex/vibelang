@@ -1,0 +1,7 @@
+mod Money
+
+;; A module is a file, and a file is a module (spec §9). Nothing is exported
+;; and nothing is imported: `App` reaches these by writing `Money.cents`.
+cents (euro:F64) : I64 = i64 (euro * 100.0)
+
+vat (net:I64) (pct:I64, pct>=0) : I64 = net + net * pct / 100
