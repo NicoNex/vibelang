@@ -31,7 +31,7 @@ Copied from the spec and the README. Every task's requirements implicitly includ
 
 ## Where the code stands today
 
-Surveyed by reading the code at commit `c0604fa`, not by reading the README. Line numbers rot; the function and file names are the durable part. Note that `src/lexer.rs` and `examples/ffi.vibe` were being edited by another worker during this survey — the surface syntax of `ext c` blocks is in flux, so quote the spec, not the examples, when you need it.
+Surveyed by reading the code at commit `c0604fa`, not by reading the README. Line numbers rot; the function and file names are the durable part. The surface syntax changed immediately after this survey — whitespace is no longer significant, a match closes with `end`, a `<-` binding is terminated by `;`, and an `ext c` block closes with `end` — so quote [`vibelang-spec.md`](../vibelang-spec.md) §3, not the examples, when you need the grammar. Nothing in this plan depends on the surface syntax: it all sits behind the parser.
 
 ### The pipeline
 
