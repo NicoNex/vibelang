@@ -827,7 +827,7 @@ fn pat_names(p: &Pat) -> Vec<String> {
 fn is_affine_t(t: &T) -> bool {
     match t {
         T::Con(n, _) => !(crate::types::is_num(n)
-            || matches!(n.as_str(), "Bool" | "Char" | "Unit" | "Size" | "CStr" | "Ptr")),
+            || matches!(n.as_str(), "Bool" | "Char" | "Unit" | "Nat" | "Size" | "CStr" | "Ptr")),
         T::Var(_) => true,
         T::Tuple(ts) => ts.iter().any(is_affine_t),
         T::Fun(..) | T::Eff(_) => false,

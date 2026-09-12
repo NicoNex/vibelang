@@ -66,7 +66,7 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
 fn is_affine(t: &Ty) -> bool {
     match t {
         Ty::Ref(_) => false,
-        Ty::Con(n, _) => !(is_num(n) || matches!(n.as_str(), "Bool" | "Char" | "Unit" | "Size" | "CStr" | "Ptr")),
+        Ty::Con(n, _) => !(is_num(n) || matches!(n.as_str(), "Bool" | "Char" | "Unit" | "Nat" | "Size" | "CStr" | "Ptr")),
         Ty::Var(_) => true,
         Ty::Tuple(ts) => ts.iter().any(is_affine),
         Ty::Fun(..) | Ty::Eff(_) => false,

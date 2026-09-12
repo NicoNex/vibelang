@@ -400,12 +400,14 @@ The C boundary is deliberately the one place where the guarantees stop, and it h
 
 ```
 ext c "sqlite3.h" link "sqlite3"
-  sqlite3_open : &CStr -> E! I32
-  sqlite3_exec : (n:Size, n>0) -> E! I32
+  sqlite3_open : &CStr -> Ptr Db -> E! I32
+  sqlite3_exec : Ptr Db -> &CStr -> E! I32
 end
 ```
 
-`link` names a library for the linker; `pkg` resolves one through `pkg-config`. Every `ext c` signature is mandatorily `E!`: the checker cannot know what a C function does, so it assumes the worst by construction. Refinements on an `ext` signature are *assumed* — checked at the Vibelang call sites, and not one step beyond.
+`link` names a library for the linker; `pkg` resolves one through `pkg-config`. Every `ext c` signature is mandatorily `E!`: the checker cannot know what a C function does, so it assumes the worst by construction.
+
+An `ext` signature is a *type*, not a parameter list — there are no names to the left of the arrows, so a refinement written on one has nothing to refer to. The spec draft wrote `(n:Size, n>0) -> E! I32`; that is not a type, and the parser says so. A precondition on an imported C function is therefore still only expressible at the Vibelang call site.
 
 Going the other way:
 
@@ -438,7 +440,7 @@ The exported signature currently passes the uniform runtime value `VbVal`. The s
 
 ## Further reading
 
-- [`vibelang-spec.md`](vibelang-spec.md) — the normative specification: goals and non-goals (§0), normative principles (§1), grammar and canonicity rules (§3), ownership (§4), effects (§5), totality (§6), refinements (§7), C interop (§10), implementation phases (§15). Currently written in Italian. The generator does not mind.
+- [`vibelang-spec.md`](vibelang-spec.md) — the normative specification: goals and non-goals (§0), normative principles (§1), grammar and canonicity rules (§3), ownership (§4), effects (§5), totality (§6), refinements (§7), C interop (§10), implementation phases (§15). Also in Italian: [`vibelang-spec.it.md`](vibelang-spec.it.md).
 - [`docs/backend-roadmap.md`](docs/backend-roadmap.md) — the plan for a Cranelift backend beside the C one, so a pure Vibelang program needs no C toolchain. C is not deprecated by it: `exp c` headers and `--emit-c` are the reason it stays.
 - [`docs/static-drop-roadmap.md`](docs/static-drop-roadmap.md) — the plan for deleting the bump allocator. The ownership checker already knows where every value dies; Static Drop is the work of emitting that knowledge instead of discarding it.
 - [`README.it.md`](README.it.md) — this page in Italian.

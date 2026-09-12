@@ -92,3 +92,12 @@ fn a_closure_that_dies_with_the_call_only_reads() {
     let (ok, out) = vibe(&["check", "tests/capture_ok.vibe"]);
     assert!(ok, "the argument to `map` is consumed during the call:\n{out}");
 }
+
+/// `Nat` was missing from the scalar list, so a natural number was treated as
+/// an affine value and using it twice was a move error. The spec's own §6.2
+/// example did not compile.
+#[test]
+fn a_nat_is_a_scalar_not_an_affine_value() {
+    let (ok, out) = vibe(&["check", "tests/nat_scalar.vibe"]);
+    assert!(ok, "a number is copied, not moved:\n{out}");
+}

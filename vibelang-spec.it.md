@@ -1,8 +1,10 @@
 # Vibelang — Specifica del linguaggio
 
+<sub>English: [vibelang-spec.md](vibelang-spec.md)</sub>
+
 > Estensione file: `.vibe` — comando: `vibe`
 > Versione documento: 0.1 — bozza di design, non normativa
-> Stato: pre-implementazione
+> Stato: parzialmente implementata. Ogni sezione dichiara cosa fa oggi il compilatore e cosa è ancora design.
 
 ---
 
@@ -111,6 +113,11 @@ solo quando i token già formano un'espressione, e solo se il token successivo
 potrebbe iniziarne una: un a capo prima di un operatore binario, prima di un
 `|` in una dichiarazione di tipo o prima di una misura `%` è una continuazione.
 
+Da quella regola discende un'asimmetria, ed è l'unico punto in cui la posizione
+dell'a capo conta ancora: `-` è anche la negazione unaria e il lexer non
+distingue le due, quindi conta come token che può iniziare un'espressione.
+`a\n- b` termina dunque la dichiarazione, `a -\nb` no.
+
 ```ebnf
 module      = "mod" ModName NL { decl } ;
 
@@ -197,6 +204,13 @@ amt   (t:&Tx)      : F64 = t.price * f64 t.qty      ;; presta
 consume (t:Tx)     : F64 = t.price                  ;; consuma, t non più usabile
 ```
 
+L'uso affine è verificato oggi su ogni nome posseduto: parametri, binder `let` e
+`<-`, nomi introdotti da un pattern, e le catture di una closure il cui valore
+raggiunge il risultato della funzione — una closure simile possiede ciò che ha
+catturato (§4.6), mentre una consumata durante la chiamata, l'argomento di `map`
+per esempio, lo legge soltanto. Un secondo uso è errore, con `fix` `&x` o
+`dup x`.
+
 ### 4.3 Riuso in-place
 
 `{ r with f = v }` su `r` unicamente posseduto compila a mutazione sul posto, zero allocazioni. Su `r` prestato o condiviso, copia — e il compilatore lo segnala come diagnostica informativa (non errore), perché è la principale sorgente di costo nascosto.
@@ -212,11 +226,24 @@ Non sono esprimibili funzioni che restituiscono un riferimento derivato da un pa
 Valvola di sfogo per strutture che l'ownership lineare non esprime (grafi, condivisione arbitraria).
 
 ```
-arena a in
-  ...                  ;; tutto ciò che alloca in `a` vive fino a fine blocco
+graph_size (n:Size) : Size = arena a in
+  len (rev &(range 0 n))   ;; tutto ciò che alloca in `a` vive fino a fine blocco
 ```
 
 Deallocazione in blocco a fine scope. Nessun conteggio di riferimenti, nessun tracciamento a runtime.
+
+Accanto alle arene esiste una seconda liberazione, automatica e a granularità di
+frame. L'allocazione è un bump pointer; un frame che non può consegnare un
+puntatore al C libera al ritorno tutto ciò che ha allocato. Se possa farlo è
+deciso staticamente, e in un linguaggio senza globali e senza mutazione di valori
+prestati la via d'uscita è una sola: chiamare un simbolo `ext c`, che contamina
+la funzione e ogni chiamante, perché la liberazione avviene nel frame più
+esterno. La domanda complementare — è il risultato stesso a sfuggire? — è
+risolta dal runtime a costo zero: `vb_release` annulla del tutto quando il valore
+restituito è una stringa, un oggetto, un vettore, una closure, una stringa C o un
+puntatore. Il limite è la granularità: una ricorsione in coda marca una volta e
+libera una volta, quindi le sue iterazioni si accumulano fino al ritorno, e
+`arena` è l'override manuale per quel caso.
 
 ### 4.6 Closure
 
@@ -225,6 +252,13 @@ L'escape analysis è statica e inferita:
 - closure che sfugge → possiede le catture, allocata dal chiamante.
 
 Nessuna annotazione. Se l'analisi non riesce a decidere, è errore con richiesta di `move` esplicito.
+
+La metà di ownership di questa regola è oggi applicata; la metà di allocazione
+no — ogni closure è allocata sullo heap, e l'analisi decide in modo conservativo
+invece di richiedere un `move`. Il drop implicito e l'allocazione su stack per
+una closure che non sfugge sono pianificati in
+[`docs/static-drop-roadmap.md`](docs/static-drop-roadmap.md), che descrive anche
+la rimozione del bump allocator su cui poggia la liberazione di §4.5.
 
 ---
 
@@ -297,8 +331,8 @@ Quando l'inferenza fallisce, il compilatore la richiede e si scrive con `%`:
 
 ```
 sum_to (k:Nat) (n:Nat, k<=n) (acc:U64) : U64 =
-  ?k==n |True  -> acc
-        |False -> sum_to (k+1) n (acc+k)
+  ?(k==n) |True  -> acc
+          |False -> sum_to (k+1) n (acc+k)
   end
   %(n-k)
 ```
@@ -330,6 +364,11 @@ Sui tipi record sono invarianti, verificati a ogni costruzione e update:
 type Tx = { sku:Str, qty:U32, price:F64, qty>0, price>0.0 }
 ```
 
+**Non esiste sintassi per una postcondizione**: un refinement vincola i
+parametri, mai il risultato. Un fatto stabilito dentro una funzione non esce
+dunque da essa, ed è la lacuna aperta più grande di questa sezione — vedi §16.8
+e gli obblighi che restano aperti nel programma di riferimento dell'Appendice A.
+
 ### 7.2 Obblighi generati automaticamente (P5)
 
 Il compilatore genera un obbligo di prova, senza che nessuno lo scriva, per:
@@ -347,6 +386,24 @@ Il compilatore genera un obbligo di prova, senza che nessuno lo scriva, per:
 
 Tutti gli obblighi vanno a un solver SMT (riferimento: Z3). Un obbligo non scaricato è **errore di compilazione** con controesempio concreto, mai un warning.
 
+È implementato e opt-in: `vibe check --prove` traduce gli obblighi in SMT-LIB 2
+e li scarica con il binario `z3` su `PATH`. Senza `--prove`, `vibe check` si
+limita a riportare quanti ne restano aperti, e il refinement è asserito a
+runtime. I certificati sono messi in cache per hash del testo SMT in un
+`.vibe-proofs` accanto al sorgente, e ogni obbligo ha un budget di solver
+(`--prove-timeout=`, 5 secondi per default) oltre il quale il compilatore
+dichiara di aver rinunciato invece di riportare una refutazione (§16.5).
+
+Due regole governano il contesto in cui un obbligo viene provato:
+
+- un binder che fa shadowing di un nome raffinato riceve un simbolo proprio,
+  perché ereditare i fatti del nome esterno proverebbe qualcosa che il programma
+  non dice;
+- ciò che un pattern di costruttore insegna entra nel contesto del suo ramo — il
+  tag, la lunghezza del payload e l'invariante di record del payload. È il
+  meccanismo di §8.3, ed è ciò che scarica `len ts > 0` su un ramo `Ok ts` sotto
+  un ramo `Ok []`.
+
 ### 7.4 Funzioni ghost
 
 Per gli invarianti che il solver non deduce localmente. Non vengono compilate, esistono solo per le prove.
@@ -355,7 +412,7 @@ Per gli invarianti che il solver non deduce localmente. Non vengono compilate, e
 ghost fib_spec (n:Nat) : Nat =
   ?n |0 -> 0
      |1 -> 1
-     |k -> fib_spec (k-1) + fib_spec (k-2)
+     |_ -> fib_spec (n-1) + fib_spec (n-2)
   end
 ```
 
@@ -401,6 +458,13 @@ end
 
 Nessun controllo esplicito di lista vuota, e `mean` è comunque sicura.
 
+È implementato per i pattern di costruttore, letterali, booleani e di lista: un
+ramo apprende il tag dello scrutinee, la lunghezza del payload di un pattern di
+lista e l'invariante di record di ciò che il payload lega. Un ramo più in basso
+apprende inoltre che i rami sopra di lui non sono scattati. Ciò che non attraversa
+un confine di funzione è un fatto stabilito in una *funzione chiamata*: servirebbe
+una postcondizione, e §7.1 non ne ha la sintassi.
+
 ---
 
 ## 9. Moduli
@@ -408,6 +472,14 @@ Nessun controllo esplicito di lista vuota, e `mean` è comunque sicura.
 Un file, un modulo. `mod Name` in prima riga. Nessun sistema di visibilità in v0.1: tutto ciò che è dichiarato è visibile ai moduli importatori, tranne `ghost`.
 
 L'import è implicito tramite qualificazione: `Ledger.total`. Nessuna keyword `import`, nessun alias — elimina un costrutto e un punto di scelta.
+
+È implementato come specificato. `Ledger.total` carica il modulo `Ledger` da un
+file che sta accanto a quello che lo nomina; il nome del file deve corrispondere
+al nome del modulo a meno di maiuscole e underscore, quindi `TotalOk` può stare
+in `total_ok.vibe` così come in `TotalOk.vibe`, e nient'altro può differire — la
+mappatura da nome qualificato a file resta meccanica. I moduli caricati sono poi
+appiattiti in un'unica unità, e un nome dichiarato due volte è errore
+`mod.duplicate`, non uno shadowing silenzioso.
 
 *(Aperto: questo non scala oltre progetti piccoli. Va rivisto prima della v1.)*
 
@@ -420,12 +492,17 @@ L'import è implicito tramite qualificazione: `Ledger.total`. Nessuna keyword `i
 ```
 ext c "stdio.h"
   puts   : &CStr -> E! I32
-  malloc : (n:Size, n>0) -> E! (Ptr Byte)
+  malloc : Size -> E! Ptr Byte
+end
 ```
 
 Regole:
 - `E!` obbligatorio su ogni dichiarazione (§5.2);
 - i refinement su una `ext` sono **assunti, non provati**: verificati sui call site Vibelang, assunti oltre il confine;
+- una firma `ext` è un tipo, non una lista di parametri: il refinement si scrive
+  dopo il tipo, `name : type, refine` (§3), e può nominare solo ciò che il call
+  site stesso nomina — non esiste un binder per l'argomento. La forma a parametri
+  `(n:Size, n>0)` di una dichiarazione di funzione non è ammessa qui;
 - il compilatore emette l'`#include` corrispondente nel C generato.
 
 ### 10.2 Vibelang → C
@@ -478,6 +555,14 @@ Non un frontend GCC. Motivazione:
 - GCC non ha una plugin API per i frontend; un frontend deve stare in-tree e il processo è in larga parte non documentato. Implica distribuire un GCC patchato.
 - Senza GC e senza unwinding, l'IR di Vibelang è quasi isomorfo al C: il gap semantico che un frontend nativo colmerebbe è minimo.
 - Emettere C dà GCC, clang, MSVC e ogni toolchain embedded senza lavoro aggiuntivo, e il debug funziona via `#line` senza generare DWARF.
+
+L'emissione C è ciò che viene distribuito. Un secondo backend, nativo, è
+pianificato in [`docs/backend-roadmap.md`](docs/backend-roadmap.md): Cranelift
+accanto al backend C, così che un programma Vibelang puro non richieda una
+toolchain C sulla macchina che lo compila. La regola sotto cui quel piano è
+scritto è che **il backend C non è deprecato da esso** — gli header `exp c`,
+`--emit-c` e ogni toolchain embedded sono il motivo per cui il C resta un target
+pienamente supportato.
 
 Opzione futura: libgccjit (che nonostante il nome fa anche AOT via `compile_to_file`), o LLVM. Da valutare solo se emergono ottimizzazioni non esprimibili in C.
 
@@ -557,6 +642,14 @@ go k a b =
 
 `--sig-only` è la vista economica per il contesto dell'agente: firme di tutto il modulo, corpi solo di ciò che si sta modificando.
 
+Tutte e quattro le viste esistono. La proiezione canonica è byte-identica su ogni
+file `.vibe` del repository, commenti inclusi — i commenti sono rimessi a partire
+dal sorgente, quindi solo la vista canonica può portarli: le altre tre riscrivono
+il programma e li perdono. `--explicit` è più stretta dell'esempio qui sopra:
+stampa la firma inferita di ogni dichiarazione e, per una dichiarazione
+raffinata, se il refinement è scaricato o verificato a runtime. Le annotazioni di
+esaustività e i termini di prova per ramo non sono emessi.
+
 ### 13.2 Edit strutturato
 
 ```
@@ -566,6 +659,12 @@ vibe patch <path> <hash> <nuovo-nodo>
 L'indirizzamento è per **percorso semantico** (`Ledger.mean.body`), non per indice — stabile sotto inserimento e riordino. L'hash del sottoalbero atteso funge da concorrenza ottimistica: se non combacia, la patch è rifiutata anziché applicata al posto sbagliato.
 
 I file restano di testo e sono la sorgente di verità. L'AST è una cache derivata. La forma canonica (P1) garantisce che una patch strutturata produca un diff testuale minimale, quindi git, grep e code review continuano a funzionare.
+
+È implementato. `vibe patch <file> <path>` senza hash stampa il nodo e il suo
+hash; con hash e nuovo nodo lo sostituisce solo se l'hash combacia ancora. Prima
+di scrivere qualsiasi cosa il file risultante è rilessato, riparsato e
+ricontrollato, e la patch è rifiutata con le diagnostiche — lasciando intatto
+l'originale — se il risultato non è un programma.
 
 ### 13.3 Superficie da esporre all'agente
 
@@ -577,6 +676,10 @@ I file restano di testo e sono la sorgente di verità. L'AST è una cache deriva
 | `check --diag=struct` | diagnostica in forma di termine |
 | `deps` | chiamanti e chiamate |
 | `proof` | obblighi SMT aperti su un nodo |
+
+Ogni riga esiste. `vibe deps` riporta chiamanti e chiamate, `vibe proof` elenca
+gli obblighi aperti uno per riga sotto lo stesso percorso semantico delle
+diagnostiche, e con `--prove` quelli che z3 chiude sono marcati come chiusi.
 
 ---
 
@@ -640,11 +743,26 @@ Punti dove il design non è risolto e la scelta va presa con dati, non a priori.
 
 4. **Granularità degli effetti (§5.3).** Un solo `E!` è probabilmente troppo grossolano per codice reale; suddividerlo aumenta la superficie. Da decidere su codice vero.
 
-5. **Tempi del solver.** Con molti obblighi, Z3 può diventare il collo di bottiglia della compilazione. Serve caching dei certificati per hash del sottoalbero, e un budget per obbligo con fallback a errore esplicito.
+5. **Tempi del solver.** In parte risolta. I certificati sono messi in cache per
+   hash del testo SMT in un `.vibe-proofs` accanto al sorgente, quindi una
+   compilazione i cui obblighi sono tutti in cache non richiede alcun solver, e
+   ogni obbligo ha un budget (`--prove-timeout=`, 5 secondi per default) oltre il
+   quale il compilatore riporta `refine.budget` — dichiara di aver rinunciato,
+   invece di presentare l'assenza di prova come una refutazione. Resta aperta la
+   granularità: la cache è indicizzata sul testo della domanda, non sul
+   sottoalbero, quindi una modifica non correlata al contesto la invalida.
 
 6. **Strutture cicliche.** Le arene coprono molti casi ma non tutti. Non è chiaro se serva un meccanismo aggiuntivo o se il vincolo sia accettabile.
 
 7. **Concorrenza.** Completamente fuori dallo scope della v0.1. L'immutabilità e l'ownership lineare sono una buona base, ma il design non è stato considerato.
+
+8. **Postcondizioni.** §7.1 ha la sintassi per una precondizione e nessuna per
+   una postcondizione, quindi un fatto stabilito dentro una funzione non esce da
+   essa. È ciò che lascia aperte le chiamate a `mean` e `top` nel `main`
+   dell'Appendice A: `load` ha già escluso `Ok []`, e il chiamante non può
+   vederlo. Qualunque sintassi per esprimerlo è un costrutto in più e un punto di
+   scelta in più per il generatore, ed è per questo che è una questione e non una
+   feature.
 
 ---
 
@@ -702,3 +820,6 @@ exp c mean, total
 ```
 
 Proprietà che questo programma esercita: FFI in entrambe le direzioni, ADT con payload, record con invariante, pattern matching annidato ed esaustivo, propagazione degli effetti, prestito multiplo dello stesso valore, copia esplicita da fetta prestata, e — il punto centrale — `mean` e `top` che richiedono `len ts > 0` senza alcun controllo esplicito, perché il ramo `Ok []` è già stato consumato in `load`.
+
+Compila e gira. Sotto `--prove` la maggior parte dei suoi obblighi è scaricata;
+i due nel `main` no, per il motivo che dà §16.8.

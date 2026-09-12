@@ -1,0 +1,11 @@
+mod NatScalar
+
+;; `Nat` is a mathematical natural with no ceiling, and a scalar: it is copied,
+;; not moved. Treating it as affine made spec §6.2's own example fail with
+;; `own.use_after_move` on a number.
+sum_to (k:Nat) (n:Nat, k<=n) (acc:U64) : U64 =
+  ?(k==n)
+   |True  -> acc
+   |False -> sum_to (k + 1) n (acc + k)
+  end
+  %(n - k)
