@@ -173,7 +173,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 
 **Works**
 
-- lexer; parser with canonical-form enforcement; AST; name resolution
+- lexer with no offside rule — whitespace does not reach the AST; parser enforcing the structural half of canonicity; AST; name resolution
 - Hindley–Milner type checker; ADTs; records; exhaustive pattern matching
 - effect propagation (`E!`)
 - structured diagnostics (`--diag=prose|struct|json`) with semantic path, witness and mechanical `fix`
@@ -184,7 +184,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - the agent surface of §13.3: `vibe patch` (semantic path, hash-guarded, refused unless the result still compiles), `vibe deps` (callers and callees), `vibe proof` (open obligations by path)
 - termination checking for the pure fragment: inferred measures, `%expr` when inference gives up, and `E!` functions exempt because divergence is an effect (§6.1)
 - refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH), with proved obligations cached in a sibling `.vibe-proofs` by the hash of the question asked, and a per-obligation solver budget (`--prove-timeout=`, 5 seconds by default) that reports giving up instead of pretending to refute (§16.5)
-- the projection views: `vibe view` (canonical form, byte-identical on every `.vibe` file in the repository, comments included), `--sig-only`, `--explicit`, `--flow`
+- the projection views: `vibe view` (canonical form, byte-identical on every `.vibe` file in the repository), `--sig-only`, `--explicit`, `--flow`. Comments are anchored to tokens, so reformatting a file laid out any other way keeps them
 - escape analysis for closures — deciding which values outlive the call that built them: a closure whose value reaches the result owns its captures, one consumed during the call reads them
 - `arena a in ...` blocks: a named region you allocate into and discard whole, which releases everything it allocated when it ends
 - automatic release per frame: a function that cannot hand a pointer to C releases everything it allocated when it returns, and the runtime cancels the release when the result is itself heap-allocated
@@ -200,6 +200,8 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 **Not yet**
 
 - stack allocation for a closure that does not escape (§4.6 wants zero cost; the ownership half of that rule is done, the allocation half is not)
+- a postcondition on a function's result. §7.1 puts refinements on parameters only, which is why the reference program's `mean &ts` in `main` is still an open obligation: the fact that rules out the empty case lives in `load`, and there is no way to say so (§16.8)
+- implicit drop — see [`docs/static-drop-roadmap.md`](docs/static-drop-roadmap.md) — and a native backend that needs no C toolchain, see [`docs/backend-roadmap.md`](docs/backend-roadmap.md)
 
 Several of these are being worked on in parallel, so this list moves faster than the prose above it.
 
