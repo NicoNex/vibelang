@@ -16,6 +16,10 @@ pub struct Parser {
 
 type P<T> = Result<T, Diag>;
 
+/// The name `a ; b` binds its left side to. Not writable: an identifier starts
+/// with a lower-case letter or `_`, never with `;`.
+pub const SEQ: &str = ";seq";
+
 pub fn parse(toks: Vec<Token>) -> P<Module> {
     Parser { toks, i: 0, depth: 0, home: String::new() }.module()
 }
@@ -200,11 +204,6 @@ impl Parser {
     }
 
     fn decl(&mut self) -> P<Decl> {
-        if self.cur().col != 0 {
-            return Err(self
-                .err("canon.indent", "a declaration must start in column 1")
-                .with_fix("remove the leading indentation"));
-        }
         if self.cur().is_kw("type") {
             return Ok(Decl::Type(self.typedecl()?));
         }
@@ -404,8 +403,13 @@ impl Parser {
         let mut types = Vec::new();
         loop {
             self.skip_newlines();
-            if self.at_eof() || self.cur().col == 0 {
+            if self.eat_kw("end") {
                 break;
+            }
+            if self.at_eof() {
+                return Err(self
+                    .err("parse.ext", "expected `end` to close the `ext c` block")
+                    .with_fix("add `end` after the last signature"));
             }
             if self.cur().is_kw("type") {
                 types.push(self.typedecl()?);
@@ -472,19 +476,17 @@ impl Parser {
         let ret = if self.eat_sym(":") { Some(self.ty()?) } else { None };
         self.expect_sym("=")?;
         let body = self.body()?;
-        // `%measure` may sit on its own indented line under the body (spec
-        // §13.1 renders it that way), so a newline in front of it is part of
-        // the declaration, not the end of it.
-        if self.at_newline() && self.toks.get(self.i + 1).is_some_and(|t| t.is_sym("%") && t.col > 0)
-        {
-            self.i += 1;
-        }
         let measure = if self.eat_sym("%") { Some(self.expr()?) } else { None };
         self.end_of_line()?;
         Ok(FunDecl { name, home: self.home.clone(), ghost, params, ret, body, measure, span })
     }
 
     /// A function body: a chain of `<-` binds / `let ... in` followed by an expression.
+    /// A body: `name <- value ;` binds, `let name = value in` binds, `;`
+    /// sequences, and anything else is an expression.
+    ///
+    /// `a ; b` is `_ <- a ; b`: the value is still bound, to a name nothing can
+    /// read, so sequencing needs no second rule in the effect checker.
     fn body(&mut self) -> P<Expr> {
         self.skip_newlines();
         let span = self.span();
@@ -492,8 +494,10 @@ impl Parser {
             let (n, _) = self.name()?;
             self.expect_sym("<-")?;
             let val = self.expr()?;
-            if !self.at_newline() {
-                return Err(self.err("parse.bind", "`<-` binding must be followed by a new line"));
+            if !self.eat_sym(";") {
+                return Err(self
+                    .err("parse.bind", "expected `;` after a `<-` binding")
+                    .with_fix("write `name <- value ;` and continue on the next line"));
             }
             let rest = self.body()?;
             return Ok(Expr::new(ExprKind::Bind(n, Box::new(val), Box::new(rest)), span));
@@ -509,7 +513,12 @@ impl Parser {
             let rest = self.body()?;
             return Ok(Expr::new(ExprKind::Let(n, Box::new(val), Box::new(rest)), span));
         }
-        self.expr()
+        let e = self.expr()?;
+        if self.eat_sym(";") {
+            let rest = self.body()?;
+            return Ok(Expr::new(ExprKind::Bind(SEQ.into(), Box::new(e), Box::new(rest)), span));
+        }
+        Ok(e)
     }
 
     // ---- expressions ----
@@ -777,30 +786,28 @@ impl Parser {
         }
     }
 
+    /// `? scrutinee { "|" pattern "->" expr } "end"`.
+    ///
+    /// `end` is what makes a nested match unambiguous without layout: the inner
+    /// one closes before the outer one's next `|` is read, so no arm has to be
+    /// aligned with anything.
     fn match_expr(&mut self, span: Span) -> P<Expr> {
         let scrut = self.expr()?;
-        self.skip_newlines();
         if !self.cur().is_sym("|") {
             return Err(self
                 .err("parse.match", "a `?` match needs at least one `|` arm")
                 .with_fix("add `|_ -> ...`"));
         }
-        let arm_col = self.cur().col;
         let mut arms = Vec::new();
-        loop {
-            self.i += 1; // `|`
+        while self.eat_sym("|") {
             let pat = self.pattern()?;
             self.expect_sym("->")?;
-            let body = self.expr()?;
-            arms.push((pat, body));
-            // Save position: only commit if the next `|` is ours.
-            let save = self.i;
-            self.skip_newlines();
-            if self.cur().is_sym("|") && self.cur().col == arm_col {
-                continue;
-            }
-            self.i = save;
-            break;
+            arms.push((pat, self.body()?));
+        }
+        if !self.eat_kw("end") {
+            return Err(self
+                .err("parse.match", "expected another `|` arm or `end` to close the match")
+                .with_fix("add `end` after the last arm"));
         }
         Ok(Expr::new(ExprKind::Match(Box::new(scrut), arms), span))
     }

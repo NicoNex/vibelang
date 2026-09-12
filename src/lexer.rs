@@ -1,8 +1,18 @@
-//! Lexer for Vibelang. Newline-significant, column-tracking.
+//! Lexer for Vibelang. Whitespace carries no meaning.
 //!
-//! No INDENT/DEDENT tokens: the parser uses column numbers directly (match arms
-//! align on their `|`, declarations start at column 0). That is enough layout
-//! for the whole grammar and keeps the lexer a flat loop.
+//! There is no offside rule, no INDENT/DEDENT, and no column tracking: a
+//! generator that miscounts spaces should produce a program that still parses,
+//! because a parse error costs a whole retry and retries are the metric this
+//! language is optimised against.
+//!
+//! One layout rule survives, and it is not a counting rule: a newline ends a
+//! top-level declaration. It fires only when the line so far is a complete
+//! expression — the last token was a name, a literal, a closing bracket or
+//! `end` — and only outside every bracketed or `end`-terminated construct.
+//! Without it juxtaposition would swallow the next declaration's name, and
+//! `f : U64 = 1` followed by `g : U64 = 2` would parse as `1 g`. Everywhere
+//! else a newline is whitespace, so a continuation line may sit at any
+//! indentation at all, including none.
 
 use crate::diag::{Diag, Span};
 
@@ -24,7 +34,6 @@ pub enum Tok {
 pub struct Token {
     pub tok: Tok,
     pub span: Span,
-    pub col: usize,
 }
 
 impl Token {
@@ -37,15 +46,67 @@ impl Token {
 }
 
 const KEYWORDS: &[&str] = &[
-    "mod", "ext", "exp", "type", "ghost", "let", "in", "own", "ref", "arena", "with", "True",
-    "False",
+    "mod", "ext", "exp", "type", "ghost", "let", "in", "own", "ref", "arena", "with", "end",
+    "True", "False",
 ];
 
 // Longest first: the matcher takes the first hit.
 const SYMBOLS: &[&str] = &[
     "|>", "<-", "->", "==", "!=", "<=", ">=", "&&", "||", "++", "E!", "::", ":", "=", "?", "|",
-    "&", "%", "{", "}", "[", "]", "(", ")", ",", ".", "\\", "+", "-", "*", "/", "<", ">", "!",
+    "&", "%", "{", "}", "[", "]", "(", ")", ",", ".", "\\", "+", "-", "*", "/", "<", ">", "!", ";",
 ];
+
+/// Whether a token can be the last one of an expression. A newline after
+/// anything else is a continuation, never a terminator — which is what lets a
+/// declaration be laid out however the generator felt like laying it out.
+fn ends_expr(t: &Tok) -> bool {
+    match t {
+        Tok::Int(_) | Tok::Float(_) | Tok::Str(_) | Tok::Char(_) | Tok::Name(_) | Tok::Ctor(_) => {
+            true
+        }
+        Tok::Kw(k) => matches!(*k, "end" | "True" | "False"),
+        Tok::Sym(s) => matches!(*s, ")" | "]" | "}"),
+        _ => false,
+    }
+}
+
+/// Whether a token can be the first one of an expression. A newline in front
+/// of something that cannot start one is a continuation: it is what lets a line
+/// break sit before a binary operator, before a `|` in a type declaration, or
+/// before a `%` measure.
+///
+/// `end` counts as a starter so the newline in front of it survives, which is
+/// what terminates the last signature of an `ext c` block.
+///
+/// `-` counts as a starter, because it is also unary negation and the lexer
+/// cannot tell the two apart. So `a\n- b` ends the declaration while `a -\nb`
+/// does not — the one case where where the break goes still matters.
+fn starts_expr(t: &Tok) -> bool {
+    match t {
+        Tok::Int(_) | Tok::Float(_) | Tok::Str(_) | Tok::Char(_) | Tok::Name(_) | Tok::Ctor(_) => {
+            true
+        }
+        Tok::Kw(k) => !matches!(*k, "in" | "with"),
+        Tok::Sym(s) => matches!(*s, "(" | "[" | "{" | "?" | "\\" | "&" | "!" | "-"),
+        Tok::Eof => true,
+        Tok::Newline => true,
+    }
+}
+
+/// How a token changes the nesting depth. `?` opens a match, closed by `end`,
+/// so a match needs no layout at all.
+///
+/// `ext c` is deliberately not on this list. Its signatures are `name : type`,
+/// and a type extends greedily, so `puts : &CStr -> E! I32` followed by
+/// `fputs : ...` would read `I32 fputs` as a type application. A newline
+/// separates them, for the same reason one separates declarations.
+fn nesting(t: &Tok) -> i32 {
+    match t {
+        Tok::Sym("(") | Tok::Sym("[") | Tok::Sym("{") | Tok::Sym("?") => 1,
+        Tok::Sym(")") | Tok::Sym("]") | Tok::Sym("}") | Tok::Kw("end") => -1,
+        _ => 0,
+    }
+}
 
 pub struct Lexer<'a> {
     src: &'a [u8],
@@ -84,14 +145,22 @@ pub fn lex_full(src: &str, file: usize) -> Result<(Vec<Token>, Vec<Comment>), Di
         line_start: 0,
         comments: Vec::new(),
     };
-    let toks = l.run()?;
+    let mut toks = l.run()?;
+    // A newline in front of something that cannot begin an expression was never
+    // a separator. Dropping those here, with one token of lookahead, is what
+    // the emitting loop could not do with none.
+    let mut keep = Vec::with_capacity(toks.len());
+    for i in 0..toks.len() {
+        if toks[i].tok == Tok::Newline && !toks.get(i + 1).is_some_and(|t| starts_expr(&t.tok)) {
+            continue;
+        }
+        keep.push(toks[i].clone());
+    }
+    toks = keep;
     Ok((toks, l.comments))
 }
 
 impl<'a> Lexer<'a> {
-    fn col(&self) -> usize {
-        self.pos - self.line_start
-    }
     fn span(&self, start: usize) -> Span {
         Span { file: self.file, line: self.line, col: start - self.line_start, len: self.pos - start }
     }
@@ -104,15 +173,13 @@ impl<'a> Lexer<'a> {
 
     fn run(&mut self) -> Result<Vec<Token>, Diag> {
         let mut out: Vec<Token> = Vec::new();
-        let mut blank_run = 0usize;
+        let mut depth: i32 = 0;
         loop {
             // Horizontal whitespace and comments.
-            let mut commented = false;
             loop {
                 match self.peek() {
                     b' ' | b'\t' | b'\r' => self.pos += 1,
                     b';' if self.at(1) == b';' => {
-                        commented = true;
                         let start = self.pos;
                         while self.peek() != b'\n' && self.pos < self.src.len() {
                             self.pos += 1;
@@ -133,33 +200,18 @@ impl<'a> Lexer<'a> {
                 }
             }
             if self.pos >= self.src.len() {
-                out.push(Token { tok: Tok::Eof, span: self.span(self.pos), col: 0 });
+                out.push(Token { tok: Tok::Eof, span: self.span(self.pos) });
                 return Ok(out);
             }
             if self.peek() == b'\n' {
-                // A comment-only line is neither a blank line nor a separator.
-                let blank = !commented
-                    && matches!(out.last(), None | Some(Token { tok: Tok::Newline, .. }));
-                if commented && matches!(out.last(), None | Some(Token { tok: Tok::Newline, .. })) {
-                    self.pos += 1;
-                    self.line += 1;
-                    self.line_start = self.pos;
-                    continue;
-                }
-                if blank {
-                    blank_run += 1;
-                    // P1: one blank line separates declarations, never two.
-                    if blank_run > 1 {
-                        return Err(Diag::error(
-                            self.span(self.pos),
-                            "canon.blankline",
-                            "more than one blank line in a row",
-                        )
-                        .with_fix("delete the extra blank lines"));
-                    }
-                } else {
-                    blank_run = 0;
-                    out.push(Token { tok: Tok::Newline, span: self.span(self.pos), col: self.col() });
+                // A newline separates declarations, and nothing else. It counts
+                // only outside every bracket and every `end`, and only when the
+                // tokens so far already form an expression; anywhere else it is
+                // a continuation, so blank lines and stray indentation vanish
+                // here rather than becoming errors later.
+                let ends = out.last().is_some_and(|t| ends_expr(&t.tok));
+                if depth == 0 && ends {
+                    out.push(Token { tok: Tok::Newline, span: self.span(self.pos) });
                 }
                 self.pos += 1;
                 self.line += 1;
@@ -167,7 +219,6 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             let start = self.pos;
-            let col = self.col();
             let c = self.peek();
             let tok = if c.is_ascii_digit() {
                 self.number()?
@@ -181,7 +232,8 @@ impl<'a> Lexer<'a> {
                 self.symbol()?
             };
             let span = self.span(start);
-            out.push(Token { tok, span, col });
+            depth = (depth + nesting(&tok)).max(0);
+            out.push(Token { tok, span });
         }
     }
 

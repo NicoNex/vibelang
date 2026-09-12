@@ -90,10 +90,10 @@ fn without_the_empty_arm_the_same_call_is_open() {
     // the arm above is what teaches the solver `len xs != 0`; drop it and the
     // proof must fail, otherwise the previous test proves nothing
     let src = "mod Neg\n\
-               head (v:&Vec U64, len v > 0) : U64 = get v 0\n\
+               head (v:&Vec U64, len v>0) : U64 = get v 0\n\
                pick (r:&Res Unit (Vec U64)) : U64 =\n  \
                  ?r |Er e  -> 0\n     \
-                    |Ok xs -> head xs\n";
+                    |Ok xs -> head xs\n  end\n";
     let dir = std::env::temp_dir().join("vibe-refine-ctor");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let f = dir.join("neg.vibe");

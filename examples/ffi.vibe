@@ -2,7 +2,8 @@ mod Ffi
 
 ext c "stdio.h"
   puts : &CStr -> E! I32
+end
 
 main : E! Unit =
-  n <- puts (to_cstr "through libc")
+  n <- puts (to_cstr "through libc") ;
   out (fmt "puts returned {}\n" n)

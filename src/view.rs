@@ -14,8 +14,8 @@
 
 use crate::ast::*;
 use crate::infer::Checked;
-use crate::diag::{Diag, Span};
-use crate::lexer::Comment;
+use crate::diag::Diag;
+use crate::lexer::{self, Comment};
 
 const WIDTH: usize = 80;
 
@@ -190,6 +190,7 @@ fn extblock(out: &mut String, e: &ExtBlock) {
         out.push_str(&line);
         out.push('\n');
     }
+    out.push_str("end\n");
 }
 
 fn sig_head(s: &ExtSig) -> String {
@@ -300,8 +301,11 @@ impl Printer {
     fn lay(&self, e: &Expr, col: usize) -> String {
         match &e.kind {
             ExprKind::Match(s, arms) => self.lay_match(s, arms, col),
+            ExprKind::Bind(n, v, rest) if n == crate::parser::SEQ => {
+                format!("{} ;\n{}{}", self.flat(v, 0), sp(col), self.lay(rest, col))
+            }
             ExprKind::Bind(n, v, rest) => {
-                format!("{n} <- {}\n{}{}", self.flat(v, 0), sp(col), self.lay(rest, col))
+                format!("{n} <- {} ;\n{}{}", self.flat(v, 0), sp(col), self.lay(rest, col))
             }
             ExprKind::Let(n, v, rest) => {
                 format!("let {n} = {} in\n{}{}", self.flat(v, 0), sp(col), self.lay(rest, col))
@@ -356,6 +360,9 @@ impl Printer {
             out.push_str(&lead);
             out.push_str(&self.lay(b, acol + lead.len()));
         }
+        // `end` closes the match; it is what lets a nested one sit inside an
+        // arm without any alignment.
+        out.push_str(&format!("\n{}end", sp(col)));
         out
     }
 
@@ -459,10 +466,13 @@ impl Printer {
                     .iter()
                     .map(|(p, b)| format!("|{} -> {}", pat(p), self.flat(b, 0)))
                     .collect();
-                format!("?{} {}", self.scrut(s), arms.join(" "))
+                format!("?{} {} end", self.scrut(s), arms.join(" "))
+            }
+            ExprKind::Bind(n, v, rest) if n == crate::parser::SEQ => {
+                format!("{} ; {}", self.flat(v, 0), self.flat(rest, 0))
             }
             ExprKind::Bind(n, v, rest) => {
-                format!("{n} <- {} {}", self.flat(v, 0), self.flat(rest, 0))
+                format!("{n} <- {} ; {}", self.flat(v, 0), self.flat(rest, 0))
             }
             ExprKind::Let(n, v, rest) => {
                 format!("let {n} = {} in {}", self.flat(v, 0), self.flat(rest, 0))
@@ -732,48 +742,30 @@ pub fn reattach(rendered: &str, src: &str, comments: &[Comment]) -> String {
 
 /// Canonicity (spec §3.1), as one rule instead of a list.
 ///
-/// §3.1 enumerates what the parser must reject — indentation that is not two
-/// spaces per level, redundant parentheses, spacing around binary operators, a
-/// `let` that a top-level binding would do, more than one blank line. Checking
-/// them one at a time invites the list and the projection to disagree, and
-/// then there are two canonical forms, which is the thing P1 exists to prevent.
+/// Whitespace is not part of it. A generator that miscounts spaces must still
+/// produce a program that compiles, so indentation, blank lines and the column
+/// a declaration starts in are all free. What canonicity still means is that
+/// the projection and the parser agree on the program: printing a file and
+/// lexing the result must give back the same tokens.
 ///
-/// So the rule is the projection: a file is canonical exactly when printing it
-/// gives it back. The fix is then not advice, it is the line to write.
-///
-/// ponytail: this reports the first offending line, not all of them, because
-/// after one line moves the rest may line up again — re-running is cheaper than
-/// guessing. The lexer's own rules (a second blank line, a declaration out of
-/// column 1) still fire earlier and more precisely, and are left where they are.
-pub fn canon(m: &Module, ck: &Checked, src: &str, comments: &[Comment], file: usize) -> Vec<Diag> {
-    let rendered = reattach(&render(m, ck, Mode::Canon), src, comments);
-    if rendered == src {
-        return Vec::new();
-    }
-    let mut want = rendered.lines();
-    for (i, got) in src.lines().enumerate() {
-        let Some(w) = want.next() else {
-            return vec![at(file, i + 1, got, "this line is not part of the canonical form", "")];
-        };
-        if w != got {
-            return vec![at(file, i + 1, got, "this line is not in canonical form", w)];
-        }
-    }
-    match want.next() {
-        Some(w) => vec![at(file, src.lines().count() + 1, "", "the canonical form has more", w)],
-        None => Vec::new(),
-    }
-}
-
-fn at(file: usize, line: usize, got: &str, msg: &str, want: &str) -> Diag {
-    let d = Diag::error(
-        Span { file, line, col: 0, len: got.len().max(1) },
-        "canon.form",
-        msg,
-    );
-    if want.is_empty() {
-        d.with_fix("delete it")
-    } else {
-        d.with_fix(&format!("write it as `{}`", want.trim_end()))
-    }
+/// In practice that leaves this check guarding the compiler rather than the
+/// user — the parser already rejects the structural variants on its own, and a
+/// difference here means `vibe view` would have changed the program. It is
+/// cheap, and the day it fires it will have caught something worth catching.
+pub fn canon(m: &Module, ck: &Checked, src: &str, _comments: &[Comment], file: usize) -> Vec<Diag> {
+    let rendered = render(m, ck, Mode::Canon);
+    let (Ok(want), Ok(got)) = (lexer::lex(&rendered, file), lexer::lex(src, file)) else {
+        return Vec::new(); // the source already failed to lex, or the rendering did
+    };
+    let n = want.len().min(got.len());
+    let at = (0..n).find(|&i| want[i].tok != got[i].tok);
+    let i = match at {
+        Some(i) => i,
+        None if want.len() == got.len() => return Vec::new(),
+        None => n.saturating_sub(1),
+    };
+    let span = got.get(i).map(|t| t.span).unwrap_or_default();
+    vec![Diag::error(span, "canon.form", "this is not the canonical form of the program")
+        .with_path(&m.name)
+        .with_fix("run `vibe view` on the file and write back what it prints")]
 }

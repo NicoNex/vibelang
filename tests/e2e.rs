@@ -84,16 +84,14 @@ fn emit_c_keeps_the_generated_source() {
     std::fs::remove_file(c).ok();
 }
 
+/// Blank lines used to be a canonicity error. Whitespace no longer reaches the
+/// AST, so the file that exists to prove it now has to compile.
 #[test]
-fn two_blank_lines_are_not_canonical() {
-    let (ok, out) = vibe(&["check", "tests/blank.vibe", "--diag=struct"]);
-    assert!(!ok, "two blank lines in a row must be rejected");
-    assert!(out.contains("canon.blankline"), "expected canon.blankline, got:\n{out}");
+fn blank_lines_carry_no_meaning() {
+    let (ok, out) = vibe(&["check", "tests/blank.vibe"]);
+    assert!(ok, "a run of blank lines is whitespace:\n{out}");
 }
 
-/// `--lib` is only worth anything if a C compiler can actually consume what it
-/// produces, so this test builds the archive and links a real C program
-/// against it (spec §10.2).
 #[test]
 fn a_library_links_into_a_c_program() {
     let dir = std::env::temp_dir().join("vibe-lib-test");

@@ -68,7 +68,7 @@ fn a_node_reads_back_with_its_hash() {
 fn a_multi_line_body_keeps_its_indentation() {
     let (_, text) = node("Ledger.parse.body", "examples/ledger.vibe");
     assert!(text.starts_with("\n  ?split ',' ln"), "{text:?}");
-    assert!(text.ends_with("|_       -> Er (Bad (dup ln))"), "{text:?}");
+    assert!(text.ends_with("|_       -> Er (Bad (dup ln))\n  end"), "{text:?}");
 }
 
 #[test]

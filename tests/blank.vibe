@@ -1,6 +1,9 @@
 mod Blank
 
+;; blank lines, and a body that starts two levels in for no reason
+
+
 main : E! Unit =
 
 
-  out "x\n"
+        out "x\n"

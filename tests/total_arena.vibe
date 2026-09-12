@@ -1,6 +1,7 @@
 mod TotalArena
 
+;; an arena block does not make a non-decreasing recursion total
 loop_ (n:U64) : U64 = arena a in loop_ n
 
 main : E! Unit =
-  out (fmt "{}\n" (loop_ 1))
+  out (show (loop_ 1))

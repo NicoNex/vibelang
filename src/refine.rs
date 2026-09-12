@@ -1198,7 +1198,7 @@ mod tests {
 
     #[test]
     fn a_match_arm_teaches_the_solver() {
-        let src = "mod T\n\nf (a:U64) (b:U64) : U64 =\n  ?b\n   |0 -> 0\n   |_ -> a / b\n";
+        let src = "mod T\n\nf (a:U64) (b:U64) : U64 =\n  ?b |0 -> 0 |_ -> a / b end\n";
         let o = obs_of(src);
         assert_eq!(o.len(), 1, "{o:#?}");
         assert!(o[0].hyps.iter().any(|h| h == "(not (= b 0))"), "{:?}", o[0].hyps);

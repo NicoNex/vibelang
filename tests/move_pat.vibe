@@ -1,7 +1,9 @@
 mod MovePat
 
+;; the same, for a name a pattern binds rather than a `let`
 type Err = Void
 
 g (r:Res Err Str) : Vec Str =
   ?r |Er e -> empty
      |Ok s -> push (push empty s) s
+  end

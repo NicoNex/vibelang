@@ -4,6 +4,7 @@ mod IdentC
 ;; and §2.3's grammar allows it as a name).
 ext c "stdio.h"
   puts : &CStr -> E! I32
+end
 
 type Col = Red | Green | Blue
 
@@ -11,5 +12,6 @@ name (c:&Col) : Str =
   ?c |Red   -> dup "r"
      |Green -> dup "g"
      |Blue  -> dup "b"
+  end
 
 exp c name

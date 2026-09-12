@@ -5,6 +5,7 @@ spin (n:U64) (acc:U64) : U64 =
   ?(n==0)
    |True  -> acc
    |False -> spin n (acc + 1)
+  end
 
 main : E! Unit =
   out (show (spin 1 0))

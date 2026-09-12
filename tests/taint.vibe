@@ -2,6 +2,7 @@ mod Taint
 
 ext c "stdio.h"
   puts : &CStr -> E! I32
+end
 
 ;; `low` hands a pointer to C, which may keep it. `high` never touches C
 ;; itself, but releasing in `high` would free what C is holding, so the taint
@@ -13,5 +14,5 @@ high (s:&Str) : E! I32 = low s
 clean (n:I32) : I32 = n + 1
 
 main : E! Unit =
-  n <- high "x"
+  n <- high "x" ;
   out (show (n + clean 1))

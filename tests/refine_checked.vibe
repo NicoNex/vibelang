@@ -1,5 +1,4 @@
 mod RefineChecked
-;; spec 7.5: the checked forms discharge the obligation at run time
 
 ;; spec 7.5: the checked forms discharge the obligation at run time
 d (a:U64) (b:U64) : Res Fault U64 = div_checked a b

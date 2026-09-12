@@ -4,12 +4,14 @@ mod TotalOk
 fib (k:U64) (a b:U64) : U64 =
   ?k |0 -> a
      |_ -> fib (k - 1) b (a + b)
+  end
 
 ;; k grows towards n, so the measure is written out
 sum_to (k:U64) (n:U64) (acc:U64) : U64 =
   ?(k==n)
    |True  -> acc
    |False -> sum_to (k + 1) n (acc + k)
+  end
   %(n - k)
 
 ;; not recursive: nothing to prove

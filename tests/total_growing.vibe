@@ -5,6 +5,7 @@ up (k:U64) (n:U64) : U64 =
   ?(k==n)
    |True  -> k
    |False -> up (k + 1) n
+  end
   %(k - n)
 
 main : E! Unit =

@@ -8,3 +8,4 @@ type Err = Void
 f (n:U64, n>0) (r:Res Err U64) : U64 =
   ?r |Er e -> 0
      |Ok n -> 100 / n
+  end

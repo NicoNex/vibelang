@@ -2,6 +2,7 @@ mod Ledger
 
 ext c "stdio.h"
   puts : &CStr -> E! I32
+end
 
 type Tx  = { sku:Str, qty:U32, price:F64, qty>0, price>0.0 }
 type Err = Bad Str | Num Str | Void
@@ -11,12 +12,15 @@ parse (ln:&Str) : Res Err Tx =
    |[s,q,p] -> ?(parse_u32 q, parse_f64 p)
                 |(Some n, Some v) -> mk (dup s) n v
                 |_                -> Er (Num (dup ln))
+               end
    |_       -> Er (Bad (dup ln))
+  end
 
 mk (s:Str) (n:U32) (v:F64) : Res Err Tx =
   ?(n>0 && v>0.0)
    |True  -> Ok {sku=s, qty=n, price=v}
    |False -> Er (Bad s)
+  end
 
 amt   (t:&Tx)      : F64 = t.price * f64 t.qty
 total (ts:&Vec Tx) : F64 = ts |> map amt |> sum
@@ -25,16 +29,18 @@ mean (ts:&Vec Tx, len ts>0) : F64 = total ts / f64 (len ts)
 top  (ts:&Vec Tx, len ts>0) : &Tx = ts |> max_by amt
 
 load (p:&Str) : E! Res Err (Vec Tx) =
-  txt <- read p
+  txt <- read p ;
   ?txt |> lines |> map parse |> seq
    |Er e  -> Er e
    |Ok [] -> Er Void
    |Ok ts -> Ok ts
+  end
 
 main : E! Unit =
-  r <- load "ledger.csv"
+  r <- load "ledger.csv" ;
   ?r |Er e  -> warn (show e)
      |Ok ts -> out (fmt "n={} tot={} avg={} top={}"
                         (len ts) (total &ts) (mean &ts) (top &ts).sku)
+  end
 
 exp c mean, total
