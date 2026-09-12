@@ -10,12 +10,14 @@ pub struct Parser {
     pub i: usize,
     /// Inside (), [] or {} newlines are insignificant.
     pub depth: usize,
+    /// The name on the `mod` line, stamped onto every declaration below it.
+    pub home: String,
 }
 
 type P<T> = Result<T, Diag>;
 
 pub fn parse(toks: Vec<Token>) -> P<Module> {
-    Parser { toks, i: 0, depth: 0 }.module()
+    Parser { toks, i: 0, depth: 0, home: String::new() }.module()
 }
 
 impl Parser {
@@ -171,6 +173,7 @@ impl Parser {
                 .with_fix("add `mod MyModule` as the first line"));
         }
         let (name, _) = self.ctor()?;
+        self.home = name.clone();
         self.end_of_line()?;
         let mut decls = Vec::new();
         loop {
@@ -232,7 +235,7 @@ impl Parser {
         if !self.eat_sym("=") {
             // `type Window` inside an `ext c` block: opaque C type.
             self.end_of_line()?;
-            return Ok(TypeDecl { name, params, body: TypeBody::Opaque, span });
+            return Ok(TypeDecl { name, home: self.home.clone(), params, body: TypeBody::Opaque, span });
         }
         let body = if self.cur().is_sym("{") {
             TypeBody::Record(self.record_def()?)
@@ -252,7 +255,7 @@ impl Parser {
             TypeBody::Variants(vs)
         };
         self.end_of_line()?;
-        Ok(TypeDecl { name, params, body, span })
+        Ok(TypeDecl { name, home: self.home.clone(), params, body, span })
     }
 
     fn record_def(&mut self) -> P<RecordDef> {
@@ -465,7 +468,7 @@ impl Parser {
         }
         let measure = if self.eat_sym("%") { Some(self.expr()?) } else { None };
         self.end_of_line()?;
-        Ok(FunDecl { name, ghost, params, ret, body, measure, span })
+        Ok(FunDecl { name, home: self.home.clone(), ghost, params, ret, body, measure, span })
     }
 
     /// A function body: a chain of `<-` binds / `let ... in` followed by an expression.

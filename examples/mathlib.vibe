@@ -1,0 +1,10 @@
+mod MathLib
+
+;; A library, not a program: no `main`, and `exp c` is the whole surface.
+;; `vibe build --lib examples/mathlib.vibe` leaves libmathlib.a and mathlib.h
+;; next to it, and any C project links them like any other library.
+area (w:F64) (h:F64, w>0.0, h>0.0) : F64 = w * h
+
+perimeter (w:F64) (h:F64) : F64 = 2.0 * (w + h)
+
+exp c area, perimeter

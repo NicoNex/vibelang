@@ -225,7 +225,7 @@ pub fn obligations(m: &Module, ck: &Checked) -> Vec<Ob> {
             syms: BTreeMap::new(),
             hyps: Vec::new(),
             obs: Vec::new(),
-            fun: format!("{}.{}", m.name, f.name),
+            fun: format!("{}.{}", f.home, f.name),
             params: Vec::new(),
         };
         for p in &f.params {

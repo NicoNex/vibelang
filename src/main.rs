@@ -1,7 +1,7 @@
 //! Driver: .vibe -> C -> native executable.
 //!
 //! vibe check <file> [--diag=prose|struct|json]
-//! vibe build <file> [-o out] [--emit-c] [--diag=...]
+//! vibe build <file> [-o out] [--lib] [--emit-c] [--diag=...]
 //! vibe run   <file> [--diag=...] [-- args...]
 //! vibe view  <file> [--sig-only|--explicit|--flow]
 //! vibe deps  <file>
@@ -41,6 +41,7 @@ usage: vibe <check|build|run|view|deps|proof|patch> <file.vibe> [options]
   --prove                    discharge refinement obligations with z3 (§7.3)
   --sig-only|--explicit|--flow   projection to print (view; default: canonical)
   -o <path>                  output executable (build)
+  --lib                      build a static library plus its C header (build)
   --emit-c                   also keep the generated C next to the output
   -- <args...>               arguments passed to the program (run)
 ";
@@ -85,6 +86,7 @@ struct Opts {
     out: Option<PathBuf>,
     fmt: DiagFormat,
     emit_c: bool,
+    lib: bool,
     prove: bool,
     view: view::Mode,
     prog_args: Vec<String>,
@@ -99,6 +101,7 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
         out: None,
         fmt: DiagFormat::Prose,
         emit_c: false,
+        lib: false,
         prove: false,
         view: view::Mode::Canon,
         prog_args: Vec::new(),
@@ -114,6 +117,7 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
                 break;
             }
             "--emit-c" => o.emit_c = true,
+            "--lib" => o.lib = true,
             "--prove" => o.prove = true,
             "--sig-only" => o.view = view::Mode::SigOnly,
             "--explicit" => o.view = view::Mode::Explicit,
@@ -219,6 +223,11 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         write(&exe.with_extension("c"), &c_src)?;
     }
 
+    if o.lib {
+        archive(&o, &dir, &c_path, &stem, &module)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
     cc(&dir, &c_path, &exe, &module)?;
 
     if o.cmd == "run" {
@@ -291,6 +300,67 @@ fn do_patch(o: &Opts, m: &ast::Module, src: &str) -> Result<ExitCode, Fail> {
     write(&o.file, &patched)?;
     println!("{path}\t{}", patch::hash(new.trim_end_matches('\n')));
     Ok(ExitCode::SUCCESS)
+}
+
+/// `vibe build --lib`: a static archive plus the generated header, so a C
+/// project links a Vibelang module the way it links any other library (§10.2).
+/// The export wrappers call `vb_init` themselves, so there is nothing for the
+/// caller to initialise.
+fn archive(
+    o: &Opts,
+    dir: &Path,
+    c_path: &Path,
+    stem: &str,
+    m: &ast::Module,
+) -> Result<(), String> {
+    if m.exports().is_empty() {
+        return Err(format!(
+            "{} declares no `exp c`, so a library built from it would have no symbols",
+            o.file.display()
+        ));
+    }
+    let out = o.out.clone().unwrap_or_else(|| {
+        o.file.with_file_name(format!("lib{stem}.a"))
+    });
+    let outdir = out.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let mut objs = Vec::new();
+    for (src, name) in [(c_path.to_path_buf(), stem), (dir.join("vibert.c"), "vibert")] {
+        let obj = dir.join(format!("{name}.o"));
+        let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+        let st = Command::new(&cc)
+            .arg("-std=c11")
+            .arg("-O2")
+            .arg("-c")
+            .arg(&src)
+            .arg("-o")
+            .arg(&obj)
+            .arg(format!("-I{}", dir.display()))
+            .status()
+            .map_err(|e| format!("cannot run {cc}: {e}"))?;
+        if !st.success() {
+            return Err(format!("{cc} failed on {}", src.display()));
+        }
+        objs.push(obj);
+    }
+    let ar = std::env::var("AR").unwrap_or_else(|_| "ar".into());
+    let st = Command::new(&ar)
+        .arg("rcs")
+        .arg(&out)
+        .args(&objs)
+        .status()
+        .map_err(|e| format!("cannot run {ar}: {e}"))?;
+    if !st.success() {
+        return Err(format!("{ar} failed on {}", out.display()));
+    }
+    // The header is the point of the exercise: copy it, and the runtime header
+    // it includes, next to the archive.
+    for h in [format!("{stem}.h"), "vibert.h".to_string()] {
+        let from = dir.join(&h);
+        std::fs::copy(&from, outdir.join(&h))
+            .map_err(|e| format!("cannot place {h} next to the archive: {e}"))?;
+    }
+    println!("{}", out.display());
+    Ok(())
 }
 
 fn write(p: &Path, s: &str) -> Result<(), String> {

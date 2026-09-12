@@ -146,6 +146,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - structured diagnostics (`--diag=prose|struct|json`) with semantic path, witness and mechanical `fix`
 - C code generation, and a small C runtime
 - `ext c` FFI with `link` / `pkg-config`, and `exp c` export with a generated header
+- `vibe build --lib`: a static archive plus that header, linkable from C with no initialisation call
 - the `vibe` CLI: `check`, `build`, `run`, `view` — a `.vibe` file to a native executable via C
 - the agent surface of §13.3: `vibe patch` (semantic path, hash-guarded, refused unless the result still compiles), `vibe deps` (callers and callees), `vibe proof` (open obligations by path)
 - termination checking: inferred measures, and `%expr` when inference gives up
@@ -333,6 +334,16 @@ double Ledger_mean(VbVal x0);
 ```
 
 Shouting it in a comment is not verification. It is the most a header can do, and pretending otherwise is how guarantees leak out of a project.
+
+A module with no `main` is a library, and `vibe build --lib` says so out loud:
+
+```console
+$ vibe build --lib examples/mathlib.vibe
+libmathlib.a
+$ cc -std=c11 -o use use.c -L. -lmathlib -lm
+```
+
+The archive arrives with its generated header beside it. The exported wrappers initialise the runtime themselves, so there is no `vibe_init()` for the C side to forget. This is the direction the project cares about most: C is not an escape hatch bolted on at the end, it is how sixty years of existing libraries stay reachable without anyone rewriting them.
 
 The exported signature currently passes the uniform runtime value `VbVal`. The spec's `own T` / `ref T` ownership qualifiers, and the generated `<name>_free`, are not implemented yet.
 

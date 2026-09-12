@@ -92,8 +92,8 @@ pub fn nodes(m: &Module, src: &str) -> Vec<Node> {
             continue; // a span the parser could not place; not addressable
         }
         let base = match d {
-            Decl::Type(t) => format!("{}.{}", m.name, t.name),
-            Decl::Fun(f) => format!("{}.{}", m.name, f.name),
+            Decl::Type(t) => format!("{}.{}", t.home, t.name),
+            Decl::Fun(f) => format!("{}.{}", f.home, f.name),
             Decl::Ext(e) => format!("{}.ext.{}", m.name, ext_key(&e.header)),
             Decl::Exp(_, _) => format!("{}.exp", m.name),
         };
@@ -164,14 +164,14 @@ pub fn deps(m: &Module) -> String {
         for c in &calls {
             callers.push((c.clone(), f.name.clone()));
         }
-        out.push_str(&format!("{}.{} -> {}\n", m.name, f.name, join(&calls, &m.name)));
+        out.push_str(&format!("{}.{} -> {}\n", f.home, f.name, join(&calls, &m.name)));
     }
     callers.sort();
     callers.dedup();
     for f in m.funs() {
         let up: Vec<String> =
             callers.iter().filter(|(c, _)| *c == f.name).map(|(_, u)| u.clone()).collect();
-        out.push_str(&format!("{}.{} <- {}\n", m.name, f.name, join(&up, &m.name)));
+        out.push_str(&format!("{}.{} <- {}\n", f.home, f.name, join(&up, &m.name)));
     }
     out
 }

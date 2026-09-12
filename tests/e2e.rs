@@ -90,3 +90,52 @@ fn two_blank_lines_are_not_canonical() {
     assert!(!ok, "two blank lines in a row must be rejected");
     assert!(out.contains("canon.blankline"), "expected canon.blankline, got:\n{out}");
 }
+
+/// `--lib` is only worth anything if a C compiler can actually consume what it
+/// produces, so this test builds the archive and links a real C program
+/// against it (spec §10.2).
+#[test]
+fn a_library_links_into_a_c_program() {
+    let dir = std::env::temp_dir().join("vibe-lib-test");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let archive = dir.join("libmathlib.a");
+    let (ok, out) = vibe(&[
+        "build",
+        "--lib",
+        "examples/mathlib.vibe",
+        "-o",
+        archive.to_str().expect("utf-8"),
+    ]);
+    assert!(ok, "building a library failed:\n{out}");
+    assert!(archive.exists(), "no archive at {}", archive.display());
+    assert!(dir.join("mathlib.h").exists(), "the header must sit next to the archive");
+    assert!(dir.join("vibert.h").exists(), "and so must the runtime header it includes");
+
+    let c = dir.join("use.c");
+    std::fs::write(
+        &c,
+        "#include <stdio.h>\n#include \"mathlib.h\"\n\
+         int main(void) {\n  printf(\"%g %g\\n\", MathLib_area(3.0, 4.0), MathLib_perimeter(1.0, 2.0));\n  return 0;\n}\n",
+    )
+    .expect("write the C caller");
+    let exe = dir.join("use");
+    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+    let st = Command::new(&cc)
+        .current_dir(&dir)
+        .args(["-std=c11", "-o"])
+        .arg(&exe)
+        .arg(&c)
+        .args(["-L.", "-lmathlib", "-lm"])
+        .status()
+        .expect("a C compiler");
+    assert!(st.success(), "C could not link the library");
+    let run = Command::new(&exe).output().expect("the linked program runs");
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "12 6");
+}
+
+#[test]
+fn a_library_with_no_exports_is_refused() {
+    let (ok, out) = vibe(&["build", "--lib", "examples/hello.vibe"]);
+    assert!(!ok, "a library with no `exp c` has no symbols:\n{out}");
+    assert!(out.contains("no `exp c`"), "{out}");
+}

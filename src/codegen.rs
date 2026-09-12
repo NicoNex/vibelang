@@ -290,7 +290,7 @@ impl<'a> Gen<'a> {
     }
 
     fn function(&mut self, f: &FunDecl) -> String {
-        let path = format!("{}.{}", self.m.name, f.name);
+        let path = format!("{}.{}", f.home, f.name);
         self.cur_fn = f.name.clone();
         self.cur_path = path.clone();
         self.push_scope();

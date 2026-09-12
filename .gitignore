@@ -5,3 +5,6 @@
 /.claude/worktrees
 /examples/ffi
 /examples/hello.c
+/tests/arena
+/tests/inplace
+/examples/mathlib

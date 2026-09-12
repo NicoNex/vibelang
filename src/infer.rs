@@ -24,7 +24,7 @@ pub struct Checked {
 
 pub fn parse_type(src: &str) -> Ty {
     let toks = lexer::lex(src, usize::MAX).expect("prelude type lexes");
-    let mut p = Parser { toks, i: 0, depth: 1 };
+    let mut p = Parser { toks, i: 0, depth: 1, home: "Prelude".into() };
     p.ty().expect("prelude type parses")
 }
 
@@ -47,7 +47,7 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
         if c.data.records.contains_key(&t.name) || c.data.variants.contains_key(&t.name) {
             c.errors.push(
                 Diag::error(t.span, "name.duplicate", &format!("type `{}` is already defined", t.name))
-                    .with_path(&format!("{}.{}", m.name, t.name)),
+                    .with_path(&format!("{}.{}", t.home, t.name)),
             );
         }
         collect_type(&mut c, t);
@@ -106,7 +106,7 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
         if c.sigs.contains_key(&f.name) && !ext.contains_key(&f.name) {
             c.errors.push(
                 Diag::error(f.span, "name.duplicate", &format!("`{}` is already defined", f.name))
-                    .with_path(&format!("{}.{}", m.name, f.name)),
+                    .with_path(&format!("{}.{}", f.home, f.name)),
             );
         }
         let mut vars = HashMap::new();
@@ -130,7 +130,7 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
 
     // 6. Bodies.
     for f in m.funs() {
-        let path = format!("{}.{}", m.name, f.name);
+        let path = format!("{}.{}", f.home, f.name);
         if let Err(e) = check_fun(&mut c, f, &path) {
             c.errors.push(e.at_path(&path));
         }

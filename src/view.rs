@@ -276,7 +276,7 @@ fn fundecl(
 fn explicit_notes(m: &Module, ck: &Checked, f: &FunDecl) -> Vec<String> {
     let mut v = Vec::new();
     if let Some(s) = ck.sigs.get(&f.name) {
-        v.push(format!("{}.{} : {}", m.name, f.name, s.ty.show()));
+        v.push(format!("{}.{} : {}", f.home, f.name, s.ty.show()));
     }
     for p in &f.params {
         for r in &p.refines {

@@ -47,7 +47,7 @@ pub fn check(m: &Module) -> Vec<Diag> {
             continue; // not recursive: nothing to prove
         }
         let f = funs[i];
-        let path = format!("{}.{}", m.name, f.name);
+        let path = format!("{}.{}", f.home, f.name);
         match &f.measure {
             Some(e) => {
                 let l = lin(e);
@@ -121,7 +121,7 @@ pub fn check(m: &Module) -> Vec<Diag> {
                         funs[i].name, funs[c.callee].name
                     ),
                 )
-                .with_path(&format!("{}.{}", m.name, funs[i].name))
+                .with_path(&format!("{}.{}", funs[i].home, funs[i].name))
                 .with_witness(&format!("measure {}", mi.show()))
                 .with_fix("make an argument shrink, or give a measure that does, e.g. `%(n-k)`"),
             );

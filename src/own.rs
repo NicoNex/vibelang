@@ -35,7 +35,7 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
             moved: HashMap::new(),
             errors: Vec::new(),
             inplace: HashSet::new(),
-            path: format!("{}.{}", m.name, f.name),
+            path: format!("{}.{}", f.home, f.name),
             ck,
         };
         let mut owned: Vec<&str> = Vec::new();

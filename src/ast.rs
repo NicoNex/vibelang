@@ -92,6 +92,10 @@ pub struct Param {
 #[derive(Clone, Debug)]
 pub struct FunDecl {
     pub name: String,
+    /// The module that declared it. Modules are flattened before checking
+    /// (spec §9), so this is what keeps a semantic path pointing at the file
+    /// the declaration actually lives in.
+    pub home: String,
     pub ghost: bool,
     pub params: Vec<Param>,
     pub ret: Option<Ty>,
@@ -124,6 +128,7 @@ pub enum TypeBody {
 #[derive(Clone, Debug)]
 pub struct TypeDecl {
     pub name: String,
+    pub home: String,
     pub params: Vec<String>,
     pub body: TypeBody,
     pub span: Span,
