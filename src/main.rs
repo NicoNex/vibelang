@@ -28,7 +28,7 @@ mod total;
 mod types;
 mod view;
 
-use diag::{DiagFormat, Diag, Files};
+use diag::{Diag, DiagFormat, Files};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -124,7 +124,10 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
             "--prove" => o.prove = true,
             _ if a.starts_with("--prove-timeout=") => {
                 let v = &a["--prove-timeout=".len()..];
-                refine::set_budget(v.parse().map_err(|_| format!("`{v}` is not a number of seconds"))?);
+                refine::set_budget(
+                    v.parse()
+                        .map_err(|_| format!("`{v}` is not a number of seconds"))?,
+                );
             }
             "--sig-only" => o.view = view::Mode::SigOnly,
             "--explicit" => o.view = view::Mode::Explicit,
@@ -161,7 +164,10 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
 
 fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     let o = parse_args(argv)?;
-    if !matches!(o.cmd.as_str(), "check" | "build" | "run" | "view" | "deps" | "proof" | "patch") {
+    if !matches!(
+        o.cmd.as_str(),
+        "check" | "build" | "run" | "view" | "deps" | "proof" | "patch"
+    ) {
         return Err(Fail::Driver(USAGE.to_string()));
     }
 
@@ -227,16 +233,27 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    let stem = o.file.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or("out".into());
-    let c_src = codegen::generate(&module, &checked, &stem).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
+    let stem = o
+        .file
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or("out".into());
+    let c_src = codegen::generate(&module, &checked, &stem)
+        .map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
     let exe = o.out.clone().unwrap_or_else(|| o.file.with_extension(""));
 
     // ponytail: build in a sibling directory, no temp-dir crate, no cleanup thread.
-    let dir = exe.parent().unwrap_or(Path::new(".")).join(format!(".vibe-{stem}"));
+    let dir = exe
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(format!(".vibe-{stem}"));
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     write(&dir.join("vibert.h"), RT_H)?;
     write(&dir.join("vibert.c"), RT_C)?;
-    write(&dir.join(format!("{stem}.h")), &codegen::header(&module, &checked))?;
+    write(
+        &dir.join(format!("{stem}.h")),
+        &codegen::header(&module, &checked),
+    )?;
     let c_path = dir.join(format!("{stem}.c"));
     write(&c_path, &c_src)?;
     if o.emit_c {
@@ -283,7 +300,10 @@ fn do_patch(o: &Opts, m: &ast::Module, src: &str) -> Result<ExitCode, Fail> {
     let path = o.rest.first().ok_or("patch needs a semantic path")?;
     let Some(node) = patch::find(&nodes, path) else {
         let known: Vec<&str> = nodes.iter().map(|n| n.path.as_str()).collect();
-        return Err(Fail::Driver(format!("no node at `{path}`; this file has: {}", known.join(" "))));
+        return Err(Fail::Driver(format!(
+            "no node at `{path}`; this file has: {}",
+            known.join(" ")
+        )));
     };
     let text = node.text(src);
     if o.rest.len() == 1 {
@@ -292,7 +312,11 @@ fn do_patch(o: &Opts, m: &ast::Module, src: &str) -> Result<ExitCode, Fail> {
     }
     let (want, new) = match (o.rest.get(1), o.rest.get(2)) {
         (Some(h), Some(n)) => (h, n),
-        _ => return Err(Fail::Driver("patch needs both a hash and a new node".into())),
+        _ => {
+            return Err(Fail::Driver(
+                "patch needs both a hash and a new node".into(),
+            ))
+        }
     };
     let got = patch::hash(text);
     if *want != got {
@@ -326,25 +350,23 @@ fn do_patch(o: &Opts, m: &ast::Module, src: &str) -> Result<ExitCode, Fail> {
 /// project links a Vibelang module the way it links any other library (§10.2).
 /// The export wrappers call `vb_init` themselves, so there is nothing for the
 /// caller to initialise.
-fn archive(
-    o: &Opts,
-    dir: &Path,
-    c_path: &Path,
-    stem: &str,
-    m: &ast::Module,
-) -> Result<(), String> {
+fn archive(o: &Opts, dir: &Path, c_path: &Path, stem: &str, m: &ast::Module) -> Result<(), String> {
     if m.exports().is_empty() {
         return Err(format!(
             "{} declares no `exp c`, so a library built from it would have no symbols",
             o.file.display()
         ));
     }
-    let out = o.out.clone().unwrap_or_else(|| {
-        o.file.with_file_name(format!("lib{stem}.a"))
-    });
+    let out = o
+        .out
+        .clone()
+        .unwrap_or_else(|| o.file.with_file_name(format!("lib{stem}.a")));
     let outdir = out.parent().unwrap_or(Path::new(".")).to_path_buf();
     let mut objs = Vec::new();
-    for (src, name) in [(c_path.to_path_buf(), stem), (dir.join("vibert.c"), "vibert")] {
+    for (src, name) in [
+        (c_path.to_path_buf(), stem),
+        (dir.join("vibert.c"), "vibert"),
+    ] {
         let obj = dir.join(format!("{name}.o"));
         let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
         let st = Command::new(&cc)
@@ -391,7 +413,12 @@ fn write(p: &Path, s: &str) -> Result<(), String> {
 fn cc(dir: &Path, c_path: &Path, exe: &Path, m: &ast::Module) -> Result<(), String> {
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
     let mut cmd = Command::new(&cc);
-    cmd.arg("-std=c11").arg("-O2").arg("-o").arg(exe).arg(c_path).arg(dir.join("vibert.c"));
+    cmd.arg("-std=c11")
+        .arg("-O2")
+        .arg("-o")
+        .arg(exe)
+        .arg(c_path)
+        .arg(dir.join("vibert.c"));
     cmd.arg(format!("-I{}", dir.display()));
 
     let mut links: Vec<String> = Vec::new();
@@ -410,11 +437,18 @@ fn cc(dir: &Path, c_path: &Path, exe: &Path, m: &ast::Module) -> Result<(), Stri
             .output()
             .map_err(|e| format!("pkg-config failed: {e}"))?;
         if !out.status.success() {
-            return Err(format!("pkg-config: {}", String::from_utf8_lossy(&out.stderr).trim()));
+            return Err(format!(
+                "pkg-config: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
         }
         // ponytail: whitespace split, so a flag containing a space (`-I/opt/a b`)
         // breaks. Parse quoting if a real package ever needs it.
-        cmd.args(String::from_utf8_lossy(&out.stdout).split_whitespace().map(String::from));
+        cmd.args(
+            String::from_utf8_lossy(&out.stdout)
+                .split_whitespace()
+                .map(String::from),
+        );
     }
     for l in &links {
         cmd.arg(format!("-l{l}"));

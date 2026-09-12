@@ -42,16 +42,28 @@ fn node(path: &str, file: &str) -> (String, String) {
 fn deps_reports_both_directions() {
     let (ok, out) = vibe(&["deps", "examples/ledger.vibe"]);
     assert!(ok, "{out}");
-    assert!(out.contains("Ledger.total -> Ledger.amt"), "callees missing:\n{out}");
-    assert!(out.contains("Ledger.amt <- Ledger.top Ledger.total"), "callers missing:\n{out}");
-    assert!(out.contains("Ledger.main <- -"), "a root must say so:\n{out}");
+    assert!(
+        out.contains("Ledger.total -> Ledger.amt"),
+        "callees missing:\n{out}"
+    );
+    assert!(
+        out.contains("Ledger.amt <- Ledger.top Ledger.total"),
+        "callers missing:\n{out}"
+    );
+    assert!(
+        out.contains("Ledger.main <- -"),
+        "a root must say so:\n{out}"
+    );
 }
 
 #[test]
 fn proof_addresses_obligations_by_semantic_path() {
     let (ok, out) = vibe(&["proof", "examples/ledger.vibe"]);
     assert!(ok, "{out}");
-    assert!(out.contains("Ledger.mean.body/0\tdiv0"), "path and code expected:\n{out}");
+    assert!(
+        out.contains("Ledger.mean.body/0\tdiv0"),
+        "path and code expected:\n{out}"
+    );
 }
 
 #[test]
@@ -61,24 +73,43 @@ fn a_node_reads_back_with_its_hash() {
     assert_eq!(h.len(), 16, "the hash is 16 hex digits: {h}");
     // the signature stops at the `=`, so the two nodes do not overlap
     let (_, sig) = node("Ledger.amt.sig", "examples/ledger.vibe");
-    assert!(sig.ends_with(": F64"), "the separator belongs to neither node: {sig:?}");
+    assert!(
+        sig.ends_with(": F64"),
+        "the separator belongs to neither node: {sig:?}"
+    );
 }
 
 #[test]
 fn a_multi_line_body_keeps_its_indentation() {
     let (_, text) = node("Ledger.parse.body", "examples/ledger.vibe");
     assert!(text.starts_with("\n  ?split ',' ln"), "{text:?}");
-    assert!(text.ends_with("|_       -> Er (Bad (dup ln))\n  end"), "{text:?}");
+    assert!(
+        text.ends_with("|_       -> Er (Bad (dup ln))\n  end"),
+        "{text:?}"
+    );
 }
 
 #[test]
 fn a_stale_hash_is_refused() {
     let f = scratch("stale");
     let before = std::fs::read_to_string(&f).expect("read");
-    let (ok, out) = vibe(&["patch", f.to_str().expect("utf-8"), "Ledger.amt.body", "0", "1.0"]);
-    assert!(!ok, "a patch against a hash nobody has must not apply:\n{out}");
+    let (ok, out) = vibe(&[
+        "patch",
+        f.to_str().expect("utf-8"),
+        "Ledger.amt.body",
+        "0",
+        "1.0",
+    ]);
+    assert!(
+        !ok,
+        "a patch against a hash nobody has must not apply:\n{out}"
+    );
     assert!(out.contains("stale patch"), "{out}");
-    assert_eq!(std::fs::read_to_string(&f).expect("read"), before, "the file must be untouched");
+    assert_eq!(
+        std::fs::read_to_string(&f).expect("read"),
+        before,
+        "the file must be untouched"
+    );
 }
 
 #[test]
@@ -91,7 +122,11 @@ fn a_patch_that_does_not_compile_is_refused() {
     assert!(!ok, "an unbound name must not reach the file:\n{out}");
     assert!(out.contains("patch refused"), "{out}");
     assert!(out.contains("name.unbound"), "{out}");
-    assert_eq!(std::fs::read_to_string(&f).expect("read"), before, "the file must be untouched");
+    assert_eq!(
+        std::fs::read_to_string(&f).expect("read"),
+        before,
+        "the file must be untouched"
+    );
 }
 
 #[test]
@@ -109,8 +144,14 @@ fn a_good_patch_applies_and_the_program_still_runs() {
     )
     .expect("read");
     assert_eq!(
-        after.lines().filter(|l| !l.starts_with("amt")).collect::<Vec<_>>(),
-        original.lines().filter(|l| !l.starts_with("amt")).collect::<Vec<_>>(),
+        after
+            .lines()
+            .filter(|l| !l.starts_with("amt"))
+            .collect::<Vec<_>>(),
+        original
+            .lines()
+            .filter(|l| !l.starts_with("amt"))
+            .collect::<Vec<_>>(),
         "a structured edit must produce a minimal textual diff"
     );
     let (ok, out) = vibe(&["check", p]);
@@ -122,5 +163,8 @@ fn an_unknown_path_lists_what_exists() {
     let (ok, out) = vibe(&["patch", "examples/ledger.vibe", "Ledger.nope"]);
     assert!(!ok, "{out}");
     assert!(out.contains("no node at `Ledger.nope`"), "{out}");
-    assert!(out.contains("Ledger.mean.body"), "the error must name the alternatives:\n{out}");
+    assert!(
+        out.contains("Ledger.mean.body"),
+        "the error must name the alternatives:\n{out}"
+    );
 }

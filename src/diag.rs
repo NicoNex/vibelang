@@ -25,7 +25,14 @@ pub struct Diag {
 
 impl Diag {
     pub fn error(span: Span, code: &str, msg: &str) -> Diag {
-        Diag { span, code: code.into(), msg: msg.into(), path: None, witness: None, fix: None }
+        Diag {
+            span,
+            code: code.into(),
+            msg: msg.into(),
+            path: None,
+            witness: None,
+            fix: None,
+        }
     }
     pub fn with_fix(mut self, fix: &str) -> Diag {
         self.fix = Some(fix.into());
@@ -61,7 +68,10 @@ pub struct Files {
 
 impl Files {
     pub fn new() -> Files {
-        Files { names: Vec::new(), texts: Vec::new() }
+        Files {
+            names: Vec::new(),
+            texts: Vec::new(),
+        }
     }
     pub fn add(&mut self, name: &str, text: &str) -> usize {
         self.names.push(name.to_string());
@@ -76,7 +86,10 @@ impl Files {
             .to_string()
     }
     pub fn name(&self, span: Span) -> &str {
-        self.names.get(span.file).map(|s| s.as_str()).unwrap_or("<input>")
+        self.names
+            .get(span.file)
+            .map(|s| s.as_str())
+            .unwrap_or("<input>")
     }
 }
 
@@ -96,16 +109,22 @@ fn json_escape(s: &str) -> String {
 }
 
 pub fn render(d: &Diag, files: &Files, fmt: DiagFormat) -> String {
-    let path = d.path.clone().unwrap_or_else(|| {
-        format!("{}:{}:{}", files.name(d.span), d.span.line, d.span.col + 1)
-    });
+    let path = d
+        .path
+        .clone()
+        .unwrap_or_else(|| format!("{}:{}:{}", files.name(d.span), d.span.line, d.span.col + 1));
     match fmt {
         DiagFormat::Struct => {
             let mut s = format!("\u{2717} {} {}", path, d.code);
             if let Some(w) = &d.witness {
                 s.push_str(&format!(" \u{22a8} {}", w));
             }
-            s.push_str(&format!("\n  at: {}:{}:{}", files.name(d.span), d.span.line, d.span.col + 1));
+            s.push_str(&format!(
+                "\n  at: {}:{}:{}",
+                files.name(d.span),
+                d.span.line,
+                d.span.col + 1
+            ));
             s.push_str(&format!("\n  msg: {}", d.msg));
             if let Some(f) = &d.fix {
                 s.push_str(&format!("\n  fix: {}", f));
@@ -133,7 +152,11 @@ pub fn render(d: &Diag, files: &Files, fmt: DiagFormat) -> String {
         }
         DiagFormat::Prose => {
             let src = files.line(d.span);
-            let caret = format!("{}{}", " ".repeat(d.span.col), "^".repeat(d.span.len.max(1)));
+            let caret = format!(
+                "{}{}",
+                " ".repeat(d.span.col),
+                "^".repeat(d.span.len.max(1))
+            );
             let mut s = format!(
                 "error[{}]: {}\n  --> {}:{}:{}\n   |\n   | {}\n   | {}",
                 d.code,

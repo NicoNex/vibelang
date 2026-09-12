@@ -43,19 +43,34 @@ fn a_qualified_name_loads_the_file_it_names() {
 fn a_missing_module_names_the_file_it_wanted() {
     let dir = project(
         "missing",
-        &[("app.vibe", "mod App\n\nmain : E! Unit =\n  out (show (Money.cents 1.0))\n")],
+        &[(
+            "app.vibe",
+            "mod App\n\nmain : E! Unit =\n  out (show (Money.cents 1.0))\n",
+        )],
     );
     let (ok, out) = vibe_in(&dir, &["check", "app.vibe", "--diag=struct"]);
     assert!(!ok, "{out}");
     assert!(out.contains("mod.missing"), "{out}");
-    assert!(out.contains("Money.vibe"), "the error must name the file it looked for:\n{out}");
+    assert!(
+        out.contains("Money.vibe"),
+        "the error must name the file it looked for:\n{out}"
+    );
 }
 
 #[test]
 fn a_module_must_match_its_file_name() {
-    let dir = project("misnamed", &[("app.vibe", "mod Elsewhere\n\nmain : E! Unit =\n  out \"x\"\n")]);
+    let dir = project(
+        "misnamed",
+        &[(
+            "app.vibe",
+            "mod Elsewhere\n\nmain : E! Unit =\n  out \"x\"\n",
+        )],
+    );
     let (ok, out) = vibe_in(&dir, &["check", "app.vibe", "--diag=struct"]);
-    assert!(!ok, "the mapping from a qualified name to a file must stay mechanical:\n{out}");
+    assert!(
+        !ok,
+        "the mapping from a qualified name to a file must stay mechanical:\n{out}"
+    );
     assert!(out.contains("mod.name"), "{out}");
 }
 
@@ -66,8 +81,14 @@ fn snake_case_files_hold_pascal_case_modules() {
     let dir = project(
         "snake",
         &[
-            ("money_box.vibe", "mod MoneyBox\n\ntwice (n:I64) : I64 = n * 2\n"),
-            ("app.vibe", "mod App\n\nmain : E! Unit =\n  out (show (MoneyBox.twice 21))\n"),
+            (
+                "money_box.vibe",
+                "mod MoneyBox\n\ntwice (n:I64) : I64 = n * 2\n",
+            ),
+            (
+                "app.vibe",
+                "mod App\n\nmain : E! Unit =\n  out (show (MoneyBox.twice 21))\n",
+            ),
         ],
     );
     let (ok, out) = vibe_in(&dir, &["run", "app.vibe"]);
@@ -88,7 +109,10 @@ fn one_name_declared_twice_is_reported_not_shadowed() {
         ],
     );
     let (ok, out) = vibe_in(&dir, &["check", "app.vibe", "--diag=struct"]);
-    assert!(!ok, "v0.1 has one flat namespace, so a clash must be an error:\n{out}");
+    assert!(
+        !ok,
+        "v0.1 has one flat namespace, so a clash must be an error:\n{out}"
+    );
     assert!(out.contains("mod.duplicate"), "{out}");
     assert!(out.contains("rename"), "the fix must be mechanical:\n{out}");
 }
@@ -99,13 +123,19 @@ fn a_cycle_terminates() {
         "cycle",
         &[
             ("a.vibe", "mod A\n\nup (n:I64) : I64 = B.down n\n"),
-            ("b.vibe", "mod B\n\ndown (n:I64) : I64 = n - 1\n\nround (n:I64) : I64 = A.up n\n"),
+            (
+                "b.vibe",
+                "mod B\n\ndown (n:I64) : I64 = n - 1\n\nround (n:I64) : I64 = A.up n\n",
+            ),
         ],
     );
     // mutual reference is not mutual recursion: loading must not spin, whatever
     // the checker then makes of the program
     let (_, out) = vibe_in(&dir, &["check", "a.vibe"]);
-    assert!(!out.contains("mod.missing"), "both modules must be found:\n{out}");
+    assert!(
+        !out.contains("mod.missing"),
+        "both modules must be found:\n{out}"
+    );
 }
 
 #[test]
@@ -113,8 +143,14 @@ fn a_diagnostic_names_the_module_that_owns_the_code() {
     let dir = project(
         "paths",
         &[
-            ("money.vibe", "mod Money\n\nhalf (n:I64) (d:I64) : I64 = n / d\n"),
-            ("app.vibe", "mod App\n\nmain : E! Unit =\n  out (show (Money.half 4 2))\n"),
+            (
+                "money.vibe",
+                "mod Money\n\nhalf (n:I64) (d:I64) : I64 = n / d\n",
+            ),
+            (
+                "app.vibe",
+                "mod App\n\nmain : E! Unit =\n  out (show (Money.half 4 2))\n",
+            ),
         ],
     );
     let (ok, out) = vibe_in(&dir, &["proof", "app.vibe"]);
@@ -129,8 +165,10 @@ fn a_diagnostic_names_the_module_that_owns_the_code() {
 /// `cents` in the output would make `vibe view` an editor.
 #[test]
 fn a_projection_keeps_the_qualifier() {
-    let (ok, out) =
-        vibe_in(Path::new(env!("CARGO_MANIFEST_DIR")), &["view", "examples/shop/app.vibe"]);
+    let (ok, out) = vibe_in(
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        &["view", "examples/shop/app.vibe"],
+    );
     assert!(ok, "{out}");
     assert!(out.contains("Money.vat (Money.cents euro)"), "{out}");
 }
@@ -143,7 +181,10 @@ fn a_record_field_declared_twice_is_a_clash_too() {
     let dir = project(
         "fields",
         &[
-            ("a.vibe", "mod A\n\ntype Ta = { qty:U32 }\n\nmk : Ta = {qty=1}\n"),
+            (
+                "a.vibe",
+                "mod A\n\ntype Ta = { qty:U32 }\n\nmk : Ta = {qty=1}\n",
+            ),
             (
                 "b.vibe",
                 "mod B\n\ntype Tb = { qty:F64 }\n\nmain : E! Unit =\n  out (show (A.mk.qty))\n",

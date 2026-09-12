@@ -26,15 +26,24 @@ fn inferred_and_explicit_measures_are_accepted() {
 fn missing_measure_is_rejected() {
     let (ok, out) = check("tests/total_no_measure.vibe");
     assert!(!ok, "a recursive function with no measure must fail");
-    assert!(out.contains("total.no_measure"), "expected total.no_measure, got:\n{out}");
-    assert!(out.contains("TotalNoMeasure.spin"), "expected a semantic path, got:\n{out}");
+    assert!(
+        out.contains("total.no_measure"),
+        "expected total.no_measure, got:\n{out}"
+    );
+    assert!(
+        out.contains("TotalNoMeasure.spin"),
+        "expected a semantic path, got:\n{out}"
+    );
 }
 
 #[test]
 fn growing_measure_is_rejected() {
     let (ok, out) = check("tests/total_growing.vibe");
     assert!(!ok, "a measure that grows must fail");
-    assert!(out.contains("total.not_decreasing"), "expected total.not_decreasing, got:\n{out}");
+    assert!(
+        out.contains("total.not_decreasing"),
+        "expected total.not_decreasing, got:\n{out}"
+    );
 }
 
 #[test]
@@ -48,8 +57,14 @@ fn examples_still_terminate() {
 #[test]
 fn recursion_inside_an_arena_is_still_recursion() {
     let (ok, out) = check("tests/total_arena.vibe");
-    assert!(!ok, "a recursive call inside an `arena` block must still need a measure");
-    assert!(out.contains("total.no_measure"), "expected total.no_measure, got:\n{out}");
+    assert!(
+        !ok,
+        "a recursive call inside an `arena` block must still need a measure"
+    );
+    assert!(
+        out.contains("total.no_measure"),
+        "expected total.no_measure, got:\n{out}"
+    );
 }
 
 /// Divergence is an effect (spec §6.1). A function whose result is `E!` may
@@ -66,6 +81,12 @@ fn a_pure_function_may_not() {
     let (ok, out) = check("tests/diverge.vibe");
     assert!(!ok, "{out}");
     assert!(out.contains("total.no_measure"), "{out}");
-    assert!(out.contains("spin_pure"), "the pure one is the one to blame:\n{out}");
-    assert!(!out.contains("Diverge.serve"), "the effectful one must not be reported:\n{out}");
+    assert!(
+        out.contains("spin_pure"),
+        "the pure one is the one to blame:\n{out}"
+    );
+    assert!(
+        !out.contains("Diverge.serve"),
+        "the effectful one must not be reported:\n{out}"
+    );
 }

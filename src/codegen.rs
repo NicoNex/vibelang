@@ -30,7 +30,6 @@ pub struct Gen<'a> {
     releasable: HashSet<String>,
 }
 
-
 /// name -> (arity, C call template). `$0`..`$n` are the arguments, `$P` the
 /// semantic path used in run-time obligation messages.
 fn builtin(name: &str) -> Option<(usize, String)> {
@@ -100,7 +99,15 @@ fn builtin(name: &str) -> Option<(usize, String)> {
 }
 
 fn cname(n: &str) -> String {
-    n.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()
+    n.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn cstring(s: &str) -> String {
@@ -169,7 +176,10 @@ impl<'a> Gen<'a> {
     fn bind(&mut self, n: &str) -> String {
         self.tmp += 1;
         let c = format!("v_{}_{}", cname(n), self.tmp);
-        self.scopes.last_mut().unwrap().insert(n.to_string(), c.clone());
+        self.scopes
+            .last_mut()
+            .unwrap()
+            .insert(n.to_string(), c.clone());
         c
     }
     fn lookup(&self, n: &str) -> Option<String> {
@@ -201,7 +211,11 @@ impl<'a> Gen<'a> {
             o.push_str(&format!(
                 "static const char *const vbfl_{}[] = {{{}}};\n",
                 cname(rn),
-                if names.is_empty() { "0".to_string() } else { names.join(", ") }
+                if names.is_empty() {
+                    "0".to_string()
+                } else {
+                    names.join(", ")
+                }
             ));
             o.push_str(&format!(
                 "static const VbInfo vbi_{} = {{{}, {}, vbfl_{}}};\n",
@@ -363,11 +377,23 @@ impl<'a> Gen<'a> {
         let mut o = String::from("\n/* exp c — C ABI surface (spec §10.2) */\n");
         for n in &names {
             let ar = *self.arity.get(n).unwrap_or(&0);
-            let sig = self.ck.sigs.get(n).cloned().unwrap_or(Scheme::mono(T::unit()));
+            let sig = self
+                .ck
+                .sigs
+                .get(n)
+                .cloned()
+                .unwrap_or(Scheme::mono(T::unit()));
             let (ps, ret) = split_fn(&sig.ty, ar);
-            let cargs: Vec<String> =
-                ps.iter().enumerate().map(|(i, t)| format!("{} x{}", c_type(t), i)).collect();
-            let boxed: Vec<String> = ps.iter().enumerate().map(|(i, t)| box_expr(t, &format!("x{}", i))).collect();
+            let cargs: Vec<String> = ps
+                .iter()
+                .enumerate()
+                .map(|(i, t)| format!("{} x{}", c_type(t), i))
+                .collect();
+            let boxed: Vec<String> = ps
+                .iter()
+                .enumerate()
+                .map(|(i, t)| box_expr(t, &format!("x{}", i)))
+                .collect();
             o.push_str(&format!(
                 "{} {}_{}({}) {{\n  vb_init();\n  VbVal a[{}];\n{}  VbVal r = vbf_{}(a);\n  {}\n}}\n",
                 c_type(&ret),
@@ -447,7 +473,11 @@ impl<'a> Gen<'a> {
         out.push_str(&format!("VbVal {} = {};\n", sv, scrut));
         for (i, (p, body)) in arms.iter().enumerate() {
             let cond = self.pat_cond(p, &sv);
-            out.push_str(&format!("{}if ({}) {{\n", if i == 0 { "" } else { "else " }, cond));
+            out.push_str(&format!(
+                "{}if ({}) {{\n",
+                if i == 0 { "" } else { "else " },
+                cond
+            ));
             let mut inner = String::new();
             self.push_scope();
             self.pat_bind(p, &sv, &mut inner);
@@ -478,14 +508,22 @@ impl<'a> Gen<'a> {
             Pat::Float(x) => format!("vb_eq({}, vb_float({:?}))", s, x),
             Pat::Str(t) => format!("vb_eq({}, vb_strz({}))", s, cstring(t)),
             Pat::Char(c) => format!("vb_eq({}, vb_char({}))", s, *c as u32),
-            Pat::Bool(b) => format!("vb_eq({}, vb_bool({}))", s, if *b { "true" } else { "false" }),
+            Pat::Bool(b) => format!(
+                "vb_eq({}, vb_bool({}))",
+                s,
+                if *b { "true" } else { "false" }
+            ),
             Pat::Tuple(ps) => {
                 let mut cs = vec!["1".to_string()];
                 for (i, sp) in ps.iter().enumerate() {
                     cs.push(self.pat_cond(sp, &format!("vb_field({}, {})", s, i)));
                 }
                 cs.retain(|c| c != "1");
-                if cs.is_empty() { "1".into() } else { cs.join(" && ") }
+                if cs.is_empty() {
+                    "1".into()
+                } else {
+                    cs.join(" && ")
+                }
             }
             Pat::List(ps) => {
                 let mut cs = vec![format!("vb_as_vec({})->n == {}", s, ps.len())];
@@ -499,7 +537,11 @@ impl<'a> Gen<'a> {
             }
             Pat::Ctor(n, args) => {
                 if n == "True" || n == "False" {
-                    return format!("vb_eq({}, vb_bool({}))", s, if n == "True" { "true" } else { "false" });
+                    return format!(
+                        "vb_eq({}, vb_bool({}))",
+                        s,
+                        if n == "True" { "true" } else { "false" }
+                    );
                 }
                 let tag = self.ck.data.ctors.get(n).map(|c| c.tag).unwrap_or(0);
                 let mut cs = vec![format!("vb_tag({}) == {}", s, tag)];
@@ -516,7 +558,8 @@ impl<'a> Gen<'a> {
 
     fn pat_bind(&mut self, p: &Pat, s: &str, out: &mut String) {
         match p {
-            Pat::Wild | Pat::Int(_) | Pat::Float(_) | Pat::Str(_) | Pat::Char(_) | Pat::Bool(_) => {}
+            Pat::Wild | Pat::Int(_) | Pat::Float(_) | Pat::Str(_) | Pat::Char(_) | Pat::Bool(_) => {
+            }
             Pat::Var(n) => {
                 let c = self.bind(n);
                 out.push_str(&format!("VbVal {} = {};\n", c, s));
@@ -580,7 +623,11 @@ impl<'a> Gen<'a> {
                     let _ = tag;
                     return format!("vb_clos(vbw_{}, {}, {})", cname(n), cstring(n), ar);
                 }
-                self.errors.push(Diag::error(e.span, "codegen.ctor", &format!("unknown constructor `{}`", n)));
+                self.errors.push(Diag::error(
+                    e.span,
+                    "codegen.ctor",
+                    &format!("unknown constructor `{}`", n),
+                ));
                 "vb_unit()".into()
             }
             ExprKind::Tuple(xs) => {
@@ -601,8 +648,11 @@ impl<'a> Gen<'a> {
                 match owner.and_then(|o| self.field_index.get(&format!("{}#{}", o, f)).copied()) {
                     Some(i) => format!("vb_field({}, {})", b, i),
                     None => {
-                        self.errors
-                            .push(Diag::error(e.span, "codegen.field", &format!("unknown field `{}`", f)));
+                        self.errors.push(Diag::error(
+                            e.span,
+                            "codegen.field",
+                            &format!("unknown field `{}`", f),
+                        ));
                         "vb_unit()".into()
                     }
                 }
@@ -651,7 +701,11 @@ impl<'a> Gen<'a> {
             self.need_wrapper.insert(n.to_string());
             return format!("vb_clos(vbw_{}, {}, {})", cname(n), cstring(n), ar);
         }
-        self.errors.push(Diag::error(span, "codegen.unbound", &format!("`{}` has no definition to emit", n)));
+        self.errors.push(Diag::error(
+            span,
+            "codegen.unbound",
+            &format!("`{}` has no definition to emit", n),
+        ));
         "vb_unit()".into()
     }
 
@@ -659,8 +713,16 @@ impl<'a> Gen<'a> {
         if op == "&&" || op == "||" {
             let va = self.ex(a, out);
             let d = self.fresh();
-            out.push_str(&format!("VbVal {} = vb_bool({});\n", d, if op == "&&" { "false" } else { "true" }));
-            let keep = if op == "&&" { format!("vb_as_bool({})", va) } else { format!("!vb_as_bool({})", va) };
+            out.push_str(&format!(
+                "VbVal {} = vb_bool({});\n",
+                d,
+                if op == "&&" { "false" } else { "true" }
+            ));
+            let keep = if op == "&&" {
+                format!("vb_as_bool({})", va)
+            } else {
+                format!("!vb_as_bool({})", va)
+            };
             out.push_str(&format!("if ({}) {{\n", keep));
             let mut inner = String::new();
             let vb = self.ex(b, &mut inner);
@@ -675,7 +737,12 @@ impl<'a> Gen<'a> {
             "+" => format!("vb_add({}, {})", va, vb),
             "-" => format!("vb_sub({}, {})", va, vb),
             "*" => format!("vb_mul({}, {})", va, vb),
-            "/" => format!("vb_div({}, {}, {})", va, vb, cstring(&format!("{}.div", self.cur_path))),
+            "/" => format!(
+                "vb_div({}, {}, {})",
+                va,
+                vb,
+                cstring(&format!("{}.div", self.cur_path))
+            ),
             "++" => format!("vb_concat({}, {})", va, vb),
             "==" => format!("vb_bool(vb_eq({}, {}))", va, vb),
             "!=" => format!("vb_bool(!vb_eq({}, {}))", va, vb),
@@ -684,7 +751,11 @@ impl<'a> Gen<'a> {
             ">" => format!("vb_bool(vb_cmp({}, {}) > 0)", va, vb),
             ">=" => format!("vb_bool(vb_cmp({}, {}) >= 0)", va, vb),
             _ => {
-                self.errors.push(Diag::error(span, "codegen.binop", &format!("unknown operator `{}`", op)));
+                self.errors.push(Diag::error(
+                    span,
+                    "codegen.binop",
+                    &format!("unknown operator `{}`", op),
+                ));
                 "vb_unit()".into()
             }
         }
@@ -697,10 +768,18 @@ impl<'a> Gen<'a> {
         span: Span,
         out: &mut String,
     ) -> String {
-        let owner = match fields.first().and_then(|(f, _)| self.ck.data.field_owner.get(f)).cloned() {
+        let owner = match fields
+            .first()
+            .and_then(|(f, _)| self.ck.data.field_owner.get(f))
+            .cloned()
+        {
             Some(o) => o,
             None => {
-                self.errors.push(Diag::error(span, "codegen.record", "cannot resolve this record type"));
+                self.errors.push(Diag::error(
+                    span,
+                    "codegen.record",
+                    "cannot resolve this record type",
+                ));
                 return "vb_unit()".into();
             }
         };
@@ -786,8 +865,10 @@ impl<'a> Gen<'a> {
         let mut bound: HashSet<String> = ps.iter().cloned().collect();
         let mut free = Vec::new();
         free_vars(body, &mut bound, &mut free);
-        let captured: Vec<(String, String)> =
-            free.into_iter().filter_map(|n| self.lookup(&n).map(|c| (n, c))).collect();
+        let captured: Vec<(String, String)> = free
+            .into_iter()
+            .filter_map(|n| self.lookup(&n).map(|c| (n, c)))
+            .collect();
 
         self.tmp += 1;
         let fname = format!("vbl_{}", self.tmp);
@@ -914,7 +995,9 @@ impl<'a> Gen<'a> {
                             "ffi.type",
                             &format!("`{}` cannot cross the C boundary", ty_show(t)),
                         )
-                        .with_fix("use a scalar, Bool, Char, Str, CStr or `Ptr a` at the C boundary"),
+                        .with_fix(
+                            "use a scalar, Bool, Char, Str, CStr or `Ptr a` at the C boundary",
+                        ),
                     );
                     cargs.push("0".into());
                 }
@@ -940,7 +1023,11 @@ impl<'a> Gen<'a> {
                 }
             }
         };
-        format!("static VbVal vbe_{}(VbVal *a) {{ (void)a; {} }}\n", cname(&sig.name), body)
+        format!(
+            "static VbVal vbe_{}(VbVal *a) {{ (void)a; {} }}\n",
+            cname(&sig.name),
+            body
+        )
     }
 
     fn ext_call(&mut self, sig: &ExtSig, args: &[Expr], out: &mut String) -> String {
@@ -957,7 +1044,9 @@ impl<'a> Gen<'a> {
                             "ffi.type",
                             &format!("`{}` cannot cross the C boundary", ty_show(t)),
                         )
-                        .with_fix("use a scalar, Bool, Char, Str, CStr or `Ptr a` at the C boundary"),
+                        .with_fix(
+                            "use a scalar, Bool, Char, Str, CStr or `Ptr a` at the C boundary",
+                        ),
                     );
                     cargs.push("0".into());
                 }
@@ -1003,7 +1092,15 @@ impl<'a> Gen<'a> {
 
 fn indent(s: &str, n: usize) -> String {
     let pad = " ".repeat(n);
-    s.lines().map(|l| if l.is_empty() { String::from("\n") } else { format!("{}{}\n", pad, l) }).collect()
+    s.lines()
+        .map(|l| {
+            if l.is_empty() {
+                String::from("\n")
+            } else {
+                format!("{}{}\n", pad, l)
+            }
+        })
+        .collect()
 }
 
 fn free_vars(e: &Expr, bound: &mut HashSet<String>, out: &mut Vec<String>) {
@@ -1027,7 +1124,9 @@ fn free_vars(e: &Expr, bound: &mut HashSet<String>, out: &mut Vec<String>) {
         ExprKind::Neg(x) | ExprKind::Not(x) | ExprKind::Borrow(x) | ExprKind::Field(x, _) => {
             free_vars(x, bound, out)
         }
-        ExprKind::Tuple(xs) | ExprKind::List(xs) => xs.iter().for_each(|x| free_vars(x, bound, out)),
+        ExprKind::Tuple(xs) | ExprKind::List(xs) => {
+            xs.iter().for_each(|x| free_vars(x, bound, out))
+        }
         ExprKind::Record(b, fs) => {
             if let Some(b) = b {
                 free_vars(b, bound, out);
@@ -1035,7 +1134,11 @@ fn free_vars(e: &Expr, bound: &mut HashSet<String>, out: &mut Vec<String>) {
             fs.iter().for_each(|(_, x)| free_vars(x, bound, out));
         }
         ExprKind::Lambda(ps, body) => {
-            let added: Vec<String> = ps.iter().filter(|p| bound.insert((*p).clone())).cloned().collect();
+            let added: Vec<String> = ps
+                .iter()
+                .filter(|p| bound.insert((*p).clone()))
+                .cloned()
+                .collect();
             free_vars(body, bound, out);
             for a in added {
                 bound.remove(&a);
@@ -1054,7 +1157,10 @@ fn free_vars(e: &Expr, bound: &mut HashSet<String>, out: &mut Vec<String>) {
             for (p, body) in arms {
                 let mut added = Vec::new();
                 pat_vars(p, &mut added);
-                let fresh: Vec<String> = added.into_iter().filter(|a| bound.insert(a.clone())).collect();
+                let fresh: Vec<String> = added
+                    .into_iter()
+                    .filter(|a| bound.insert(a.clone()))
+                    .collect();
                 free_vars(body, bound, out);
                 for a in fresh {
                     bound.remove(&a);
@@ -1068,7 +1174,9 @@ fn free_vars(e: &Expr, bound: &mut HashSet<String>, out: &mut Vec<String>) {
 fn pat_vars(p: &Pat, out: &mut Vec<String>) {
     match p {
         Pat::Var(n) => out.push(n.clone()),
-        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => ps.iter().for_each(|x| pat_vars(x, out)),
+        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => {
+            ps.iter().for_each(|x| pat_vars(x, out))
+        }
         _ => {}
     }
 }
@@ -1135,12 +1243,19 @@ fn is_unit(t: &Ty) -> bool {
 fn ty_show(t: &Ty) -> String {
     match t {
         Ty::Con(n, a) if a.is_empty() => n.clone(),
-        Ty::Con(n, a) => format!("{} {}", n, a.iter().map(ty_show).collect::<Vec<_>>().join(" ")),
+        Ty::Con(n, a) => format!(
+            "{} {}",
+            n,
+            a.iter().map(ty_show).collect::<Vec<_>>().join(" ")
+        ),
         Ty::Var(n) => n.clone(),
         Ty::Ref(x) => format!("&{}", ty_show(x)),
         Ty::Eff(x) => format!("E! {}", ty_show(x)),
         Ty::Fun(a, b) => format!("{} -> {}", ty_show(a), ty_show(b)),
-        Ty::Tuple(ts) => format!("({})", ts.iter().map(ty_show).collect::<Vec<_>>().join(", ")),
+        Ty::Tuple(ts) => format!(
+            "({})",
+            ts.iter().map(ty_show).collect::<Vec<_>>().join(", ")
+        ),
     }
 }
 
@@ -1336,8 +1451,11 @@ pub fn header(m: &Module, ck: &Checked) -> String {
         let ar: usize = f.params.iter().map(|p| p.names.len()).sum();
         let sig = ck.sigs.get(n).cloned().unwrap_or(Scheme::mono(T::unit()));
         let (ps, ret) = split_fn(&sig.ty, ar);
-        let pres: Vec<String> =
-            f.params.iter().flat_map(|p| p.refines.iter().map(expr_text)).collect();
+        let pres: Vec<String> = f
+            .params
+            .iter()
+            .flat_map(|p| p.refines.iter().map(expr_text))
+            .collect();
         if !pres.is_empty() {
             o.push_str(&format!(
                 "/* {} — pre: {}   NOT VERIFIED ACROSS THE BOUNDARY */\n",
@@ -1345,14 +1463,21 @@ pub fn header(m: &Module, ck: &Checked) -> String {
                 pres.join(" && ")
             ));
         }
-        let args: Vec<String> =
-            ps.iter().enumerate().map(|(i, t)| format!("{} x{}", c_type(t), i)).collect();
+        let args: Vec<String> = ps
+            .iter()
+            .enumerate()
+            .map(|(i, t)| format!("{} x{}", c_type(t), i))
+            .collect();
         o.push_str(&format!(
             "{} {}_{}({});\n",
             c_type(&ret),
             cname(&m.name),
             cname(n),
-            if args.is_empty() { "void".into() } else { args.join(", ") }
+            if args.is_empty() {
+                "void".into()
+            } else {
+                args.join(", ")
+            }
         ));
     }
     o.push_str("\n#ifdef __cplusplus\n}\n#endif\n#endif\n");

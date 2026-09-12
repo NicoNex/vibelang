@@ -13,8 +13,8 @@
 //! printing something that does not re-parse.
 
 use crate::ast::*;
-use crate::infer::Checked;
 use crate::diag::Diag;
+use crate::infer::Checked;
 use crate::lexer::{self, Comment};
 
 const WIDTH: usize = 80;
@@ -69,7 +69,10 @@ fn oneline(f: &FunDecl, mode: Mode) -> bool {
     if f.params.is_empty() || f.measure.is_some() {
         return false;
     }
-    if matches!(f.body.kind, ExprKind::Match(..) | ExprKind::Bind(..) | ExprKind::Let(..)) {
+    if matches!(
+        f.body.kind,
+        ExprKind::Match(..) | ExprKind::Bind(..) | ExprKind::Let(..)
+    ) {
         return false;
     }
     head(f, 0, 0, 0).len() + 1 + P.flat(&f.body, 0).len() <= WIDTH
@@ -145,8 +148,11 @@ fn typedecl(t: &TypeDecl, w: usize) -> String {
     match &t.body {
         TypeBody::Opaque => format!("type {}\n", h.trim_end()),
         TypeBody::Record(r) => {
-            let mut parts: Vec<String> =
-                r.fields.iter().map(|(n, ft)| format!("{n}:{}", ty(ft))).collect();
+            let mut parts: Vec<String> = r
+                .fields
+                .iter()
+                .map(|(n, ft)| format!("{n}:{}", ty(ft)))
+                .collect();
             parts.extend(r.refines.iter().map(|e| P.flat(e, 0)));
             format!("type {h} = {{ {} }}\n", parts.join(", "))
         }
@@ -259,7 +265,11 @@ fn fundecl(
         out.push('\n');
         return;
     }
-    let body = if mode == Mode::Flow { flow_body(&f.body, &mut 0) } else { f.body.clone() };
+    let body = if mode == Mode::Flow {
+        flow_body(&f.body, &mut 0)
+    } else {
+        f.body.clone()
+    };
     if oneline(f, mode) && !matches!(body.kind, ExprKind::Let(..)) {
         out.push_str(&format!("{h} {}\n", P.flat(&body, 0)));
     } else {
@@ -285,7 +295,10 @@ fn explicit_notes(ck: &Checked, f: &FunDecl) -> Vec<String> {
         }
     }
     if let Some(ms) = &f.measure {
-        v.push(format!("%{} [measure parsed, not discharged]", P.flat(ms, 10)));
+        v.push(format!(
+            "%{} [measure parsed, not discharged]",
+            P.flat(ms, 10)
+        ));
     }
     v
 }
@@ -305,10 +318,20 @@ impl Printer {
                 format!("{} ;\n{}{}", self.flat(v, 0), sp(col), self.lay(rest, col))
             }
             ExprKind::Bind(n, v, rest) => {
-                format!("{n} <- {} ;\n{}{}", self.flat(v, 0), sp(col), self.lay(rest, col))
+                format!(
+                    "{n} <- {} ;\n{}{}",
+                    self.flat(v, 0),
+                    sp(col),
+                    self.lay(rest, col)
+                )
             }
             ExprKind::Let(n, v, rest) => {
-                format!("let {n} = {} in\n{}{}", self.flat(v, 0), sp(col), self.lay(rest, col))
+                format!(
+                    "let {n} = {} in\n{}{}",
+                    self.flat(v, 0),
+                    sp(col),
+                    self.lay(rest, col)
+                )
             }
             // The block body is indented one step in, as the parser expects.
             ExprKind::Arena(a, body) => {
@@ -347,7 +370,11 @@ impl Printer {
     fn lay_match(&self, scrut: &Expr, arms: &[(Pat, Expr)], col: usize) -> String {
         let s = self.scrut(scrut);
         let inline = matches!(scrut.kind, ExprKind::Var(_));
-        let acol = if inline { col + 1 + s.len() + 1 } else { col + 1 };
+        let acol = if inline {
+            col + 1 + s.len() + 1
+        } else {
+            col + 1
+        };
         let w = arms.iter().map(|(p, _)| pat(p).len()).max().unwrap_or(0);
         let mut out = format!("?{s}");
         for (i, (p, b)) in arms.iter().enumerate() {
@@ -447,15 +474,32 @@ impl Printer {
             ExprKind::Arena(a, body) => format!("arena {a} in {}", self.flat(body, 0)),
             ExprKind::Field(x, f) => format!("{}.{f}", self.flat(x, 10)),
             ExprKind::Tuple(xs) => {
-                format!("({})", xs.iter().map(|x| self.flat(x, 0)).collect::<Vec<_>>().join(", "))
+                format!(
+                    "({})",
+                    xs.iter()
+                        .map(|x| self.flat(x, 0))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
             ExprKind::List(xs) => {
-                format!("[{}]", xs.iter().map(|x| self.flat(x, 0)).collect::<Vec<_>>().join(", "))
+                format!(
+                    "[{}]",
+                    xs.iter()
+                        .map(|x| self.flat(x, 0))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             }
             ExprKind::Record(base, fs) => {
-                let b = base.as_ref().map(|b| format!("{} with ", self.flat(b, 10))).unwrap_or_default();
-                let fs: Vec<String> =
-                    fs.iter().map(|(n, v)| format!("{n}={}", self.flat(v, 0))).collect();
+                let b = base
+                    .as_ref()
+                    .map(|b| format!("{} with ", self.flat(b, 10)))
+                    .unwrap_or_default();
+                let fs: Vec<String> = fs
+                    .iter()
+                    .map(|(n, v)| format!("{n}={}", self.flat(v, 0)))
+                    .collect();
                 format!("{{{b}{}}}", fs.join(", "))
             }
             ExprKind::Lambda(ps, b) => format!("\\{} -> {}", ps.join(" "), self.flat(b, 0)),
@@ -525,7 +569,10 @@ fn pat(p: &Pat) -> String {
         Pat::Bool(b) => if *b { "True" } else { "False" }.to_string(),
         Pat::Ctor(n, args) if args.is_empty() => n.clone(),
         Pat::Ctor(n, args) => {
-            format!("{n} {}", args.iter().map(pat_atom).collect::<Vec<_>>().join(" "))
+            format!(
+                "{n} {}",
+                args.iter().map(pat_atom).collect::<Vec<_>>().join(" ")
+            )
         }
         Pat::List(ps) => format!("[{}]", ps.iter().map(pat).collect::<Vec<_>>().join(",")),
         Pat::Tuple(ps) => format!("({})", ps.iter().map(pat).collect::<Vec<_>>().join(", ")),
@@ -552,7 +599,10 @@ fn ty_app(t: &Ty) -> String {
     match t {
         Ty::Con(n, args) if args.is_empty() => n.clone(),
         Ty::Con(n, args) => {
-            format!("{n} {}", args.iter().map(ty_atom).collect::<Vec<_>>().join(" "))
+            format!(
+                "{n} {}",
+                args.iter().map(ty_atom).collect::<Vec<_>>().join(" ")
+            )
         }
         Ty::Var(v) => v.clone(),
         Ty::Ref(x) => format!("&{}", ty_app(x)),
@@ -579,21 +629,36 @@ fn ty_atom(t: &Ty) -> String {
 fn flow_body(e: &Expr, n: &mut usize) -> Expr {
     match &e.kind {
         ExprKind::Bind(name, v, rest) => Expr::new(
-            ExprKind::Bind(name.clone(), Box::new(hoisted(v, n)), Box::new(flow_body(rest, n))),
+            ExprKind::Bind(
+                name.clone(),
+                Box::new(hoisted(v, n)),
+                Box::new(flow_body(rest, n)),
+            ),
             e.span,
         ),
         ExprKind::Let(name, v, rest) => Expr::new(
-            ExprKind::Let(name.clone(), Box::new(hoisted(v, n)), Box::new(flow_body(rest, n))),
+            ExprKind::Let(
+                name.clone(),
+                Box::new(hoisted(v, n)),
+                Box::new(flow_body(rest, n)),
+            ),
             e.span,
         ),
-        ExprKind::Lambda(ps, b) => {
-            Expr::new(ExprKind::Lambda(ps.clone(), Box::new(flow_body(b, n))), e.span)
-        }
+        ExprKind::Lambda(ps, b) => Expr::new(
+            ExprKind::Lambda(ps.clone(), Box::new(flow_body(b, n))),
+            e.span,
+        ),
         ExprKind::Match(s, arms) => {
             let mut lets = Vec::new();
             let scrut = hoist(s, n, &mut lets);
-            let arms = arms.iter().map(|(p, b)| (p.clone(), flow_body(b, n))).collect();
-            wrap(lets, Expr::new(ExprKind::Match(Box::new(scrut), arms), e.span))
+            let arms = arms
+                .iter()
+                .map(|(p, b)| (p.clone(), flow_body(b, n)))
+                .collect();
+            wrap(
+                lets,
+                Expr::new(ExprKind::Match(Box::new(scrut), arms), e.span),
+            )
         }
         _ => hoisted(e, n),
     }
@@ -633,7 +698,9 @@ fn hoist(e: &Expr, n: &mut usize, lets: &mut Vec<(String, Expr)>) -> Expr {
         ExprKind::List(xs) => ExprKind::List(xs.iter().map(|x| hoist(x, n, lets)).collect()),
         ExprKind::Record(b, fs) => ExprKind::Record(
             b.as_ref().map(|b| Box::new(hoist(b, n, lets))),
-            fs.iter().map(|(k, v)| (k.clone(), hoist(v, n, lets))).collect(),
+            fs.iter()
+                .map(|(k, v)| (k.clone(), hoist(v, n, lets)))
+                .collect(),
         ),
         // A binding cannot be hoisted out of a nested block form; leaves have
         // nothing to hoist.
@@ -735,7 +802,11 @@ pub fn reattach(rendered: &str, comments: &[Comment]) -> String {
             let at = lines.get(c.after).copied().unwrap_or(body.len() + 1);
             before[(at - 1).min(body.len())].push(&c.text);
         } else {
-            let at = c.after.checked_sub(1).and_then(|i| lines.get(i).copied()).unwrap_or(1);
+            let at = c
+                .after
+                .checked_sub(1)
+                .and_then(|i| lines.get(i).copied())
+                .unwrap_or(1);
             after[(at - 1).min(body.len().saturating_sub(1))].push(&c.text);
         }
     }
@@ -786,7 +857,11 @@ pub fn canon(m: &Module, ck: &Checked, src: &str, _comments: &[Comment], file: u
         None => n.saturating_sub(1),
     };
     let span = got.get(i).map(|t| t.span).unwrap_or_default();
-    vec![Diag::error(span, "canon.form", "this is not the canonical form of the program")
-        .with_path(&m.name)
-        .with_fix("run `vibe view` on the file and write back what it prints")]
+    vec![Diag::error(
+        span,
+        "canon.form",
+        "this is not the canonical form of the program",
+    )
+    .with_path(&m.name)
+    .with_fix("run `vibe view` on the file and write back what it prints")]
 }

@@ -99,11 +99,23 @@ pub fn nodes(m: &Module, src: &str) -> Vec<Node> {
         };
         if let Decl::Fun(_) = d {
             if let Some((sig_end, body)) = split_head(src, start, end) {
-                out.push(Node { path: format!("{base}.sig"), start, end: sig_end });
-                out.push(Node { path: format!("{base}.body"), start: body, end });
+                out.push(Node {
+                    path: format!("{base}.sig"),
+                    start,
+                    end: sig_end,
+                });
+                out.push(Node {
+                    path: format!("{base}.body"),
+                    start: body,
+                    end,
+                });
             }
         }
-        out.push(Node { path: base, start, end });
+        out.push(Node {
+            path: base,
+            start,
+            end,
+        });
     }
     out
 }
@@ -121,7 +133,10 @@ fn split_head(src: &str, start: usize, end: usize) -> Option<(usize, usize)> {
     let i = (0..b.len()).find(|&i| {
         b[i] == b'='
             && b.get(i + 1) != Some(&b'=')
-            && !matches!(i.checked_sub(1).map(|p| b[p]), Some(b'<' | b'>' | b'!' | b'='))
+            && !matches!(
+                i.checked_sub(1).map(|p| b[p]),
+                Some(b'<' | b'>' | b'!' | b'=')
+            )
     })?;
     let body = seg[i + 1..].len() - seg[i + 1..].trim_start_matches([' ', '\t']).len();
     Some((start + seg[..i].trim_end().len(), start + i + 1 + body))
@@ -164,14 +179,27 @@ pub fn deps(m: &Module) -> String {
         for c in &calls {
             callers.push((c.clone(), f.name.clone()));
         }
-        out.push_str(&format!("{}.{} -> {}\n", f.home, f.name, join(&calls, &m.name)));
+        out.push_str(&format!(
+            "{}.{} -> {}\n",
+            f.home,
+            f.name,
+            join(&calls, &m.name)
+        ));
     }
     callers.sort();
     callers.dedup();
     for f in m.funs() {
-        let up: Vec<String> =
-            callers.iter().filter(|(c, _)| *c == f.name).map(|(_, u)| u.clone()).collect();
-        out.push_str(&format!("{}.{} <- {}\n", f.home, f.name, join(&up, &m.name)));
+        let up: Vec<String> = callers
+            .iter()
+            .filter(|(c, _)| *c == f.name)
+            .map(|(_, u)| u.clone())
+            .collect();
+        out.push_str(&format!(
+            "{}.{} <- {}\n",
+            f.home,
+            f.name,
+            join(&up, &m.name)
+        ));
     }
     out
 }
@@ -180,7 +208,11 @@ fn join(names: &[String], m: &str) -> String {
     if names.is_empty() {
         "-".to_string()
     } else {
-        names.iter().map(|n| format!("{m}.{n}")).collect::<Vec<_>>().join(" ")
+        names
+            .iter()
+            .map(|n| format!("{m}.{n}"))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -245,7 +277,11 @@ mod tests {
     fn a_head_splits_at_the_bare_equals() {
         let src = "f (n:U64, n >= 1) : U64 = n + 1";
         let (sig, body) = split_head(src, 0, src.len()).expect("a head with a body");
-        assert_eq!(&src[..sig], "f (n:U64, n >= 1) : U64", "`>=` is not the separator");
+        assert_eq!(
+            &src[..sig],
+            "f (n:U64, n >= 1) : U64",
+            "`>=` is not the separator"
+        );
         assert_eq!(&src[body..], "n + 1");
     }
 
@@ -253,6 +289,9 @@ mod tests {
     fn a_head_with_no_body_splits_nowhere() {
         let src = "type Err = Bad Str";
         // `=` is there, but nodes() only asks this of a function declaration
-        assert!(split_head(src, 0, 0).is_none(), "an empty extent has no head");
+        assert!(
+            split_head(src, 0, 0).is_none(),
+            "an empty extent has no head"
+        );
     }
 }

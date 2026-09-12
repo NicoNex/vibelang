@@ -18,14 +18,23 @@ fn vibe(args: &[&str]) -> (bool, String) {
 fn double_move_is_rejected() {
     let (ok, out) = vibe(&["check", "tests/move.vibe", "--diag=struct"]);
     assert!(!ok, "using an owned parameter twice must fail");
-    assert!(out.contains("own.use_after_move"), "expected own.use_after_move, got:\n{out}");
-    assert!(out.contains("dup s"), "the fix must name the mechanical repair, got:\n{out}");
+    assert!(
+        out.contains("own.use_after_move"),
+        "expected own.use_after_move, got:\n{out}"
+    );
+    assert!(
+        out.contains("dup s"),
+        "the fix must name the mechanical repair, got:\n{out}"
+    );
 }
 
 #[test]
 fn repeated_borrows_are_fine() {
     let (ok, out) = vibe(&["check", "examples/ledger.vibe"]);
-    assert!(ok, "borrowing the same value repeatedly must be allowed:\n{out}");
+    assert!(
+        ok,
+        "borrowing the same value repeatedly must be allowed:\n{out}"
+    );
 }
 
 #[test]
@@ -37,7 +46,10 @@ fn unique_update_mutates_in_place() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/.vibe-inplace/inplace.c"),
     )
     .expect("generated C is kept next to the example");
-    assert!(c.contains("vb_set_fields"), "an owned `{{r with ...}}` must not copy:\n{c}");
+    assert!(
+        c.contains("vb_set_fields"),
+        "an owned `{{r with ...}}` must not copy:\n{c}"
+    );
 }
 
 #[test]
@@ -49,7 +61,10 @@ fn arena_block_releases_in_bulk() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/.vibe-arena/arena.c"),
     )
     .expect("generated C is kept next to the example");
-    assert!(c.contains("vb_mark") && c.contains("vb_release"), "arena must mark and release:\n{c}");
+    assert!(
+        c.contains("vb_mark") && c.contains("vb_release"),
+        "arena must mark and release:\n{c}"
+    );
 }
 
 #[test]
@@ -61,9 +76,15 @@ fn consecutive_comment_lines_are_not_blank_lines() {
 #[test]
 fn a_let_binder_is_affine_too() {
     let (ok, out) = vibe(&["check", "tests/move_let.vibe", "--diag=struct"]);
-    assert!(!ok, "a `let` name with no written type is still owned:\n{out}");
+    assert!(
+        !ok,
+        "a `let` name with no written type is still owned:\n{out}"
+    );
     assert!(out.contains("own.use_after_move"), "{out}");
-    assert!(out.contains("MoveLet.f"), "the semantic path must name the function:\n{out}");
+    assert!(
+        out.contains("MoveLet.f"),
+        "the semantic path must name the function:\n{out}"
+    );
 }
 
 #[test]
@@ -76,13 +97,19 @@ fn a_pattern_binder_is_affine_too() {
 #[test]
 fn a_scalar_binder_is_copied() {
     let (ok, out) = vibe(&["check", "tests/own_let.vibe"]);
-    assert!(ok, "scalars are copied, so using one twice is not a move:\n{out}");
+    assert!(
+        ok,
+        "scalars are copied, so using one twice is not a move:\n{out}"
+    );
 }
 
 #[test]
 fn an_escaping_closure_owns_its_captures() {
     let (ok, out) = vibe(&["check", "tests/capture.vibe", "--diag=struct"]);
-    assert!(!ok, "a closure that outlives the call moves what it captured:\n{out}");
+    assert!(
+        !ok,
+        "a closure that outlives the call moves what it captured:\n{out}"
+    );
     assert!(out.contains("own.use_after_move"), "{out}");
     assert!(out.contains("Capture.grab"), "{out}");
 }
@@ -90,7 +117,10 @@ fn an_escaping_closure_owns_its_captures() {
 #[test]
 fn a_closure_that_dies_with_the_call_only_reads() {
     let (ok, out) = vibe(&["check", "tests/capture_ok.vibe"]);
-    assert!(ok, "the argument to `map` is consumed during the call:\n{out}");
+    assert!(
+        ok,
+        "the argument to `map` is consumed during the call:\n{out}"
+    );
 }
 
 /// `Nat` was missing from the scalar list, so a natural number was treated as

@@ -66,7 +66,13 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
 fn is_affine(t: &Ty) -> bool {
     match t {
         Ty::Ref(_) => false,
-        Ty::Con(n, _) => !(is_num(n) || matches!(n.as_str(), "Bool" | "Char" | "Unit" | "Nat" | "Size" | "CStr" | "Ptr")),
+        Ty::Con(n, _) => {
+            !(is_num(n)
+                || matches!(
+                    n.as_str(),
+                    "Bool" | "Char" | "Unit" | "Nat" | "Size" | "CStr" | "Ptr"
+                ))
+        }
         Ty::Var(_) => true,
         Ty::Tuple(ts) => ts.iter().any(is_affine),
         Ty::Fun(..) | Ty::Eff(_) => false,
@@ -97,8 +103,11 @@ impl State<'_> {
     /// affine. A name that shadows an owned one always leaves the outer set,
     /// affine or not, because from here on it means something else.
     fn scope<'n>(&self, outer: &[&'n str], bound: &'n [String], scope: Span) -> Vec<&'n str> {
-        let mut v: Vec<&str> =
-            outer.iter().copied().filter(|x| !bound.iter().any(|b| b == x)).collect();
+        let mut v: Vec<&str> = outer
+            .iter()
+            .copied()
+            .filter(|x| !bound.iter().any(|b| b == x))
+            .collect();
         for n in bound {
             let k = (scope.file, scope.line, scope.col, n.clone());
             if self.ck.affine.get(&k).copied().unwrap_or(false) {
@@ -114,10 +123,21 @@ impl State<'_> {
         }
         if let Some(first) = self.moved.get(n) {
             self.errors.push(
-                Diag::error(span, "own.use_after_move", &format!("`{}` was already moved", n))
-                    .with_path(&self.path)
-                    .with_witness(&format!("first moved at line {}, column {}", first.line, first.col + 1))
-                    .with_fix(&format!("borrow it here with `&{}`, or copy it with `dup {}`", n, n)),
+                Diag::error(
+                    span,
+                    "own.use_after_move",
+                    &format!("`{}` was already moved", n),
+                )
+                .with_path(&self.path)
+                .with_witness(&format!(
+                    "first moved at line {}, column {}",
+                    first.line,
+                    first.col + 1
+                ))
+                .with_fix(&format!(
+                    "borrow it here with `&{}`, or copy it with `dup {}`",
+                    n, n
+                )),
             );
         } else {
             self.moved.insert(n.to_string(), span);
@@ -153,7 +173,10 @@ impl State<'_> {
                     // `{r with f = v}` on a value we own and have not moved yet
                     // is a mutation, not a copy.
                     if let Var(n) = &b.kind {
-                        if mode == Mode::Own && owned.contains(&n.as_str()) && !self.moved.contains_key(n) {
+                        if mode == Mode::Own
+                            && owned.contains(&n.as_str())
+                            && !self.moved.contains_key(n)
+                        {
                             self.inplace.insert((e.span.file, e.span.line, e.span.col));
                         }
                     }
@@ -173,7 +196,11 @@ impl State<'_> {
                 let key = (e.span.file, e.span.line, e.span.col);
                 // An escaping closure owns its captures; one that dies with the
                 // call only reads them (spec §4.6).
-                let m = if self.escaping.contains(&key) { Mode::Own } else { Mode::Borrow };
+                let m = if self.escaping.contains(&key) {
+                    Mode::Own
+                } else {
+                    Mode::Borrow
+                };
                 self.walk(body, m, owned)
             }
             Match(scrut, arms) => {
@@ -218,7 +245,9 @@ fn escapes(e: &Expr, out: &mut HashSet<(usize, usize, usize)>) {
 fn pat_names(p: &Pat) -> Vec<String> {
     match p {
         Pat::Var(n) => vec![n.clone()],
-        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => ps.iter().flat_map(pat_names).collect(),
+        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => {
+            ps.iter().flat_map(pat_names).collect()
+        }
         _ => Vec::new(),
     }
 }

@@ -53,7 +53,12 @@ impl Program {
 /// Read `path` and everything it names, transitively.
 pub fn program(path: &Path, files: &mut Files) -> Result<Program, Vec<Diag>> {
     let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let mut l = Loader { dir, files, loaded: HashMap::new(), order: Vec::new() };
+    let mut l = Loader {
+        dir,
+        files,
+        loaded: HashMap::new(),
+        order: Vec::new(),
+    };
     let root = l.read(path, None)?;
     l.follow(&root.module)?;
 
@@ -88,8 +93,11 @@ pub fn program(path: &Path, files: &mut Files) -> Result<Program, Vec<Diag>> {
         return Err(errors);
     }
     let root = units.last().expect("the root was pushed last");
-    let mut flat =
-        Module { name: root.module.name.clone(), decls, span: root.module.span };
+    let mut flat = Module {
+        name: root.module.name.clone(),
+        decls,
+        span: root.module.span,
+    };
     let known: Vec<String> = home.values().cloned().collect();
     // Only the flattened unit is resolved: a projection has to show the program
     // as it is written, qualifiers included, or `vibe view` would edit the file
@@ -123,17 +131,31 @@ impl Loader<'_> {
         // so `TotalOk` lives in `total_ok.vibe` as readily as in `TotalOk.vibe`.
         // Case and underscores are the only things allowed to differ: the
         // mapping from a qualified name to a file has to stay mechanical.
-        let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
         if squash(&m.name) != squash(&stem) {
             return Err(vec![Diag::error(
                 m.span,
                 "mod.name",
-                &format!("`mod {}` does not match the file name `{stem}.vibe`", m.name),
+                &format!(
+                    "`mod {}` does not match the file name `{stem}.vibe`",
+                    m.name
+                ),
             )
-            .with_fix(&format!("rename the file to {}.vibe, or the module to {stem}", m.name))]);
+            .with_fix(&format!(
+                "rename the file to {}.vibe, or the module to {stem}",
+                m.name
+            ))]);
         }
         self.loaded.insert(m.name.clone(), path.to_path_buf());
-        Ok(Unit { module: m, src, comments, file: fid })
+        Ok(Unit {
+            module: m,
+            src,
+            comments,
+            file: fid,
+        })
     }
 
     /// Load every module `m` names, depth first, so `order` ends up with
@@ -163,7 +185,10 @@ impl Loader<'_> {
 
 /// Case and underscores carry no information in the file-name mapping.
 fn squash(s: &str) -> String {
-    s.chars().filter(|c| *c != '_').flat_map(|c| c.to_lowercase()).collect()
+    s.chars()
+        .filter(|c| *c != '_')
+        .flat_map(|c| c.to_lowercase())
+        .collect()
 }
 
 /// `TotalOk` -> `total_ok`: the spelling a file is most likely to use.

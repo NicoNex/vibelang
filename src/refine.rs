@@ -56,7 +56,10 @@ pub fn smt(o: &Ob) -> String {
     for h in &o.hyps {
         s.push_str(&format!("(assert {})\n", h));
     }
-    s.push_str(&format!("(assert (not {}))\n(check-sat)\n(get-model)\n", o.goal));
+    s.push_str(&format!(
+        "(assert (not {}))\n(check-sat)\n(get-model)\n",
+        o.goal
+    ));
     s
 }
 
@@ -132,7 +135,11 @@ pub struct Cache {
 
 impl Cache {
     pub fn off() -> Cache {
-        Cache { path: None, proved: HashSet::new(), added: false }
+        Cache {
+            path: None,
+            proved: HashSet::new(),
+            added: false,
+        }
     }
 
     /// The cache for a source file: a sibling `.vibe-proofs`, one hash a line.
@@ -144,7 +151,11 @@ impl Cache {
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .collect();
-        Cache { path: Some(path), proved, added: false }
+        Cache {
+            path: Some(path),
+            proved,
+            added: false,
+        }
     }
 
     /// Whether this obligation was already proved, by this cache or an earlier
@@ -192,9 +203,15 @@ fn discharge(o: &Ob, cache: &mut Cache) -> Option<Diag> {
     // saying so is more useful than a refutation nobody can read (§16.5).
     if out.starts_with("unknown") || out.starts_with("timeout") {
         return Some(
-            Diag::error(o.span, "refine.budget", &format!("the solver gave up on: {}", o.msg))
-                .with_path(&o.path)
-                .with_fix("raise --prove-timeout, or add a ghost function that makes the step explicit"),
+            Diag::error(
+                o.span,
+                "refine.budget",
+                &format!("the solver gave up on: {}", o.msg),
+            )
+            .with_path(&o.path)
+            .with_fix(
+                "raise --prove-timeout, or add a ghost function that makes the step explicit",
+            ),
         );
     }
     let mut d = Diag::error(o.span, &o.code, &o.msg).with_path(&o.path);
@@ -256,7 +273,11 @@ fn model(out: &str) -> Option<String> {
 fn value(s: &str) -> Option<String> {
     if !s.starts_with('(') {
         let a = s.split(|c: char| c.is_whitespace() || c == ')').next()?;
-        return if a.is_empty() { None } else { Some(a.to_string()) };
+        return if a.is_empty() {
+            None
+        } else {
+            Some(a.to_string())
+        };
     }
     let mut depth = 0usize;
     let mut end = 0usize;
@@ -439,7 +460,10 @@ fn is_checked(name: &str) -> bool {
 impl<'a> Gen<'a> {
     /// The symbol standing for a source name here.
     fn var(&self, n: &str) -> String {
-        self.renames.get(n).cloned().unwrap_or_else(|| n.to_string())
+        self.renames
+            .get(n)
+            .cloned()
+            .unwrap_or_else(|| n.to_string())
     }
 
     /// Introduce `n`, giving it a fresh symbol if the name is already taken.
@@ -480,8 +504,12 @@ impl<'a> Gen<'a> {
     /// A value of a record type satisfies that record's invariant, so the
     /// invariant of every parameter enters the context as `param_field` facts.
     fn inv_hyps(&mut self, var: &str) {
-        let Some(rec) = self.tys.get(var).cloned() else { return };
-        let Some(info) = self.ck.data.records.get(&rec).cloned() else { return };
+        let Some(rec) = self.tys.get(var).cloned() else {
+            return;
+        };
+        let Some(info) = self.ck.data.records.get(&rec).cloned() else {
+            return;
+        };
         if info.refines.is_empty() {
             return;
         }
@@ -502,7 +530,8 @@ impl<'a> Gen<'a> {
             }
         }
         let pre = format!("{var}_");
-        self.syms.retain(|k, _| keep.contains(k) || k.starts_with(&pre));
+        self.syms
+            .retain(|k, _| keep.contains(k) || k.starts_with(&pre));
         self.hyps.extend(out);
     }
 
@@ -547,7 +576,11 @@ impl<'a> Gen<'a> {
             ExprKind::Binop(op, a, b) => {
                 let (ta, ka) = self.term(a)?;
                 let (tb, kb) = self.term(b)?;
-                let k = if ka == Sort::Real || kb == Sort::Real { Sort::Real } else { ka };
+                let k = if ka == Sort::Real || kb == Sort::Real {
+                    Sort::Real
+                } else {
+                    ka
+                };
                 let (ta, tb) = (cast(ta, ka, k), cast(tb, kb, k));
                 match op.as_str() {
                     "==" => Some((format!("(= {ta} {tb})"), Sort::Bool)),
@@ -622,7 +655,11 @@ impl<'a> Gen<'a> {
             .syms
             .keys()
             .filter(|s| goal.contains(s.as_str()))
-            .all(|s| self.params.iter().any(|p| p == s || format!("len_{p}") == *s));
+            .all(|s| {
+                self.params
+                    .iter()
+                    .any(|p| p == s || format!("len_{p}") == *s)
+            });
         let fix = if fixable {
             Some(format!("{}.sig += {}", self.fun, pretty))
         } else {
@@ -738,9 +775,7 @@ impl<'a> Gen<'a> {
         let (t, k) = s.clone()?;
         match p {
             Pat::Int(n) if k == Sort::Int => Some(format!("(= {t} {})", int_lit(*n as i128))),
-            Pat::Bool(b) if k == Sort::Bool => {
-                Some(if *b { t } else { format!("(not {t})") })
-            }
+            Pat::Bool(b) if k == Sort::Bool => Some(if *b { t } else { format!("(not {t})") }),
             Pat::List(ps) => {
                 let v = self.var(&as_name(strip(scrut))?);
                 let (l, _) = self.sym(format!("len_{v}"), Sort::Int);
@@ -843,13 +878,23 @@ impl<'a> Gen<'a> {
             "+" | "*" => {
                 let ty = self.ty_of(a).or_else(|| self.ty_of(b));
                 let Some(ty) = ty else { return };
-                let Some((lo, Some(hi))) = range(&ty) else { return };
-                let (Some((ta, _)), Some((tb, _))) = (self.term(a), self.term(b)) else { return };
+                let Some((lo, Some(hi))) = range(&ty) else {
+                    return;
+                };
+                let (Some((ta, _)), Some((tb, _))) = (self.term(a), self.term(b)) else {
+                    return;
+                };
                 let t = format!("({op} {ta} {tb})");
                 self.push(
                     e.span,
                     "overflow",
-                    &format!("cannot prove `{} {} {}` stays in {}", show(a), op, show(b), ty),
+                    &format!(
+                        "cannot prove `{} {} {}` stays in {}",
+                        show(a),
+                        op,
+                        show(b),
+                        ty
+                    ),
                     format!("{} {} {} <= {}", show(a), op, show(b), hi),
                     format!("(and (<= {t} {hi}) (>= {t} {lo}))"),
                 );
@@ -860,7 +905,9 @@ impl<'a> Gen<'a> {
                 if !is_unsigned(&ty) {
                     return;
                 }
-                let (Some((ta, _)), Some((tb, _))) = (self.term(a), self.term(b)) else { return };
+                let (Some((ta, _)), Some((tb, _))) = (self.term(a), self.term(b)) else {
+                    return;
+                };
                 self.push(
                     e.span,
                     "underflow",
@@ -916,12 +963,16 @@ impl<'a> Gen<'a> {
             let saved = std::mem::take(&mut self.tys);
             let got = self.term(r);
             self.tys = saved;
-            let Some((mut t, Sort::Bool)) = got else { continue };
+            let Some((mut t, Sort::Bool)) = got else {
+                continue;
+            };
             for (from, to) in &len_sub {
                 t = replace_sym(&t, from, to);
             }
             for (from, (to, _)) in &sub {
-                if !len_sub.contains_key(&format!("len_{from}")) || !t.contains(&format!("len_{from}")) {
+                if !len_sub.contains_key(&format!("len_{from}"))
+                    || !t.contains(&format!("len_{from}"))
+                {
                     t = replace_sym(&t, from, to);
                 }
             }
@@ -960,9 +1011,15 @@ impl<'a> Gen<'a> {
     }
 
     fn record(&mut self, e: &Expr, base: Option<&Expr>, fields: &[(String, Expr)]) {
-        let Some((f0, _)) = fields.first() else { return };
-        let Some(rec) = self.ck.data.field_owner.get(f0).cloned() else { return };
-        let Some(info) = self.ck.data.records.get(&rec).cloned() else { return };
+        let Some((f0, _)) = fields.first() else {
+            return;
+        };
+        let Some(rec) = self.ck.data.field_owner.get(f0).cloned() else {
+            return;
+        };
+        let Some(info) = self.ck.data.records.get(&rec).cloned() else {
+            return;
+        };
         if info.refines.is_empty() {
             return;
         }
@@ -987,7 +1044,9 @@ impl<'a> Gen<'a> {
             let saved = std::mem::replace(&mut self.tys, field_tys(&info));
             let got = self.term(r);
             self.tys = saved;
-            let Some((mut t, Sort::Bool)) = got else { continue };
+            let Some((mut t, Sort::Bool)) = got else {
+                continue;
+            };
             for (from, (to, _)) in &sub {
                 t = replace_sym(&t, from, to);
             }
@@ -1014,7 +1073,11 @@ fn int_lit(n: i128) -> String {
 }
 
 fn real_lit(f: f64) -> String {
-    let s = if f.fract() == 0.0 { format!("{f:.1}") } else { format!("{f}") };
+    let s = if f.fract() == 0.0 {
+        format!("{f:.1}")
+    } else {
+        format!("{f}")
+    };
     if f < 0.0 {
         format!("(- {})", &s[1..])
     } else {
@@ -1141,7 +1204,11 @@ mod tests {
     fn a_refinement_on_the_signature_becomes_a_hypothesis() {
         let o = obs_of("mod T\n\nf (a:U64) (b:U64, b != 0) : U64 = a / b\n");
         assert_eq!(o.len(), 1);
-        assert!(o[0].hyps.contains(&"(not (= b 0))".to_string()), "{:?}", o[0].hyps);
+        assert!(
+            o[0].hyps.contains(&"(not (= b 0))".to_string()),
+            "{:?}",
+            o[0].hyps
+        );
     }
 
     #[test]
@@ -1201,7 +1268,11 @@ mod tests {
         let src = "mod T\n\nf (a:U64) (b:U64) : U64 =\n  ?b |0 -> 0 |_ -> a / b end\n";
         let o = obs_of(src);
         assert_eq!(o.len(), 1, "{o:#?}");
-        assert!(o[0].hyps.iter().any(|h| h == "(not (= b 0))"), "{:?}", o[0].hyps);
+        assert!(
+            o[0].hyps.iter().any(|h| h == "(not (= b 0))"),
+            "{:?}",
+            o[0].hyps
+        );
     }
 
     #[test]

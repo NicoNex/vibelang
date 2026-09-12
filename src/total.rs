@@ -34,8 +34,11 @@ fn diverges(f: &FunDecl) -> bool {
 
 pub fn check(m: &Module) -> Vec<Diag> {
     let funs: Vec<&FunDecl> = m.funs().collect();
-    let index: HashMap<&str, usize> =
-        funs.iter().enumerate().map(|(i, f)| (f.name.as_str(), i)).collect();
+    let index: HashMap<&str, usize> = funs
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.name.as_str(), i))
+        .collect();
     let params: Vec<Vec<String>> = funs.iter().map(|f| param_names(f)).collect();
     let calls: Vec<Vec<Call>> = funs.iter().map(|f| calls_in(&f.body, &index)).collect();
 
@@ -87,7 +90,9 @@ pub fn check(m: &Module) -> Vec<Diag> {
                         )
                         .with_path(&path)
                         .with_witness(&show(e))
-                        .with_fix("write the measure with `+`/`-` over scalar parameters, e.g. `%(n-k)`"),
+                        .with_fix(
+                            "write the measure with `+`/`-` over scalar parameters, e.g. `%(n-k)`",
+                        ),
                     );
                 }
             }
@@ -98,7 +103,9 @@ pub fn check(m: &Module) -> Vec<Diag> {
                 let solo = calls[i].iter().all(|c| c.callee == i);
                 let inferred = params[i].iter().find(|p| {
                     let cand = Lin::var(p);
-                    solo && calls[i].iter().all(|c| decreases(&cand, &cand, &params[i], &c.args))
+                    solo && calls[i]
+                        .iter()
+                        .all(|c| decreases(&cand, &cand, &params[i], &c.args))
                 });
                 match inferred {
                     Some(p) => measures[i] = Some(Lin::var(p)),
@@ -112,7 +119,10 @@ pub fn check(m: &Module) -> Vec<Diag> {
                                     f.name
                                 )
                             } else {
-                                format!("`{}` is mutually recursive, so its measure is not inferred", f.name)
+                                format!(
+                                    "`{}` is mutually recursive, so its measure is not inferred",
+                                    f.name
+                                )
                             },
                         )
                         .with_path(&path)
@@ -130,7 +140,9 @@ pub fn check(m: &Module) -> Vec<Diag> {
             if !same_group(i, c.callee) {
                 continue;
             }
-            let Some(mj) = &measures[c.callee] else { continue };
+            let Some(mj) = &measures[c.callee] else {
+                continue;
+            };
             if decreases(mi, mj, &params[c.callee], &c.args) {
                 continue;
             }
@@ -159,7 +171,10 @@ struct Call {
 }
 
 fn param_names(f: &FunDecl) -> Vec<String> {
-    f.params.iter().flat_map(|p| p.names.iter().cloned()).collect()
+    f.params
+        .iter()
+        .flat_map(|p| p.names.iter().cloned())
+        .collect()
 }
 
 /// Direct calls to module functions. ponytail: a recursive name used as a value
@@ -172,7 +187,11 @@ fn calls_in(body: &Expr, index: &HashMap<&str, usize>) -> Vec<Call> {
         if let ExprKind::App(h, args) = &e.kind {
             if let ExprKind::Var(name) = &h.kind {
                 if let Some(&i) = index.get(name.as_str()) {
-                    out.push(Call { callee: i, args: args.clone(), span: e.span });
+                    out.push(Call {
+                        callee: i,
+                        args: args.clone(),
+                        span: e.span,
+                    });
                 }
             }
         }
@@ -246,7 +265,11 @@ impl Lin {
         }
     }
     fn show(&self) -> String {
-        let mut parts: Vec<String> = self.terms.iter().map(|(a, v)| format!("{}*{}", v, a)).collect();
+        let mut parts: Vec<String> = self
+            .terms
+            .iter()
+            .map(|(a, v)| format!("{}*{}", v, a))
+            .collect();
         parts.sort();
         if self.c != 0 || parts.is_empty() {
             parts.push(self.c.to_string());

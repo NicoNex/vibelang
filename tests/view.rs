@@ -13,12 +13,17 @@ fn view(args: &[&str]) -> String {
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("vibe runs");
-    assert!(o.status.success(), "vibe view {args:?} failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    assert!(
+        o.status.success(),
+        "vibe view {args:?} failed:\n{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
     String::from_utf8_lossy(&o.stdout).to_string()
 }
 
 fn source(path: &str) -> String {
-    std::fs::read_to_string(format!("{}/{path}", env!("CARGO_MANIFEST_DIR"))).expect("example exists")
+    std::fs::read_to_string(format!("{}/{path}", env!("CARGO_MANIFEST_DIR")))
+        .expect("example exists")
 }
 
 #[test]
@@ -31,10 +36,19 @@ fn canonical_form_round_trips() {
 #[test]
 fn sig_only_drops_bodies() {
     let out = view(&["examples/ledger.vibe", "--sig-only"]);
-    assert!(out.contains("mean (ts:&Vec Tx, len ts>0) : F64\n"), "missing signature:\n{out}");
-    assert!(!out.contains("total ts /"), "bodies must not be printed:\n{out}");
+    assert!(
+        out.contains("mean (ts:&Vec Tx, len ts>0) : F64\n"),
+        "missing signature:\n{out}"
+    );
+    assert!(
+        !out.contains("total ts /"),
+        "bodies must not be printed:\n{out}"
+    );
     // Types, externs and exports are signatures: they survive.
-    assert!(out.contains("type Err = Bad Str | Num Str | Void"), "missing type:\n{out}");
+    assert!(
+        out.contains("type Err = Bad Str | Num Str | Void"),
+        "missing type:\n{out}"
+    );
     assert!(out.contains("exp c mean, total"), "missing exports:\n{out}");
 }
 
@@ -42,14 +56,23 @@ fn sig_only_drops_bodies() {
 fn flow_expands_pipelines() {
     let out = view(&["examples/ledger.vibe", "--flow"]);
     assert!(!out.contains("|>"), "no pipeline may survive:\n{out}");
-    assert!(out.contains("let p1 = map amt ts in\n"), "missing named stage:\n{out}");
+    assert!(
+        out.contains("let p1 = map amt ts in\n"),
+        "missing named stage:\n{out}"
+    );
 }
 
 #[test]
 fn explicit_shows_inferred_types() {
     let out = view(&["examples/ledger.vibe", "--explicit"]);
-    assert!(out.contains(";; Ledger.total : (Vec Tx) -> F64"), "missing inferred type:\n{out}");
-    assert!(out.contains(";; |- len ts>0 [checked at run time]"), "missing refinement:\n{out}");
+    assert!(
+        out.contains(";; Ledger.total : (Vec Tx) -> F64"),
+        "missing inferred type:\n{out}"
+    );
+    assert!(
+        out.contains(";; |- len ts>0 [checked at run time]"),
+        "missing refinement:\n{out}"
+    );
 }
 
 /// Every `.vibe` file in the repository that is meant to parse is already in
@@ -68,12 +91,20 @@ fn every_file_round_trips_byte_for_byte() {
             if p.extension().is_none_or(|x| x != "vibe") {
                 continue;
             }
-            let name = p.file_name().expect("a file name").to_string_lossy().to_string();
+            let name = p
+                .file_name()
+                .expect("a file name")
+                .to_string_lossy()
+                .to_string();
             if broken.contains(&name.as_str()) {
                 continue;
             }
             let rel = format!("{dir}/{name}");
-            assert_eq!(view(&[&rel]), source(&rel), "{rel} is not in canonical form");
+            assert_eq!(
+                view(&[&rel]),
+                source(&rel),
+                "{rel} is not in canonical form"
+            );
             seen += 1;
         }
     }
@@ -85,7 +116,10 @@ fn every_file_round_trips_byte_for_byte() {
 #[test]
 fn comments_survive_the_round_trip() {
     let out = view(&["tests/total_ok.vibe"]);
-    assert!(out.contains(";; measure inferred: k decreases at the only recursive call"), "{out}");
+    assert!(
+        out.contains(";; measure inferred: k decreases at the only recursive call"),
+        "{out}"
+    );
     assert!(out.contains(";; not recursive: nothing to prove"), "{out}");
 }
 

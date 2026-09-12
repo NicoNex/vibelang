@@ -29,9 +29,19 @@ impl T {
         match self {
             T::Var(i) => format!("t{}", i),
             T::Con(n, a) if a.is_empty() => n.clone(),
-            T::Con(n, a) => format!("{} {}", n, a.iter().map(|t| t.show_atom()).collect::<Vec<_>>().join(" ")),
+            T::Con(n, a) => format!(
+                "{} {}",
+                n,
+                a.iter()
+                    .map(|t| t.show_atom())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
             T::Fun(a, b) => format!("{} -> {}", a.show_atom(), b.show()),
-            T::Tuple(ts) => format!("({})", ts.iter().map(|t| t.show()).collect::<Vec<_>>().join(", ")),
+            T::Tuple(ts) => format!(
+                "({})",
+                ts.iter().map(|t| t.show()).collect::<Vec<_>>().join(", ")
+            ),
             T::Eff(t) => format!("E! {}", t.show_atom()),
         }
     }
@@ -52,7 +62,10 @@ pub struct Scheme {
 
 impl Scheme {
     pub fn mono(t: T) -> Scheme {
-        Scheme { vars: vec![], ty: t }
+        Scheme {
+            vars: vec![],
+            ty: t,
+        }
     }
 }
 
@@ -269,13 +282,21 @@ impl Checker {
             (T::Eff(_), _) => Err(Diag::error(
                 span,
                 "effect.leak",
-                &format!("this is an effectful value (`{}`) used where a pure `{}` is expected", a.show(), b.show()),
+                &format!(
+                    "this is an effectful value (`{}`) used where a pure `{}` is expected",
+                    a.show(),
+                    b.show()
+                ),
             )
             .with_fix("bind it first with `name <- ...`, or mark the enclosing function `E!`")),
             (_, T::Eff(_)) => Err(Diag::error(
                 span,
                 "effect.missing",
-                &format!("expected an effectful `{}` but found the pure `{}`", b.show(), a.show()),
+                &format!(
+                    "expected an effectful `{}` but found the pure `{}`",
+                    b.show(),
+                    a.show()
+                ),
             )),
             _ => Err(Diag::error(
                 span,
@@ -287,7 +308,11 @@ impl Checker {
 
     fn bind_var(&mut self, v: usize, t: &T, span: Span, ctx: &str) -> R<()> {
         if self.occurs(v, t) {
-            return Err(Diag::error(span, "type.infinite", "this expression would have an infinite type"));
+            return Err(Diag::error(
+                span,
+                "type.infinite",
+                "this expression would have an infinite type",
+            ));
         }
         match (self.kinds[v], t) {
             (Kind::Num, T::Con(n, _)) if !is_num(n) => {
@@ -342,7 +367,10 @@ impl Checker {
         self.env.pop();
     }
     pub fn define(&mut self, n: &str, s: Scheme) {
-        self.env.last_mut().expect("a scope is open").insert(n.to_string(), s);
+        self.env
+            .last_mut()
+            .expect("a scope is open")
+            .insert(n.to_string(), s);
     }
 
     /// Record a binder for the ownership pass. `scope` is the span of the
@@ -497,15 +525,21 @@ impl Checker {
                 T::Con(n, _) if self.data.variants.contains_key(n) => {
                     let all = self.data.variants[n].clone();
                     all.into_iter()
-                        .filter(|c| !pats.iter().any(|p| matches!(p, Pat::Ctor(pc, _) if pc == c)))
+                        .filter(|c| {
+                            !pats
+                                .iter()
+                                .any(|p| matches!(p, Pat::Ctor(pc, _) if pc == c))
+                        })
                         .collect()
                 }
                 T::Con(n, _) if n == "Vec" => {
-                    let lens: Vec<usize> =
-                        pats.iter().filter_map(|p| match p {
+                    let lens: Vec<usize> = pats
+                        .iter()
+                        .filter_map(|p| match p {
                             Pat::List(xs) => Some(xs.len()),
                             _ => None,
-                        }).collect();
+                        })
+                        .collect();
                     let next = (0..).find(|k| !lens.contains(k)).unwrap();
                     vec![format!("a list of length {}", next)]
                 }
@@ -524,7 +558,14 @@ impl Checker {
                     .with_witness(&format!("missing {}", list))
                     .with_fix(&format!(
                         "add `|{} -> ...`",
-                        missing.first().map(|m| if m.contains(' ') { "_".to_string() } else { m.clone() }).unwrap()
+                        missing
+                            .first()
+                            .map(|m| if m.contains(' ') {
+                                "_".to_string()
+                            } else {
+                                m.clone()
+                            })
+                            .unwrap()
                     )),
                 );
             }

@@ -30,14 +30,20 @@ fn have_z3() -> bool {
 fn obligations_are_counted_but_not_discharged_by_default() {
     let (ok, out) = vibe(&["check", "tests/refine_ok.vibe"]);
     assert!(ok, "check must keep working without a solver:\n{out}");
-    assert!(out.contains("4 refinement obligation(s) not discharged"), "{out}");
+    assert!(
+        out.contains("4 refinement obligation(s) not discharged"),
+        "{out}"
+    );
 }
 
 #[test]
 fn the_checked_forms_generate_no_obligation() {
     let (ok, out) = vibe(&["check", "tests/refine_checked.vibe"]);
     assert!(ok, "{out}");
-    assert!(!out.contains("obligation"), "§7.5 must leave nothing to prove:\n{out}");
+    assert!(
+        !out.contains("obligation"),
+        "§7.5 must leave nothing to prove:\n{out}"
+    );
 }
 
 #[test]
@@ -46,7 +52,10 @@ fn prove_without_z3_says_so_clearly() {
         return;
     }
     let (ok, out) = vibe(&["check", "--prove", "tests/refine_ok.vibe", "--diag=struct"]);
-    assert!(!ok, "--prove cannot silently succeed without a solver:\n{out}");
+    assert!(
+        !ok,
+        "--prove cannot silently succeed without a solver:\n{out}"
+    );
     assert!(out.contains("refine.no-solver"), "{out}");
     assert!(out.contains("z3"), "{out}");
 }
@@ -66,11 +75,20 @@ fn an_open_obligation_is_an_error_with_a_counterexample() {
         return;
     }
     let (ok, out) = vibe(&["check", "--prove", "tests/refine_bad.vibe", "--diag=struct"]);
-    assert!(!ok, "an undischarged obligation is an error, not a warning:\n{out}");
+    assert!(
+        !ok,
+        "an undischarged obligation is an error, not a warning:\n{out}"
+    );
     assert!(out.contains("div0"), "{out}");
-    assert!(out.contains("RefineBad.div_any.body/0"), "semantic path missing:\n{out}");
+    assert!(
+        out.contains("RefineBad.div_any.body/0"),
+        "semantic path missing:\n{out}"
+    );
     assert!(out.contains("\u{22a8}"), "counterexample missing:\n{out}");
-    assert!(out.contains("fix: RefineBad.div_any.sig += b != 0"), "{out}");
+    assert!(
+        out.contains("fix: RefineBad.div_any.sig += b != 0"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -79,7 +97,10 @@ fn a_refinement_survives_a_constructor_pattern() {
         return;
     }
     let (ok, out) = vibe(&["check", "--prove", "tests/refine_ctor.vibe"]);
-    assert!(ok, "the `Ok []` arm and the record invariant discharge these:\n{out}");
+    assert!(
+        ok,
+        "the `Ok []` arm and the record invariant discharge these:\n{out}"
+    );
 }
 
 #[test]
@@ -121,7 +142,11 @@ fn a_proved_obligation_is_not_asked_twice() {
     let (ok, out) = vibe(&["check", "--prove", p]);
     assert!(ok, "{out}");
     let cache = std::fs::read_to_string(dir.join(".vibe-proofs")).expect("a cache file");
-    assert_eq!(cache.lines().count(), 4, "one certificate per obligation:\n{cache}");
+    assert_eq!(
+        cache.lines().count(),
+        4,
+        "one certificate per obligation:\n{cache}"
+    );
 
     // The strongest statement the cache can make: with no solver on PATH the
     // same file still proves, so nothing was asked again.
@@ -143,7 +168,10 @@ fn a_proved_obligation_is_not_asked_twice() {
         .env("PATH", "/nonexistent")
         .output()
         .expect("vibe runs");
-    assert!(!o.status.success(), "without a cache the solver is required");
+    assert!(
+        !o.status.success(),
+        "without a cache the solver is required"
+    );
     assert!(String::from_utf8_lossy(&o.stderr).contains("refine.no-solver"));
 }
 
@@ -163,9 +191,15 @@ fn a_shadowing_binder_does_not_inherit_a_refinement() {
         return;
     }
     let (ok, out) = vibe(&["check", "--prove", "tests/shadow.vibe", "--diag=struct"]);
-    assert!(!ok, "`n>0` is about the parameter, not about whatever `Ok n` bound:\n{out}");
+    assert!(
+        !ok,
+        "`n>0` is about the parameter, not about whatever `Ok n` bound:\n{out}"
+    );
     assert!(out.contains("div0"), "{out}");
-    assert!(out.contains("n.1=0"), "the counterexample must be about the inner `n`:\n{out}");
+    assert!(
+        out.contains("n.1=0"),
+        "the counterexample must be about the inner `n`:\n{out}"
+    );
 }
 
 /// and the outer name still works where nothing shadows it

@@ -23,7 +23,12 @@ pub struct Checked {
 
 pub fn parse_type(src: &str) -> Ty {
     let toks = lexer::lex(src, usize::MAX).expect("prelude type lexes");
-    let mut p = Parser { toks, i: 0, depth: 1, home: "Prelude".into() };
+    let mut p = Parser {
+        toks,
+        i: 0,
+        depth: 1,
+        home: "Prelude".into(),
+    };
     p.ty().expect("prelude type parses")
 }
 
@@ -44,8 +49,12 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
     for t in m.types() {
         if c.data.records.contains_key(&t.name) || c.data.variants.contains_key(&t.name) {
             c.errors.push(
-                Diag::error(t.span, "name.duplicate", &format!("type `{}` is already defined", t.name))
-                    .with_path(&format!("{}.{}", t.home, t.name)),
+                Diag::error(
+                    t.span,
+                    "name.duplicate",
+                    &format!("type `{}` is already defined", t.name),
+                )
+                .with_path(&format!("{}.{}", t.home, t.name)),
             );
         }
         collect_type(&mut c, t);
@@ -65,8 +74,11 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
     for name in ctor_names {
         let info = c.data.ctors[&name].clone();
         let mut vars: HashMap<String, T> = HashMap::new();
-        let owner_args: Vec<T> =
-            info.params.iter().map(|p| c.lower_ty(&Ty::Var(p.clone()), &mut vars)).collect();
+        let owner_args: Vec<T> = info
+            .params
+            .iter()
+            .map(|p| c.lower_ty(&Ty::Var(p.clone()), &mut vars))
+            .collect();
         let mut ty = T::Con(info.owner.clone(), owner_args);
         for a in info.args.iter().rev() {
             let at = c.lower_ty(a, &mut vars);
@@ -89,7 +101,11 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
                         &format!("`{}` comes from C, so its result must be `E!`", sig.name),
                     )
                     .with_path(&format!("{}.{}", m.name, sig.name))
-                    .with_fix(&format!("write `{} : ... -> E! {}`", sig.name, result_name(&t))),
+                    .with_fix(&format!(
+                        "write `{} : ... -> E! {}`",
+                        sig.name,
+                        result_name(&t)
+                    )),
                 );
             }
             let s = c.generalise(&t);
@@ -102,8 +118,12 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
     for f in m.funs() {
         if c.sigs.contains_key(&f.name) && !ext.contains_key(&f.name) {
             c.errors.push(
-                Diag::error(f.span, "name.duplicate", &format!("`{}` is already defined", f.name))
-                    .with_path(&format!("{}.{}", f.home, f.name)),
+                Diag::error(
+                    f.span,
+                    "name.duplicate",
+                    &format!("`{}` is already defined", f.name),
+                )
+                .with_path(&format!("{}.{}", f.home, f.name)),
             );
         }
         let mut vars = HashMap::new();
@@ -121,7 +141,11 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
                 ty = T::Fun(Box::new(pt), Box::new(ty));
             }
         }
-        let s = if fully_annotated { c.generalise(&ty) } else { Scheme::mono(ty) };
+        let s = if fully_annotated {
+            c.generalise(&ty)
+        } else {
+            Scheme::mono(ty)
+        };
         c.sigs.insert(f.name.clone(), s);
     }
 
@@ -186,9 +210,15 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
                 (k, is_affine_t(&c.resolve(t)))
             })
             .collect();
-        Ok(Checked { data: c.data, ext, sigs: c.sigs, affine })
+        Ok(Checked {
+            data: c.data,
+            ext,
+            sigs: c.sigs,
+            affine,
+        })
     } else {
-        c.errors.sort_by_key(|d| (d.span.file, d.span.line, d.span.col));
+        c.errors
+            .sort_by_key(|d| (d.span.file, d.span.line, d.span.col));
         Err(c.errors)
     }
 }
@@ -216,7 +246,11 @@ fn collect_type(c: &mut Checker, t: &TypeDecl) {
             }
             c.data.records.insert(
                 t.name.clone(),
-                RecordInfo { name: t.name.clone(), fields: r.fields.clone(), refines: r.refines.clone() },
+                RecordInfo {
+                    name: t.name.clone(),
+                    fields: r.fields.clone(),
+                    refines: r.refines.clone(),
+                },
             );
         }
         TypeBody::Variants(vs) => {
@@ -286,7 +320,11 @@ fn check_fun(c: &mut Checker, f: &FunDecl, path: &str) -> R<()> {
             return Err(Diag::error(
                 f.body.span,
                 "effect.missing",
-                &format!("`{}` performs effects but its result type is pure `{}`", f.name, want.show()),
+                &format!(
+                    "`{}` performs effects but its result type is pure `{}`",
+                    f.name,
+                    want.show()
+                ),
             )
             .with_fix(&format!("change the result type to `E! {}`", inner.show())));
         }
@@ -300,7 +338,12 @@ fn check_fun(c: &mut Checker, f: &FunDecl, path: &str) -> R<()> {
 
 fn infer_bool(c: &mut Checker, e: &Expr, path: &str) -> R<()> {
     let t = infer(c, e, path)?;
-    c.unify(&t, &T::con("Bool"), e.span, " (a refinement must be a Bool)")
+    c.unify(
+        &t,
+        &T::con("Bool"),
+        e.span,
+        " (a refinement must be a Bool)",
+    )
 }
 
 fn effect_of(t: &T) -> Option<T> {
@@ -343,7 +386,8 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                     for scope in &c.env {
                         names.extend(scope.keys().cloned());
                     }
-                    let mut d = Diag::error(e.span, "name.unbound", &format!("`{}` is not defined", n));
+                    let mut d =
+                        Diag::error(e.span, "name.unbound", &format!("`{}` is not defined", n));
                     if let Some(s) = suggest(n, names.iter()) {
                         d = d.with_fix(&format!("did you mean `{}`?", s));
                     }
@@ -356,8 +400,11 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
             Some(s) => Ok(c.instantiate(&s)),
             None => {
                 let names: Vec<String> = c.data.ctors.keys().cloned().collect();
-                let mut d =
-                    Diag::error(e.span, "name.unbound", &format!("constructor `{}` is not defined", n));
+                let mut d = Diag::error(
+                    e.span,
+                    "name.unbound",
+                    &format!("constructor `{}` is not defined", n),
+                );
                 if let Some(s) = suggest(n, names.iter()) {
                     d = d.with_fix(&format!("did you mean `{}`?", s));
                 }
@@ -369,10 +416,19 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
             if let ExprKind::Var(n) = &head.kind {
                 if n == "fmt" {
                     if args.is_empty() {
-                        return Err(Diag::error(e.span, "fmt.args", "`fmt` needs a format string"));
+                        return Err(Diag::error(
+                            e.span,
+                            "fmt.args",
+                            "`fmt` needs a format string",
+                        ));
                     }
                     let f = infer(c, &args[0], path)?;
-                    c.unify(&f, &T::con("Str"), args[0].span, " (the first argument of `fmt`)")?;
+                    c.unify(
+                        &f,
+                        &T::con("Str"),
+                        args[0].span,
+                        " (the first argument of `fmt`)",
+                    )?;
                     for a in &args[1..] {
                         infer(c, a, path)?;
                     }
@@ -433,8 +489,18 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
             let tb = infer(c, b, path)?;
             match op.as_str() {
                 "&&" | "||" => {
-                    c.unify(&ta, &T::con("Bool"), a.span, " (left of a logical operator)")?;
-                    c.unify(&tb, &T::con("Bool"), b.span, " (right of a logical operator)")?;
+                    c.unify(
+                        &ta,
+                        &T::con("Bool"),
+                        a.span,
+                        " (left of a logical operator)",
+                    )?;
+                    c.unify(
+                        &tb,
+                        &T::con("Bool"),
+                        b.span,
+                        " (right of a logical operator)",
+                    )?;
                     Ok(T::con("Bool"))
                 }
                 "==" | "!=" => {
@@ -531,7 +597,10 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                         return Err(Diag::error(
                             val.span,
                             "effect.pure_bind",
-                            &format!("`<-` needs an effectful value, but this is a pure `{}`", r.show()),
+                            &format!(
+                                "`<-` needs an effectful value, but this is a pure `{}`",
+                                r.show()
+                            ),
                         )
                         .with_fix(&format!("use `let {} = ... in` instead", n))
                         .at_path(path));
@@ -570,8 +639,17 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                 }
                 c.pop_scope();
             }
-            c.record_match(e.span, st, arms.iter().map(|(p, _)| p.clone()).collect(), path.to_string());
-            Ok(if effectful { T::Eff(Box::new(res)) } else { res })
+            c.record_match(
+                e.span,
+                st,
+                arms.iter().map(|(p, _)| p.clone()).collect(),
+                path.to_string(),
+            );
+            Ok(if effectful {
+                T::Eff(Box::new(res))
+            } else {
+                res
+            })
         }
 
         ExprKind::Field(base, f) => {
@@ -600,7 +678,11 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                     return Err(Diag::error(
                         e.span,
                         "field.not_record",
-                        &format!("`{}` is not a record, so it has no field `{}`", other.show(), f),
+                        &format!(
+                            "`{}` is not a record, so it has no field `{}`",
+                            other.show(),
+                            f
+                        ),
                     )
                     .at_path(path))
                 }
@@ -635,15 +717,22 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                         T::Var(_) => match given.first().and_then(|f| c.data.field_owner.get(f)) {
                             Some(o) => o.clone(),
                             None => {
-                                return Err(Diag::error(e.span, "record.unknown", "cannot tell which record type this update builds")
-                                    .at_path(path))
+                                return Err(Diag::error(
+                                    e.span,
+                                    "record.unknown",
+                                    "cannot tell which record type this update builds",
+                                )
+                                .at_path(path))
                             }
                         },
                         other => {
                             return Err(Diag::error(
                                 e.span,
                                 "record.not_record",
-                                &format!("`{}` is not a record, so `with` does not apply", other.show()),
+                                &format!(
+                                    "`{}` is not a record, so `with` does not apply",
+                                    other.show()
+                                ),
                             )
                             .at_path(path))
                         }
@@ -652,7 +741,8 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                 None => {
                     let mut found = None;
                     for (name, r) in &c.data.records {
-                        let mut want: Vec<String> = r.fields.iter().map(|(n, _)| n.clone()).collect();
+                        let mut want: Vec<String> =
+                            r.fields.iter().map(|(n, _)| n.clone()).collect();
                         let mut have = given.clone();
                         want.sort();
                         have.sort();
@@ -745,7 +835,12 @@ fn bind_pattern(c: &mut Checker, p: &Pat, expected: &T, span: Span, path: &str) 
         }
         Pat::List(ps) => {
             let el = c.fresh(Kind::Any);
-            c.unify(expected, &T::Con("Vec".into(), vec![el.clone()]), span, " (list pattern)")?;
+            c.unify(
+                expected,
+                &T::Con("Vec".into(), vec![el.clone()]),
+                span,
+                " (list pattern)",
+            )?;
             for sp in ps {
                 bind_pattern(c, sp, &el, span, path)?;
             }
@@ -785,14 +880,24 @@ fn bind_pattern(c: &mut Checker, p: &Pat, expected: &T, span: Span, path: &str) 
                 .with_fix(&format!(
                     "write `|{}{} -> ...`",
                     name,
-                    (0..info.args.len()).map(|i| format!(" x{}", i)).collect::<String>()
+                    (0..info.args.len())
+                        .map(|i| format!(" x{}", i))
+                        .collect::<String>()
                 ))
                 .at_path(path));
             }
             let mut vars: HashMap<String, T> = HashMap::new();
-            let owner_args: Vec<T> =
-                info.params.iter().map(|q| c.lower_ty(&Ty::Var(q.clone()), &mut vars)).collect();
-            c.unify(expected, &T::Con(info.owner.clone(), owner_args), span, " (constructor pattern)")?;
+            let owner_args: Vec<T> = info
+                .params
+                .iter()
+                .map(|q| c.lower_ty(&Ty::Var(q.clone()), &mut vars))
+                .collect();
+            c.unify(
+                expected,
+                &T::Con(info.owner.clone(), owner_args),
+                span,
+                " (constructor pattern)",
+            )?;
             for (sp, aty) in args.iter().zip(info.args.iter()) {
                 let at = c.lower_ty(aty, &mut vars);
                 bind_pattern(c, sp, &at, span, path)?;
@@ -816,7 +921,9 @@ fn record_pattern(c: &mut Checker, p: &Pat, scope: Span) {
 fn pat_names(p: &Pat) -> Vec<String> {
     match p {
         Pat::Var(n) => vec![n.clone()],
-        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => ps.iter().flat_map(pat_names).collect(),
+        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => {
+            ps.iter().flat_map(pat_names).collect()
+        }
         _ => Vec::new(),
     }
 }
@@ -826,8 +933,13 @@ fn pat_names(p: &Pat) -> Vec<String> {
 /// unknown is reported rather than waved through.
 fn is_affine_t(t: &T) -> bool {
     match t {
-        T::Con(n, _) => !(crate::types::is_num(n)
-            || matches!(n.as_str(), "Bool" | "Char" | "Unit" | "Nat" | "Size" | "CStr" | "Ptr")),
+        T::Con(n, _) => {
+            !(crate::types::is_num(n)
+                || matches!(
+                    n.as_str(),
+                    "Bool" | "Char" | "Unit" | "Nat" | "Size" | "CStr" | "Ptr"
+                ))
+        }
         T::Var(_) => true,
         T::Tuple(ts) => ts.iter().any(is_affine_t),
         T::Fun(..) | T::Eff(_) => false,

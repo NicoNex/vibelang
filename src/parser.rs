@@ -21,7 +21,13 @@ type P<T> = Result<T, Diag>;
 pub const SEQ: &str = ";seq";
 
 pub fn parse(toks: Vec<Token>) -> P<Module> {
-    Parser { toks, i: 0, depth: 0, home: String::new() }.module()
+    Parser {
+        toks,
+        i: 0,
+        depth: 0,
+        home: String::new(),
+    }
+    .module()
 }
 
 impl Parser {
@@ -123,7 +129,10 @@ impl Parser {
         if self.eat_sym(s) {
             Ok(sp)
         } else {
-            Err(self.err("parse.expected", &format!("expected `{}`, found {}", s, self.describe())))
+            Err(self.err(
+                "parse.expected",
+                &format!("expected `{}`, found {}", s, self.describe()),
+            ))
         }
     }
     fn describe(&self) -> String {
@@ -150,7 +159,10 @@ impl Parser {
                 self.i += 1;
                 Ok((n, t.span))
             }
-            _ => Err(self.err("parse.name", &format!("expected a name, found {}", self.describe()))),
+            _ => Err(self.err(
+                "parse.name",
+                &format!("expected a name, found {}", self.describe()),
+            )),
         }
     }
     fn ctor(&mut self) -> P<(String, Span)> {
@@ -161,8 +173,10 @@ impl Parser {
                 self.i += 1;
                 Ok((n, t.span))
             }
-            _ => Err(self
-                .err("parse.ctor", &format!("expected a capitalised name, found {}", self.describe()))),
+            _ => Err(self.err(
+                "parse.ctor",
+                &format!("expected a capitalised name, found {}", self.describe()),
+            )),
         }
     }
     fn skip_newlines(&mut self) {
@@ -175,7 +189,10 @@ impl Parser {
             self.skip_newlines();
             Ok(())
         } else {
-            Err(self.err("parse.trailing", &format!("unexpected {} at end of declaration", self.describe())))
+            Err(self.err(
+                "parse.trailing",
+                &format!("unexpected {} at end of declaration", self.describe()),
+            ))
         }
     }
 
@@ -247,7 +264,13 @@ impl Parser {
         if !self.eat_sym("=") {
             // `type Window` inside an `ext c` block: opaque C type.
             self.end_of_line()?;
-            return Ok(TypeDecl { name, home: self.home.clone(), params, body: TypeBody::Opaque, span });
+            return Ok(TypeDecl {
+                name,
+                home: self.home.clone(),
+                params,
+                body: TypeBody::Opaque,
+                span,
+            });
         }
         let body = if self.cur().is_sym("{") {
             TypeBody::Record(self.record_def()?)
@@ -267,7 +290,13 @@ impl Parser {
             TypeBody::Variants(vs)
         };
         self.end_of_line()?;
-        Ok(TypeDecl { name, home: self.home.clone(), params, body, span })
+        Ok(TypeDecl {
+            name,
+            home: self.home.clone(),
+            params,
+            body,
+            span,
+        })
     }
 
     fn record_def(&mut self) -> P<RecordDef> {
@@ -280,7 +309,8 @@ impl Parser {
                 break;
             }
             // A field is `name : type`; anything else is a refinement predicate.
-            let is_field = matches!(self.peek(), Tok::Name(_)) && matches!(self.peek_at(1), Tok::Sym(":"));
+            let is_field =
+                matches!(self.peek(), Tok::Name(_)) && matches!(self.peek_at(1), Tok::Sym(":"));
             if is_field {
                 let (n, _) = self.name()?;
                 self.expect_sym(":")?;
@@ -298,7 +328,9 @@ impl Parser {
     }
 
     fn starts_type_atom(&mut self) -> bool {
-        matches!(self.peek(), Tok::Ctor(_) | Tok::Name(_)) || self.cur().is_sym("(") || self.cur().is_sym("&")
+        matches!(self.peek(), Tok::Ctor(_) | Tok::Name(_))
+            || self.cur().is_sym("(")
+            || self.cur().is_sym("&")
             || self.cur().is_sym("E!")
     }
 
@@ -361,9 +393,16 @@ impl Parser {
                 }
                 self.depth -= 1;
                 self.expect_sym(")")?;
-                Ok(if parts.len() == 1 { parts.pop().unwrap() } else { Ty::Tuple(parts) })
+                Ok(if parts.len() == 1 {
+                    parts.pop().unwrap()
+                } else {
+                    Ty::Tuple(parts)
+                })
             }
-            _ => Err(self.err("parse.type", &format!("expected a type, found {}", self.describe()))),
+            _ => Err(self.err(
+                "parse.type",
+                &format!("expected a type, found {}", self.describe()),
+            )),
         }
     }
 
@@ -431,9 +470,22 @@ impl Parser {
                 refines.push(self.expr()?);
             }
             self.end_of_line()?;
-            sigs.push(ExtSig { name, symbol, ty, refines, span: sp });
+            sigs.push(ExtSig {
+                name,
+                symbol,
+                ty,
+                refines,
+                span: sp,
+            });
         }
-        Ok(ExtBlock { header, links, pkgs, sigs, types, span })
+        Ok(ExtBlock {
+            header,
+            links,
+            pkgs,
+            sigs,
+            types,
+            span,
+        })
     }
 
     // ---- functions ----
@@ -447,7 +499,12 @@ impl Parser {
                 Tok::Name(n) => {
                     let sp = self.span();
                     self.i += 1;
-                    params.push(Param { names: vec![n], ty: None, refines: vec![], span: sp });
+                    params.push(Param {
+                        names: vec![n],
+                        ty: None,
+                        refines: vec![],
+                        span: sp,
+                    });
                 }
                 Tok::Sym("(") => {
                     let sp = self.span();
@@ -468,17 +525,39 @@ impl Parser {
                     }
                     self.depth -= 1;
                     self.expect_sym(")")?;
-                    params.push(Param { names, ty: Some(ty), refines, span: sp });
+                    params.push(Param {
+                        names,
+                        ty: Some(ty),
+                        refines,
+                        span: sp,
+                    });
                 }
                 _ => break,
             }
         }
-        let ret = if self.eat_sym(":") { Some(self.ty()?) } else { None };
+        let ret = if self.eat_sym(":") {
+            Some(self.ty()?)
+        } else {
+            None
+        };
         self.expect_sym("=")?;
         let body = self.body()?;
-        let measure = if self.eat_sym("%") { Some(self.expr()?) } else { None };
+        let measure = if self.eat_sym("%") {
+            Some(self.expr()?)
+        } else {
+            None
+        };
         self.end_of_line()?;
-        Ok(FunDecl { name, home: self.home.clone(), ghost, params, ret, body, measure, span })
+        Ok(FunDecl {
+            name,
+            home: self.home.clone(),
+            ghost,
+            params,
+            ret,
+            body,
+            measure,
+            span,
+        })
     }
 
     /// A function body: a chain of `<-` binds / `let ... in` followed by an expression.
@@ -500,7 +579,10 @@ impl Parser {
                     .with_fix("write `name <- value ;` and continue on the next line"));
             }
             let rest = self.body()?;
-            return Ok(Expr::new(ExprKind::Bind(n, Box::new(val), Box::new(rest)), span));
+            return Ok(Expr::new(
+                ExprKind::Bind(n, Box::new(val), Box::new(rest)),
+                span,
+            ));
         }
         if self.cur().is_kw("let") {
             self.i += 1;
@@ -511,12 +593,18 @@ impl Parser {
                 return Err(self.err("parse.let", "expected `in` after a `let` binding"));
             }
             let rest = self.body()?;
-            return Ok(Expr::new(ExprKind::Let(n, Box::new(val), Box::new(rest)), span));
+            return Ok(Expr::new(
+                ExprKind::Let(n, Box::new(val), Box::new(rest)),
+                span,
+            ));
         }
         let e = self.expr()?;
         if self.eat_sym(";") {
             let rest = self.body()?;
-            return Ok(Expr::new(ExprKind::Bind(SEQ.into(), Box::new(e), Box::new(rest)), span));
+            return Ok(Expr::new(
+                ExprKind::Bind(SEQ.into(), Box::new(e), Box::new(rest)),
+                span,
+            ));
         }
         Ok(e)
     }
@@ -568,7 +656,10 @@ impl Parser {
             let span = self.span();
             self.i += 1;
             let rhs = self.binop(prec + 1)?;
-            lhs = Expr::new(ExprKind::Binop(op.to_string(), Box::new(lhs), Box::new(rhs)), span);
+            lhs = Expr::new(
+                ExprKind::Binop(op.to_string(), Box::new(lhs), Box::new(rhs)),
+                span,
+            );
         }
         Ok(lhs)
     }
@@ -629,7 +720,12 @@ impl Parser {
         }
         self.sync();
         match &self.cur().tok {
-            Tok::Int(_) | Tok::Float(_) | Tok::Str(_) | Tok::Char(_) | Tok::Name(_) | Tok::Ctor(_) => true,
+            Tok::Int(_)
+            | Tok::Float(_)
+            | Tok::Str(_)
+            | Tok::Char(_)
+            | Tok::Name(_)
+            | Tok::Ctor(_) => true,
             Tok::Kw(k) => matches!(*k, "True" | "False" | "arena"),
             Tok::Sym(s) => matches!(*s, "(" | "[" | "{" | "&" | "?" | "\\"),
             _ => false,
@@ -682,7 +778,10 @@ impl Parser {
                     return Err(self.err("parse.let", "expected `in` after a `let` binding"));
                 }
                 let body = self.body()?;
-                Ok(Expr::new(ExprKind::Let(n, Box::new(val), Box::new(body)), span))
+                Ok(Expr::new(
+                    ExprKind::Let(n, Box::new(val), Box::new(body)),
+                    span,
+                ))
             }
             Tok::Kw("arena") => {
                 self.i += 1;
@@ -759,7 +858,8 @@ impl Parser {
             Tok::Sym("{") => {
                 self.i += 1;
                 self.depth += 1;
-                let base = if matches!(self.peek(), Tok::Name(_)) && matches!(self.peek_at(1), Tok::Kw("with"))
+                let base = if matches!(self.peek(), Tok::Name(_))
+                    && matches!(self.peek_at(1), Tok::Kw("with"))
                 {
                     let (n, sp) = self.name()?;
                     self.eat_kw("with");
@@ -782,7 +882,10 @@ impl Parser {
                 self.expect_sym("}")?;
                 Ok(Expr::new(ExprKind::Record(base, fields), span))
             }
-            _ => Err(self.err("parse.expr", &format!("expected an expression, found {}", self.describe()))),
+            _ => Err(self.err(
+                "parse.expr",
+                &format!("expected an expression, found {}", self.describe()),
+            )),
         }
     }
 
@@ -806,7 +909,10 @@ impl Parser {
         }
         if !self.eat_kw("end") {
             return Err(self
-                .err("parse.match", "expected another `|` arm or `end` to close the match")
+                .err(
+                    "parse.match",
+                    "expected another `|` arm or `end` to close the match",
+                )
                 .with_fix("add `end` after the last arm"));
         }
         Ok(Expr::new(ExprKind::Match(Box::new(scrut), arms), span))
@@ -828,7 +934,12 @@ impl Parser {
     fn starts_pattern_atom(&mut self) -> bool {
         self.sync();
         match &self.cur().tok {
-            Tok::Int(_) | Tok::Float(_) | Tok::Str(_) | Tok::Char(_) | Tok::Name(_) | Tok::Ctor(_) => true,
+            Tok::Int(_)
+            | Tok::Float(_)
+            | Tok::Str(_)
+            | Tok::Char(_)
+            | Tok::Name(_)
+            | Tok::Ctor(_) => true,
             Tok::Kw(k) => matches!(*k, "True" | "False"),
             Tok::Sym(s) => matches!(*s, "(" | "[" | "_"),
             _ => false,
@@ -898,9 +1009,16 @@ impl Parser {
                 }
                 self.depth -= 1;
                 self.expect_sym(")")?;
-                Ok(if ps.len() == 1 { ps.pop().unwrap() } else { Pat::Tuple(ps) })
+                Ok(if ps.len() == 1 {
+                    ps.pop().unwrap()
+                } else {
+                    Pat::Tuple(ps)
+                })
             }
-            _ => Err(self.err("parse.pattern", &format!("expected a pattern, found {}", self.describe()))),
+            _ => Err(self.err(
+                "parse.pattern",
+                &format!("expected a pattern, found {}", self.describe()),
+            )),
         }
     }
 }

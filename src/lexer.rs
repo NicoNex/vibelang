@@ -164,7 +164,12 @@ pub fn lex_full(src: &str, file: usize) -> Result<(Vec<Token>, Vec<Comment>), Di
 
 impl<'a> Lexer<'a> {
     fn span(&self, start: usize) -> Span {
-        Span { file: self.file, line: self.line, col: start - self.line_start, len: self.pos - start }
+        Span {
+            file: self.file,
+            line: self.line,
+            col: start - self.line_start,
+            len: self.pos - start,
+        }
     }
     fn peek(&self) -> u8 {
         *self.src.get(self.pos).unwrap_or(&0)
@@ -200,7 +205,10 @@ impl<'a> Lexer<'a> {
                 }
             }
             if self.pos >= self.src.len() {
-                out.push(Token { tok: Tok::Eof, span: self.span(self.pos) });
+                out.push(Token {
+                    tok: Tok::Eof,
+                    span: self.span(self.pos),
+                });
                 return Ok(out);
             }
             if self.peek() == b'\n' {
@@ -211,7 +219,10 @@ impl<'a> Lexer<'a> {
                 // here rather than becoming errors later.
                 let ends = out.last().is_some_and(|t| ends_expr(&t.tok));
                 if depth == 0 && ends {
-                    out.push(Token { tok: Tok::Newline, span: self.span(self.pos) });
+                    out.push(Token {
+                        tok: Tok::Newline,
+                        span: self.span(self.pos),
+                    });
                 }
                 self.pos += 1;
                 self.line += 1;
@@ -250,13 +261,20 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
             }
         }
-        let text: String =
-            std::str::from_utf8(&self.src[start..self.pos]).unwrap().chars().filter(|c| *c != '_').collect();
+        let text: String = std::str::from_utf8(&self.src[start..self.pos])
+            .unwrap()
+            .chars()
+            .filter(|c| *c != '_')
+            .collect();
         if is_float {
             Ok(Tok::Float(text.parse().unwrap()))
         } else {
             text.parse::<i64>().map(Tok::Int).map_err(|_| {
-                Diag::error(self.span(start), "lex.int", "integer literal does not fit in 64 bits")
+                Diag::error(
+                    self.span(start),
+                    "lex.int",
+                    "integer literal does not fit in 64 bits",
+                )
             })
         }
     }
@@ -296,7 +314,11 @@ impl<'a> Lexer<'a> {
                 }
                 b'\\' => s.push(self.escape()?),
                 0 | b'\n' => {
-                    return Err(Diag::error(self.span(start), "lex.string", "unterminated string"))
+                    return Err(Diag::error(
+                        self.span(start),
+                        "lex.string",
+                        "unterminated string",
+                    ))
                 }
                 c => {
                     s.push(c as char);
@@ -309,13 +331,19 @@ impl<'a> Lexer<'a> {
     fn character(&mut self) -> Result<Tok, Diag> {
         let start = self.pos;
         self.pos += 1;
-        let c = if self.peek() == b'\\' { self.escape()? } else {
+        let c = if self.peek() == b'\\' {
+            self.escape()?
+        } else {
             let c = self.peek() as char;
             self.pos += 1;
             c
         };
         if self.peek() != b'\'' {
-            return Err(Diag::error(self.span(start), "lex.char", "unterminated character literal"));
+            return Err(Diag::error(
+                self.span(start),
+                "lex.char",
+                "unterminated character literal",
+            ));
         }
         self.pos += 1;
         Ok(Tok::Char(c))

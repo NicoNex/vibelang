@@ -29,14 +29,21 @@ fn examples_check() {
 fn reference_program_runs() {
     let (ok, out) = vibe(&["run", "examples/ledger.vibe"]);
     assert!(ok, "ledger failed to build or run:\n{out}");
-    assert_eq!(out.trim(), "n=3 tot=20.75 avg=6.91667 top=b", "unexpected output");
+    assert_eq!(
+        out.trim(),
+        "n=3 tot=20.75 avg=6.91667 top=b",
+        "unexpected output"
+    );
 }
 
 #[test]
 fn bad_program_reports_a_diagnostic() {
     let (ok, out) = vibe(&["check", "tests/bad.vibe", "--diag=struct"]);
     assert!(!ok, "a type error must fail the check");
-    assert!(out.contains("type.mismatch"), "expected type.mismatch, got:\n{out}");
+    assert!(
+        out.contains("type.mismatch"),
+        "expected type.mismatch, got:\n{out}"
+    );
 }
 
 #[test]
@@ -63,16 +70,28 @@ fn exported_functions_get_a_header() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/.vibe-ledger/ledger.h"),
     )
     .expect("a header is generated for `exp c`");
-    assert!(h.contains("double Ledger_mean(VbVal x0);"), "mean must be exported:\n{h}");
-    assert!(h.contains("NOT VERIFIED ACROSS THE BOUNDARY"), "the precondition must be flagged:\n{h}");
+    assert!(
+        h.contains("double Ledger_mean(VbVal x0);"),
+        "mean must be exported:\n{h}"
+    );
+    assert!(
+        h.contains("NOT VERIFIED ACROSS THE BOUNDARY"),
+        "the precondition must be flagged:\n{h}"
+    );
 }
 
 #[test]
 fn json_diagnostics_are_json() {
     let (ok, out) = vibe(&["check", "tests/bad.vibe", "--diag=json"]);
     assert!(!ok);
-    assert!(out.trim_start().starts_with("[{"), "expected a JSON array, got:\n{out}");
-    assert!(out.contains("\"code\""), "expected a code field, got:\n{out}");
+    assert!(
+        out.trim_start().starts_with("[{"),
+        "expected a JSON array, got:\n{out}"
+    );
+    assert!(
+        out.contains("\"code\""),
+        "expected a code field, got:\n{out}"
+    );
 }
 
 #[test]
@@ -106,8 +125,14 @@ fn a_library_links_into_a_c_program() {
     ]);
     assert!(ok, "building a library failed:\n{out}");
     assert!(archive.exists(), "no archive at {}", archive.display());
-    assert!(dir.join("mathlib.h").exists(), "the header must sit next to the archive");
-    assert!(dir.join("vibert.h").exists(), "and so must the runtime header it includes");
+    assert!(
+        dir.join("mathlib.h").exists(),
+        "the header must sit next to the archive"
+    );
+    assert!(
+        dir.join("vibert.h").exists(),
+        "and so must the runtime header it includes"
+    );
 
     let c = dir.join("use.c");
     std::fs::write(
@@ -127,7 +152,9 @@ fn a_library_links_into_a_c_program() {
         .status()
         .expect("a C compiler");
     assert!(st.success(), "C could not link the library");
-    let run = Command::new(&exe).output().expect("the linked program runs");
+    let run = Command::new(&exe)
+        .output()
+        .expect("the linked program runs");
     assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "12 6");
 }
 
@@ -156,8 +183,14 @@ fn an_ext_symbol_can_be_passed_as_a_value() {
     ]);
     assert!(ok, "the generated C must compile:\n{out}");
     let c = std::fs::read_to_string(exe.with_extension("c")).expect("the emitted C");
-    assert!(c.contains("static VbVal vbe_perror("), "the wrapper must be defined:\n{c}");
-    assert!(c.contains("perror(vb_as_cstr(a[0]))"), "and it must call the C function:\n{c}");
+    assert!(
+        c.contains("static VbVal vbe_perror("),
+        "the wrapper must be defined:\n{c}"
+    );
+    assert!(
+        c.contains("perror(vb_as_cstr(a[0]))"),
+        "and it must call the C function:\n{c}"
+    );
 }
 
 /// The C boundary is a language rule (§10.3), so `vibe check` has to be the one
@@ -167,5 +200,8 @@ fn a_type_that_cannot_cross_the_c_boundary_fails_at_check() {
     let (ok, out) = vibe(&["check", "tests/ffi_bad.vibe", "--diag=struct"]);
     assert!(!ok, "`check` must not pass what `build` refuses:\n{out}");
     assert!(out.contains("ffi.type"), "{out}");
-    assert!(out.contains("FfiBad.takes"), "blame the signature, not a call site:\n{out}");
+    assert!(
+        out.contains("FfiBad.takes"),
+        "blame the signature, not a call site:\n{out}"
+    );
 }

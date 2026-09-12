@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn path(name: &str) -> PathBuf {
-    std::env::temp_dir().join("vibe-canon-tests").join(format!("{name}.vibe"))
+    std::env::temp_dir()
+        .join("vibe-canon-tests")
+        .join(format!("{name}.vibe"))
 }
 
 /// The canonical projection of a file written earlier by `check`.
@@ -44,7 +46,10 @@ fn indentation_is_free() {
     let (ok, out) = check("tidy", tidy);
     assert!(ok, "{out}");
     let (ok, out) = check("ragged", ragged);
-    assert!(ok, "indentation must not be able to break a program:\n{out}");
+    assert!(
+        ok,
+        "indentation must not be able to break a program:\n{out}"
+    );
     assert_eq!(
         view("tidy").replace("Tidy", "M"),
         view("ragged").replace("Ragged", "M"),
@@ -56,7 +61,10 @@ fn indentation_is_free() {
 fn blank_lines_are_free() {
     let src = "mod Blanks\n\n\n\n\nf (n:U64) : U64 = n\n\n\ng (n:U64) : U64 = n\n";
     let (ok, out) = check("blanks", src);
-    assert!(ok, "a run of blank lines is whitespace, not an error:\n{out}");
+    assert!(
+        ok,
+        "a run of blank lines is whitespace, not an error:\n{out}"
+    );
 }
 
 /// A newline still ends a declaration, and that is the only layout rule left.
@@ -64,7 +72,10 @@ fn blank_lines_are_free() {
 #[test]
 fn a_newline_still_separates_declarations() {
     let (ok, out) = check("joined", "mod Joined\n\nf : U64 = 1 g : U64 = 2\n");
-    assert!(!ok, "`1 g` is an application, and that is the ambiguity:\n{out}");
+    assert!(
+        !ok,
+        "`1 g` is an application, and that is the ambiguity:\n{out}"
+    );
 }
 
 /// A newline inside a declaration is a continuation wherever the line so far
@@ -73,13 +84,19 @@ fn a_newline_still_separates_declarations() {
 fn a_newline_inside_a_declaration_is_whitespace() {
     let src = "mod Split\n\nf (n:U64) : U64 =\n  n\n  +\n  1\n";
     let (ok, out) = check("split", src);
-    assert!(ok, "a line break around an operator must not end the declaration:\n{out}");
+    assert!(
+        ok,
+        "a line break around an operator must not end the declaration:\n{out}"
+    );
 }
 
 #[test]
 fn redundant_parentheses_are_still_rejected() {
     let (ok, out) = check("parens", "mod Parens\n\nf (n:U64) : U64 = (n)\n");
-    assert!(!ok, "structure is still canonical even though layout is not:\n{out}");
+    assert!(
+        !ok,
+        "structure is still canonical even though layout is not:\n{out}"
+    );
     assert!(out.contains("canon."), "{out}");
 }
 
@@ -96,10 +113,20 @@ fn the_whole_corpus_checks() {
             }
             let name = p.file_name().expect("a name").to_string_lossy().to_string();
             // these exist to be rejected, for reasons of their own
-            if ["bad.vibe", "move.vibe", "capture.vibe", "move_let.vibe",
-                "move_pat.vibe", "refine_bad.vibe", "total_growing.vibe",
-                "total_no_measure.vibe", "total_arena.vibe", "diverge.vibe", "ffi_bad.vibe"]
-                .contains(&name.as_str())
+            if [
+                "bad.vibe",
+                "move.vibe",
+                "capture.vibe",
+                "move_let.vibe",
+                "move_pat.vibe",
+                "refine_bad.vibe",
+                "total_growing.vibe",
+                "total_no_measure.vibe",
+                "total_arena.vibe",
+                "diverge.vibe",
+                "ffi_bad.vibe",
+            ]
+            .contains(&name.as_str())
             {
                 continue;
             }
@@ -161,7 +188,10 @@ fn end_closes_the_inner_match_before_the_outer_one() {
                end\n";
     let (ok, out) = check("nest", src);
     assert!(ok, "{out}");
-    assert!(view("nest").contains("end"), "the projection must print it back");
+    assert!(
+        view("nest").contains("end"),
+        "the projection must print it back"
+    );
 }
 
 #[test]
@@ -170,7 +200,10 @@ fn a_match_without_end_says_so() {
     let (ok, out) = check("unclosed", src);
     assert!(!ok, "{out}");
     assert!(out.contains("parse.match"), "{out}");
-    assert!(out.contains("add `end`"), "the fix must be mechanical:\n{out}");
+    assert!(
+        out.contains("add `end`"),
+        "the fix must be mechanical:\n{out}"
+    );
 }
 
 #[test]
