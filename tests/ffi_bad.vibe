@@ -1,0 +1,10 @@
+mod FfiBad
+
+;; `&Vec U64` has no §10.3 mapping, so this signature is unusable. The error
+;; belongs to `vibe check`: a checker that passes a program `vibe build` then
+;; refuses costs the generator a whole retry for nothing.
+ext c "x.h"
+  takes : &Vec U64 -> E! Unit
+end
+
+use_ (v:&Vec U64) : E! Unit = takes v

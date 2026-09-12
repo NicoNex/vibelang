@@ -159,3 +159,13 @@ fn an_ext_symbol_can_be_passed_as_a_value() {
     assert!(c.contains("static VbVal vbe_perror("), "the wrapper must be defined:\n{c}");
     assert!(c.contains("perror(vb_as_cstr(a[0]))"), "and it must call the C function:\n{c}");
 }
+
+/// The C boundary is a language rule (§10.3), so `vibe check` has to be the one
+/// that says no. It used to pass, and `cc` found out later.
+#[test]
+fn a_type_that_cannot_cross_the_c_boundary_fails_at_check() {
+    let (ok, out) = vibe(&["check", "tests/ffi_bad.vibe", "--diag=struct"]);
+    assert!(!ok, "`check` must not pass what `build` refuses:\n{out}");
+    assert!(out.contains("ffi.type"), "{out}");
+    assert!(out.contains("FfiBad.takes"), "blame the signature, not a call site:\n{out}");
+}

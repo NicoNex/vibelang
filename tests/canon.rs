@@ -98,7 +98,7 @@ fn the_whole_corpus_checks() {
             // these exist to be rejected, for reasons of their own
             if ["bad.vibe", "move.vibe", "capture.vibe", "move_let.vibe",
                 "move_pat.vibe", "refine_bad.vibe", "total_growing.vibe",
-                "total_no_measure.vibe", "total_arena.vibe", "diverge.vibe"]
+                "total_no_measure.vibe", "total_arena.vibe", "diverge.vibe", "ffi_bad.vibe"]
                 .contains(&name.as_str())
             {
                 continue;

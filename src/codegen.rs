@@ -1276,6 +1276,50 @@ fn split_fn(t: &T, n: usize) -> (Vec<T>, T) {
 
 /// The C header for `exp c` (spec §10.2). Preconditions are carried as comments
 /// with an explicit warning: nothing verifies them past the boundary.
+/// Every `ext c` signature, checked against the §10.3 type mapping at its
+/// declaration rather than at a call site.
+///
+/// This used to live in code generation, which meant `vibe check` passed a
+/// program `vibe build` then refused. For a generator that is a wasted retry,
+/// and a checker that is not the authority on what compiles is not worth
+/// running. The call-site check stays as a backstop.
+pub fn boundary_errors(m: &Module) -> Vec<Diag> {
+    let mut out = Vec::new();
+    for b in m.exts() {
+        for sig in &b.sigs {
+            let (ps, ret) = flatten_fn(&sig.ty);
+            for t in &ps {
+                if c_unbox(t, "x").is_none() {
+                    out.push(
+                        Diag::error(
+                            sig.span,
+                            "ffi.type",
+                            &format!("`{}` cannot cross the C boundary", ty_show(t)),
+                        )
+                        .with_path(&format!("{}.{}", m.name, sig.name))
+                        .with_fix(
+                            "use a scalar, Bool, Char, Str, CStr or `Ptr a` at the C boundary",
+                        ),
+                    );
+                }
+            }
+            let inner = strip_eff(&ret);
+            if !is_unit(&inner) && c_box(&inner, "x").is_none() {
+                out.push(
+                    Diag::error(
+                        sig.span,
+                        "ffi.type",
+                        &format!("`{}` cannot come back from C", ty_show(&inner)),
+                    )
+                    .with_path(&format!("{}.{}", m.name, sig.name))
+                    .with_fix("return a scalar, Bool, Char, CStr or `Ptr a`"),
+                );
+            }
+        }
+    }
+    out
+}
+
 pub fn header(m: &Module, ck: &Checked) -> String {
     let names = m.exports();
     let mut o = format!(

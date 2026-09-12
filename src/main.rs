@@ -208,6 +208,8 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         .flat_map(|u| view::canon(&u.module, &checked, &u.src, &u.comments, u.file))
         .collect();
     semantic.append(&mut own::check(&module, &checked));
+    // The C boundary is a language rule, not a backend detail (§10.3).
+    semantic.append(&mut codegen::boundary_errors(&module));
     semantic.append(&mut total::check(&module));
     // Refinements: proved on demand, counted on `check`, quiet on build/run so
     // the program's own output stays clean.
