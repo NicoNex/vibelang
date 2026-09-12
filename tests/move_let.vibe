@@ -1,0 +1,5 @@
+mod MoveLet
+
+f : Vec Str =
+  let s = dup "a" in
+  push (push empty s) s

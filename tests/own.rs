@@ -57,3 +57,24 @@ fn consecutive_comment_lines_are_not_blank_lines() {
     let (ok, out) = vibe(&["check", "tests/arena.vibe"]);
     assert!(ok, "two comment lines in a row must be canonical:\n{out}");
 }
+
+#[test]
+fn a_let_binder_is_affine_too() {
+    let (ok, out) = vibe(&["check", "tests/move_let.vibe", "--diag=struct"]);
+    assert!(!ok, "a `let` name with no written type is still owned:\n{out}");
+    assert!(out.contains("own.use_after_move"), "{out}");
+    assert!(out.contains("MoveLet.f"), "the semantic path must name the function:\n{out}");
+}
+
+#[test]
+fn a_pattern_binder_is_affine_too() {
+    let (ok, out) = vibe(&["check", "tests/move_pat.vibe", "--diag=struct"]);
+    assert!(!ok, "a name a pattern binds is owned:\n{out}");
+    assert!(out.contains("own.use_after_move"), "{out}");
+}
+
+#[test]
+fn a_scalar_binder_is_copied() {
+    let (ok, out) = vibe(&["check", "tests/own_let.vibe"]);
+    assert!(ok, "scalars are copied, so using one twice is not a move:\n{out}");
+}

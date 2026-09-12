@@ -1,0 +1,7 @@
+mod MovePat
+
+type Err = Void
+
+g (r:Res Err Str) : Vec Str =
+  ?r |Er e -> empty
+     |Ok s -> push (push empty s) s

@@ -186,7 +186,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     if o.cmd == "patch" {
         return do_patch(&o, &module, &src);
     }
-    let mut semantic = own::check(&module);
+    let mut semantic = own::check(&module, &checked);
     semantic.append(&mut total::check(&module));
     // Refinements: proved on demand, counted on `check`, quiet on build/run so
     // the program's own output stays clean.

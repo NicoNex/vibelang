@@ -16,6 +16,10 @@ pub struct Checked {
     pub ext: HashMap<String, ExtSig>,
     pub ext_block_of: HashMap<String, usize>,
     pub sigs: HashMap<String, Scheme>,
+    /// Which `let`, `<-` and pattern binders hold an affine value, keyed by the
+    /// span of the expression they scope over and their name. Ownership has no
+    /// other way to know: a binder has no written type (spec §4.2).
+    pub affine: HashMap<(usize, usize, usize, String), bool>,
 }
 
 pub fn parse_type(src: &str) -> Ty {
@@ -177,7 +181,15 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
     c.check_exhaustiveness();
 
     if c.errors.is_empty() {
-        Ok(Checked { data: c.data, ext, ext_block_of, sigs: c.sigs })
+        let affine = c
+            .binds
+            .iter()
+            .map(|(sp, n, t)| {
+                let k = (sp.file, sp.line, sp.col, n.clone());
+                (k, is_affine_t(&c.resolve(t)))
+            })
+            .collect();
+        Ok(Checked { data: c.data, ext, ext_block_of, sigs: c.sigs, affine })
     } else {
         c.errors.sort_by_key(|d| (d.span.file, d.span.line, d.span.col));
         Err(c.errors)
@@ -502,6 +514,7 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
         ExprKind::Let(n, val, body) => {
             let vt = infer(c, val, path)?;
             c.push_scope();
+            c.bound(body.span, n, &vt);
             c.define(n, Scheme::mono(vt));
             let bt = infer(c, body, path)?;
             c.pop_scope();
@@ -530,6 +543,7 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                 }
             };
             c.push_scope();
+            c.bound(body.span, n, &inner);
             c.define(n, Scheme::mono(inner));
             let bt = infer(c, body, path)?;
             c.pop_scope();
@@ -546,6 +560,7 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
             for (p, body) in arms {
                 c.push_scope();
                 bind_pattern(c, p, &st, e.span, path)?;
+                record_pattern(c, p, body.span);
                 let bt = infer(c, body, path)?;
                 let bt_r = c.resolve(&bt);
                 match effect_of(&bt_r) {
@@ -788,5 +803,37 @@ fn bind_pattern(c: &mut Checker, p: &Pat, expected: &T, span: Span, path: &str) 
             }
             Ok(())
         }
+    }
+}
+
+/// After `bind_pattern` has typed a pattern's names, hand them to the
+/// ownership pass under the span of the arm they scope over — the only stable
+/// identity a pattern binder has, since `Pat` carries no spans.
+fn record_pattern(c: &mut Checker, p: &Pat, scope: Span) {
+    for n in pat_names(p) {
+        if let Some(s) = c.lookup(&n) {
+            c.bound(scope, &n, &s.ty.clone());
+        }
+    }
+}
+
+fn pat_names(p: &Pat) -> Vec<String> {
+    match p {
+        Pat::Var(n) => vec![n.clone()],
+        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => ps.iter().flat_map(pat_names).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The inferred-type twin of `own::is_affine`: scalars are copied, everything
+/// with a payload is moved. An unresolved variable is treated as affine, so an
+/// unknown is reported rather than waved through.
+fn is_affine_t(t: &T) -> bool {
+    match t {
+        T::Con(n, _) => !(crate::types::is_num(n)
+            || matches!(n.as_str(), "Bool" | "Char" | "Unit" | "Size" | "CStr" | "Ptr")),
+        T::Var(_) => true,
+        T::Tuple(ts) => ts.iter().any(is_affine_t),
+        T::Fun(..) | T::Eff(_) => false,
     }
 }

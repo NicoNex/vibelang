@@ -192,6 +192,11 @@ pub struct Checker {
     pub sigs: HashMap<String, Scheme>,
     pub ext_names: HashMap<String, ExtSig>,
     pub errors: Vec<Diag>,
+    /// Every `let`, `<-` and pattern binder, keyed by the span of the
+    /// expression it scopes over plus its name, with the type it was given.
+    /// Ownership needs this: a binder has no written type, so the only place
+    /// its affinity can come from is inference (spec §4.2).
+    pub binds: Vec<(Span, String, T)>,
     pending_matches: Vec<(Span, T, Vec<Pat>, String)>,
 }
 
@@ -207,6 +212,7 @@ impl Checker {
             sigs: HashMap::new(),
             ext_names: HashMap::new(),
             errors: Vec::new(),
+            binds: Vec::new(),
             pending_matches: Vec::new(),
         }
     }
@@ -339,7 +345,14 @@ impl Checker {
         self.env.pop();
     }
     pub fn define(&mut self, n: &str, s: Scheme) {
-        self.env.last_mut().unwrap().insert(n.to_string(), s);
+        self.env.last_mut().expect("a scope is open").insert(n.to_string(), s);
+    }
+
+    /// Record a binder for the ownership pass. `scope` is the span of the
+    /// expression the name is visible in, which is the only identity a binder
+    /// has: patterns carry no spans of their own.
+    pub fn bound(&mut self, scope: Span, n: &str, t: &T) {
+        self.binds.push((scope, n.to_string(), t.clone()));
     }
     pub fn lookup(&self, n: &str) -> Option<Scheme> {
         for scope in self.env.iter().rev() {

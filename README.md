@@ -157,7 +157,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 
 **Partial**
 
-- **ownership** — affine use checking of owned parameters, and in-place update of uniquely owned records. No full borrow checker. Memory is a bump allocator that never frees.
+- **ownership** — affine use checking of every owned name: parameters, `let` and `<-` binders, and names a pattern binds, the last two typed by inference since they carry no written type. In-place update of uniquely owned records. Still no escape analysis for closures, and memory is a bump allocator that never frees.
 - **refinements** — parsed, type-checked, and asserted at run time. Not proven.
 
 **Not yet**

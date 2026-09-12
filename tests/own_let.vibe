@@ -1,0 +1,5 @@
+mod OwnLet
+
+f : U64 =
+  let n = 2 in
+  n + n

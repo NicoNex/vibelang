@@ -139,7 +139,7 @@ pub fn generate(m: &Module, ck: &Checked, file: &str) -> Result<String, Vec<Diag
         cur_fn: String::new(),
         cur_params: Vec::new(),
         cur_path: String::new(),
-        inplace: crate::own::inplace_updates(m),
+        inplace: crate::own::inplace_updates(m, ck),
     };
     for (rn, r) in &ck.data.records {
         for (i, (fname, _)) in r.fields.iter().enumerate() {
