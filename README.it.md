@@ -443,6 +443,7 @@ La firma esportata oggi passa il valore uniforme di runtime `VbVal`. I qualifica
 ## Per approfondire
 
 - [`vibelang-spec.md`](vibelang-spec.md) — la specifica normativa: obiettivi e non-obiettivi (§0), principi normativi (§1), grammatica e regole di canonicità (§3), ownership (§4), effetti (§5), totalità (§6), refinement (§7), interoperabilità C (§10), fasi di implementazione (§15). Disponibile anche in italiano: [`vibelang-spec.it.md`](vibelang-spec.it.md).
+- [`docs/remaining-work.md`](docs/remaining-work.md) — cosa non è fatto, in un posto solo: le questioni aperte della spec, i buchi che elenca lo Stato, e i difetti trovati costruendo il resto. La lista da leggere per prima.
 - [`docs/backend-roadmap.md`](docs/backend-roadmap.md) — il piano per un backend Cranelift accanto a quello C, così che un programma Vibelang puro non abbia bisogno di una toolchain C. Non per questo C viene deprecato: gli header di `exp c` e `--emit-c` sono il motivo per cui resta.
 - [`docs/static-drop-roadmap.md`](docs/static-drop-roadmap.md) — il piano per cancellare il bump allocator. Il checker di ownership sa già dove muore ogni valore; Static Drop è il lavoro di emettere quella conoscenza invece di buttarla via.
 - [`README.md`](README.md) — questa pagina in inglese.

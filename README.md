@@ -443,6 +443,7 @@ The exported signature currently passes the uniform runtime value `VbVal`. The s
 ## Further reading
 
 - [`vibelang-spec.md`](vibelang-spec.md) — the normative specification: goals and non-goals (§0), normative principles (§1), grammar and canonicity rules (§3), ownership (§4), effects (§5), totality (§6), refinements (§7), C interop (§10), implementation phases (§15). Also in Italian: [`vibelang-spec.it.md`](vibelang-spec.it.md).
+- [`docs/remaining-work.md`](docs/remaining-work.md) — what is not done, in one place: the spec's open questions, the gaps the Status list names, and the defects found while building the rest. The list to read first.
 - [`docs/backend-roadmap.md`](docs/backend-roadmap.md) — the plan for a Cranelift backend beside the C one, so a pure Vibelang program needs no C toolchain. C is not deprecated by it: `exp c` headers and `--emit-c` are the reason it stays.
 - [`docs/static-drop-roadmap.md`](docs/static-drop-roadmap.md) — the plan for deleting the bump allocator. The ownership checker already knows where every value dies; Static Drop is the work of emitting that knowledge instead of discarding it.
 - [`README.it.md`](README.it.md) — this page in Italian.
