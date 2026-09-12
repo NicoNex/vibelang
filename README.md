@@ -295,7 +295,7 @@ vibe patch <file.vibe> <path> [<hash> <node>]
   --emit-c                        keep the generated C next to the output
 ```
 
-`cargo test` runs the end-to-end suite — 93 tests, and they are the most reliable description of what the compiler actually does: every example must check, the reference program must produce exactly the output above, a type error must report `type.mismatch`, a double move must report `own.use_after_move`, an owned `{r with ...}` must not copy, a frame that cannot leak must release what it allocated, and a C program must link the library `--lib` builds.
+`cargo test` runs the end-to-end suite, which is the most reliable description of what the compiler actually does: every example must check, the reference program must produce exactly the output above, a type error must report `type.mismatch`, a double move must report `own.use_after_move`, an owned `{r with ...}` must not copy, a frame that cannot leak must release what it allocated, and a C program must link the library `--lib` builds.
 
 ---
 

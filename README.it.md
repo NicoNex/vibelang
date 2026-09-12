@@ -20,7 +20,9 @@ parse (ln:&Str) : Res Err Tx =
    |[s,q,p] -> ?(parse_u32 q, parse_f64 p)
                 |(Some n, Some v) -> mk (dup s) n v
                 |_                -> Er (Num (dup ln))
+               end
    |_       -> Er (Bad (dup ln))
+  end
 ```
 
 Non è C con lo zucchero tolto. È la sintassi a varianza minima per un generatore statistico, imbullonata a un compilatore che trasforma un file `.vibe` in un eseguibile nativo passando per C. Quel compilatore esiste, e gira:
@@ -44,13 +46,15 @@ Un **linguaggio di programmazione** è la notazione in cui si scrivono le istruz
 
 **La premessa.** Ogni linguaggio di cui hai sentito parlare è stato progettato attorno a una persona che lo scrive — decenni di ricerca su quale notazione gli umani trovino leggibile, memorizzabile, indulgente. Vibelang dà per scontato che la prima stesura la scriva una macchina, e che la legga una persona che poi la approva o la rimanda indietro. Ogni scelta in questa pagina è quell'unica inversione, portata fino in fondo.
 
-**Un solo modo di scrivere ogni cosa.** Quasi tutti i linguaggi permettono di scrivere la stessa idea in tre o quattro modi, e a scegliere è il gusto. Un generatore non ha gusto; ha una distribuzione di probabilità. Due grafie ugualmente valide sono un lancio di moneta, e un lancio di moneta in mezzo a un programma è un bug che aspetta il suo turno. Perciò il parser rifiuta le varianti invece di accettarle e mettere in ordine dopo: le dichiarazioni iniziano in colonna 1, le parentesi che non servivano sono un errore, una seconda riga vuota consecutiva è un errore. Gli altri linguaggi distribuiscono un formatter, cioè uno strumento che serve a perdonarti. Il formatter di Vibelang è il messaggio di errore.
+**Un solo modo di scrivere ogni cosa.** Quasi tutti i linguaggi permettono di scrivere la stessa idea in tre o quattro modi, e a scegliere è il gusto. Un generatore non ha gusto; ha una distribuzione di probabilità. Due grafie ugualmente valide sono un lancio di moneta, e un lancio di moneta in mezzo a un programma è un bug che aspetta il suo turno. Perciò il parser rifiuta le varianti invece di accettarle e mettere in ordine dopo: le parentesi che non servivano sono un errore, un match non chiuso è un errore. Gli altri linguaggi distribuiscono un formatter, cioè uno strumento che serve a perdonarti. Il formatter di Vibelang è il messaggio di errore.
+
+L'unica cosa su cui il parser *non* è severo sono gli spazi, ed è lo stesso ragionamento letto al contrario. Qui l'indentazione non è struttura: un match finisce con `end`, un binding finisce con `;`, e qualunque disposizione metta i token in quell'ordine è lo stesso programma. Un modello che sbaglia a contare gli spazi non ha sbagliato niente sul programma, quindi non deve pagare un tentativo in più per questo.
 
 **Quattro cose che non compilerà.** In parole povere:
 
 - **Una scelta a cui manca un caso.** Il codice gestisce il rosso e il verde; esiste anche il blu. Quasi tutti i linguaggi lasciano che una cosa così vada in produzione, e cascano la prima volta che si presenta il blu. Vibelang rifiuta il file e fa il nome del blu.
 - **Usare un valore dopo averlo ceduto.** Ogni valore ha esattamente un proprietario. Lo passi a qualcun altro e non ce l'hai più; usarlo di nuovo è vendere due volte la stessa auto, e il compilatore è lì in piedi alla seconda vendita.
-- **Un ciclo che potrebbe non fermarsi mai.** Tutto ciò che chiama sé stesso deve esibire una quantità che cala in senso stretto a ogni chiamata, così che il fondo sia raggiungibile. Niente quantità che cala, niente programma.
+- **Un ciclo che potrebbe non fermarsi mai.** Tutto ciò che è *puro* e chiama sé stesso deve esibire una quantità che cala in senso stretto a ogni chiamata, così che il fondo sia raggiungibile. Una funzione marcata come qualcosa che tocca il mondo esterno è esente, perché un server è fatto apposta per girare per sempre — è la firma a dire di quale delle due si tratta.
 - **Dividere per qualcosa che potrebbe essere zero.** Le operazioni controllate restituiscono un risultato che è un numero oppure un fallimento, e davanti al fallimento non c'è modo di guardare da un'altra parte.
 
 La parola portante è **prima**. Nessuno di questi è un controllo a runtime che scatta quando il caso brutto finalmente arriva. Si chiudono mentre non sta girando niente, e valgono per ogni esecuzione che potrà mai avvenire. Lo standard del settore è venire a sapere le stesse cose alle tre di notte, da un cliente, oppure da nessuno dei due — e un test copre solo i casi che a qualcuno è venuto in mente di scrivere.
@@ -90,11 +94,11 @@ La leggibilità umana non è ignorata. È un obiettivo *derivato*, da servire co
 
 Questa è la sezione in cui il README di un linguaggio di solito elenca aggettivi. Qui è un elenco di cose che ti fermeranno, tutte verificate dal codice in `src/` e coperte da `cargo test`.
 
-- **Forma canonica, imposta e non normalizzata.** Le dichiarazioni iniziano in colonna 1; le parentesi ridondanti sono un errore; due righe vuote di fila sono un errore. Il parser rifiuta e restituisce un `fix`; non riformatta mai in silenzio. (Oggi tre regole, non l'elenco completo della §3.1 della specifica.)
+- **Struttura canonica, imposta e non normalizzata.** Le parentesi ridondanti sono un errore; un match `?` o un blocco `ext c` non chiuso è un errore; un binding `<-` senza il suo `;` è un errore. Il parser rifiuta e restituisce un `fix`; non riformatta mai in silenzio. Il layout è escluso di proposito: gli spazi non arrivano all'AST, quindi indentazione, righe vuote e colonna in cui inizia una dichiarazione sono tutte libere.
 - **Inferenza Hindley–Milner.** L'algoritmo classico che deduce ogni tipo da come un valore viene usato, invece di farselo dire. Inferenza completa sugli ADT — *tipi di dato algebrici*, cioè un tipo dichiarato come lista fissa di alternative, ciascuna delle quali può portare dati — con payload, record, tuple e liste. Le firme si dichiarano; i corpi si inferiscono.
 - **Pattern matching esaustivo.** Un costruttore mancante è un errore di compilazione che nomina il costruttore e il ramo da aggiungere.
 - **Effetti, propagati non inferiti.** Una funzione è pura finché non è marcata `E!`. Chiamare qualcosa di effettoso da una funzione pura è un errore; il compilatore non ti promuove in silenzio.
-- **Terminazione.** Ogni funzione ricorsiva ha bisogno di una misura che decresce a ogni chiamata. Il compilatore la inferisce quando un parametro decresce sintatticamente, e chiede `%expr` quando non ci riesce.
+- **Terminazione, per il frammento puro.** Ogni funzione ricorsiva *pura* ha bisogno di una misura che decresce a ogni chiamata. Il compilatore la inferisce quando un parametro decresce sintatticamente, e chiede `%expr` quando non ci riesce. La divergenza è un effetto: una funzione `E!` può ricorrere per sempre, ed è così che si scrive un event loop senza che il linguaggio debba farsi crescere un `while`.
 - **Uso affine dei valori posseduti.** *Affine* vuol dire che un valore può essere usato una volta e non due. I parametri `&` sono prestiti — dati in prestito per la durata della chiamata e ancora tuoi dopo; tutto il resto è posseduto e viene consumato dal primo uso. Usarlo due volte è un errore il cui `fix` è `&x` oppure `dup x`. Un aggiornamento `{r with ...}` su un record posseduto in modo unico muta sul posto invece di copiare.
 - **Aritmetica e indicizzazione che possono fallire, dentro il sistema di tipi.** `add_checked`, `sub_checked`, `mul_checked`, `div_checked` e `get_checked` restituiscono `Res Fault a`, quindi overflow, divisione per zero e indice fuori range sono valori su cui devi fare match. (Il `+` nudo resta non controllato; il piano della specifica è che a scaricare questi obblighi sia il solver di prove descritto più sotto.)
 - **Diagnostica pensata prima per la macchina.** `--diag=prose` per te, `--diag=struct` e `--diag=json` per qualunque cosa stia generando il codice.
@@ -132,7 +136,7 @@ Lo stesso contenuto in forma di termine, indicizzato da un percorso semantico st
 
 ```console
 $ vibe check color.vibe --diag=struct
-vibe: ✗ Color.show_c.match match.nonexhaustive ⊨ missing Blue
+✗ Color.show_c.match match.nonexhaustive ⊨ missing Blue
   at: color.vibe:6:3
   msg: this match does not cover Blue
   fix: add `|Blue -> ...`
@@ -169,7 +173,7 @@ Stato onesto di `main` a oggi. Spostare una riga da un elenco al successivo è i
 
 **Funziona**
 
-- lexer; parser con imposizione della forma canonica; AST; risoluzione dei nomi
+- lexer senza offside rule — gli spazi non arrivano all'AST; parser che impone la metà strutturale della canonicità; AST; risoluzione dei nomi
 - type checker Hindley–Milner; ADT; record; pattern matching esaustivo
 - propagazione degli effetti (`E!`)
 - diagnostica strutturata (`--diag=prose|struct|json`) con percorso semantico, witness e `fix` meccanico
@@ -178,9 +182,9 @@ Stato onesto di `main` a oggi. Spostare una riga da un elenco al successivo è i
 - `vibe build --lib`: un archivio statico più quell'header, linkabile da C senza alcuna chiamata di inizializzazione
 - la CLI `vibe`: `check`, `build`, `run`, `view` — da un file `.vibe` a un eseguibile nativo passando per C
 - la superficie per l'agente della §13.3: `vibe patch` (percorso semantico, protetto da hash, rifiutato se il risultato non compila più), `vibe deps` (chiamanti e chiamati), `vibe proof` (obblighi aperti per percorso)
-- controllo di terminazione: misure inferite, e `%expr` quando l'inferenza si arrende
+- controllo di terminazione per il frammento puro: misure inferite, `%expr` quando l'inferenza si arrende, e funzioni `E!` esenti perché la divergenza è un effetto (§6.1)
 - obblighi di refinement generati per la §7.2 e scaricati con `vibe check --prove` (richiede `z3` nel PATH), con gli obblighi dimostrati messi in cache in un `.vibe-proofs` accanto al file, indicizzati dall'hash della domanda posta, e un budget del solver per singolo obbligo (`--prove-timeout=`, 5 secondi per default) che dichiara di arrendersi invece di fingere una confutazione (§16.5)
-- le viste di proiezione: `vibe view` (forma canonica, identica byte per byte su ogni file `.vibe` del repository, commenti inclusi), `--sig-only`, `--explicit`, `--flow`
+- le viste di proiezione: `vibe view` (forma canonica, identica byte per byte su ogni file `.vibe` del repository), `--sig-only`, `--explicit`, `--flow`. I commenti sono ancorati ai token, quindi riformattare un file disposto in qualunque altro modo se li tiene
 - escape analysis per le closure — decidere quali valori sopravvivono alla chiamata che li ha costruiti: una closure il cui valore arriva al risultato possiede le proprie catture, una consumata durante la chiamata le legge
 - blocchi `arena a in ...`: una regione con un nome in cui allochi e che butti via intera, e che rilascia tutto ciò che ha allocato quando finisce
 - rilascio automatico per frame: una funzione che non può passare un puntatore a C rilascia tutto ciò che ha allocato quando ritorna, e il runtime annulla il rilascio quando il risultato è a sua volta allocato sullo heap
@@ -196,6 +200,8 @@ Stato onesto di `main` a oggi. Spostare una riga da un elenco al successivo è i
 **Non ancora**
 
 - allocazione sullo stack per una closure che non sfugge (la §4.6 vuole costo zero; la metà di ownership di quella regola è fatta, la metà allocativa no)
+- una postcondizione sul risultato di una funzione. La §7.1 mette i refinement solo sui parametri, ed è per questo che il `mean &ts` in `main` del programma di riferimento resta un obbligo aperto: il fatto che esclude il caso vuoto sta dentro `load`, e non c'è modo di dirlo (§16.8)
+- il drop implicito — vedi [`docs/static-drop-roadmap.md`](docs/static-drop-roadmap.md) — e un backend nativo che non abbia bisogno di una toolchain C, vedi [`docs/backend-roadmap.md`](docs/backend-roadmap.md)
 
 Su parecchie di queste cose si lavora in parallelo, quindi questo elenco si muove più in fretta della prosa che lo precede.
 
@@ -237,6 +243,7 @@ type Color = Red | Green | Blue
 show_c (k:&Color) : Str =
   ?k |Red   -> dup "red"
      |Green -> dup "green"
+  end
 
 main : E! Unit =
   out (show_c &Red)
@@ -268,18 +275,27 @@ $ ./ledger
 n=3 tot=20.75 avg=6.91667 top=b
 ```
 
-Tutta la CLI sono tre comandi. Niente dashboard, niente directory di plugin, niente in cui fare login:
+Tutta la CLI sono sette comandi, tre dei quali esistono per il generatore e non per te. Niente dashboard, niente directory di plugin, niente in cui fare login:
 
 ```
-vibe check <file.vibe>            type-check only; silent on success
+vibe check <file.vibe>            check only; silent on success
 vibe build <file.vibe> [-o out]   emit C, compile, link
 vibe run   <file.vibe> [-- args]  build and execute
+vibe view  <file.vibe>            print the canonical form, or a projection of it
+vibe deps  <file.vibe>            callers and callees, one line each
+vibe proof <file.vibe>            the open refinement obligations, by semantic path
+vibe patch <file.vibe> <path> [<hash> <node>]
+                                  read a node, or replace it if the hash still matches
 
   --diag=prose|struct|json        diagnostic rendering (default: prose)
+  --prove                         discharge obligations with z3 (§7.3)
+  --prove-timeout=<secs>          solver budget per obligation (default 5)
+  --sig-only|--explicit|--flow    which projection to print (view)
+  --lib                           build a static library and its C header
   --emit-c                        keep the generated C next to the output
 ```
 
-`cargo test` esegue la suite end-to-end: ogni esempio deve passare il type-check, il programma di riferimento deve produrre esattamente l'output qui sopra, un errore di tipo deve riportare `type.mismatch`, un doppio move deve riportare `own.use_after_move`, e un `{r with ...}` su un valore posseduto non deve copiare.
+`cargo test` esegue la suite end-to-end, la descrizione più affidabile di cosa faccia davvero il compilatore: ogni esempio deve passare il check, il programma di riferimento deve produrre esattamente l'output qui sopra, un errore di tipo deve riportare `type.mismatch`, un doppio move deve riportare `own.use_after_move`, un `{r with ...}` posseduto non deve copiare, un frame che non può perdere niente deve rilasciare ciò che ha allocato, e un programma C deve linkare la libreria che `--lib` costruisce.
 
 ---
 
@@ -292,6 +308,7 @@ mod Ledger
 
 ext c "stdio.h"
   puts : &CStr -> E! I32
+end
 
 type Tx  = { sku:Str, qty:U32, price:F64, qty>0, price>0.0 }
 type Err = Bad Str | Num Str | Void
@@ -301,12 +318,15 @@ parse (ln:&Str) : Res Err Tx =
    |[s,q,p] -> ?(parse_u32 q, parse_f64 p)
                 |(Some n, Some v) -> mk (dup s) n v
                 |_                -> Er (Num (dup ln))
+               end
    |_       -> Er (Bad (dup ln))
+  end
 
 mk (s:Str) (n:U32) (v:F64) : Res Err Tx =
   ?(n>0 && v>0.0)
    |True  -> Ok {sku=s, qty=n, price=v}
    |False -> Er (Bad s)
+  end
 
 amt   (t:&Tx)      : F64 = t.price * f64 t.qty
 total (ts:&Vec Tx) : F64 = ts |> map amt |> sum
@@ -315,24 +335,26 @@ mean (ts:&Vec Tx, len ts>0) : F64 = total ts / f64 (len ts)
 top  (ts:&Vec Tx, len ts>0) : &Tx = ts |> max_by amt
 
 load (p:&Str) : E! Res Err (Vec Tx) =
-  txt <- read p
+  txt <- read p ;
   ?txt |> lines |> map parse |> seq
    |Er e  -> Er e
    |Ok [] -> Er Void
    |Ok ts -> Ok ts
+  end
 
 main : E! Unit =
-  r <- load "ledger.csv"
+  r <- load "ledger.csv" ;
   ?r |Er e  -> warn (show e)
      |Ok ts -> out (fmt "n={} tot={} avg={} top={}"
                         (len ts) (total &ts) (mean &ts) (top &ts).sku)
+  end
 
 exp c mean, total
 ```
 
 `mean` e `top` pretendono `len ts > 0` nelle loro firme, e in `main` non lo controlla nessuno. L'intento di progetto è che `load` abbia già escluso `Ok []`, che questo fatto entri nel contesto del solver sul ramo `Ok ts`, e che un controllo ridondante sarebbe a sua volta un errore di ramo morto.
 
-Sia però chiaro perché compila *oggi*: i refinement vengono type-checkati e poi asseriti a runtime, quindi nessuna prova viene eseguita. Questo programma è l'obiettivo che tiene onesta la pipeline — non la prova che la prova esista.
+Sia chiaro quanto di tutto ciò è reale *oggi*: `vibe check --prove` ne scarica la maggior parte, e i due obblighi in `main` restano aperti, perché per dimostrarli `main` dovrebbe sapere cosa il ramo `Ok []` di `load` ha già escluso — una postcondizione, per cui la §7.1 della specifica non ha sintassi. Questo programma è l'obiettivo che tiene onesta la pipeline, e la sezione [Stato](#stato) dice esattamente a che punto è.
 
 Una deviazione dalla specifica pubblicata: la bozza scrive `u32` e `f64` come conversioni di parsing sovraccaricate sulle stringhe. Vibelang non ha overloading — è un principio del linguaggio, non una lacuna dell'implementazione — quindi il parsing di stringa è `parse_u32` / `parse_f64` : `&Str -> Opt U32` / `&Str -> Opt F64`. Il codice qui sopra è la forma corretta.
 
@@ -380,11 +402,14 @@ Il confine C è deliberatamente l'unico punto in cui le garanzie finiscono, e de
 
 ```
 ext c "sqlite3.h" link "sqlite3"
-  sqlite3_open : &CStr -> E! I32
-  sqlite3_exec : (n:Size, n>0) -> E! I32
+  sqlite3_open : &CStr -> Ptr Db -> E! I32
+  sqlite3_exec : Ptr Db -> &CStr -> E! I32
+end
 ```
 
-`link` indica al linker il nome di una libreria; `pkg` ne risolve una tramite `pkg-config`. Ogni firma `ext c` è obbligatoriamente `E!`: il checker non può sapere cosa fa una funzione C, quindi assume il caso peggiore per costruzione. I refinement su una firma `ext` sono *assunti* — verificati sui punti di chiamata Vibelang, e non un passo oltre.
+`link` indica al linker il nome di una libreria; `pkg` ne risolve una tramite `pkg-config`. Ogni firma `ext c` è obbligatoriamente `E!`: il checker non può sapere cosa fa una funzione C, quindi assume il caso peggiore per costruzione.
+
+Una firma `ext` è un *tipo*, non una lista di parametri — a sinistra delle frecce non ci sono nomi, quindi un refinement scritto lì sopra non ha niente a cui riferirsi. La bozza della specifica scriveva `(n:Size, n>0) -> E! I32`; quello non è un tipo, e il parser lo dice. Una precondizione su una funzione C importata resta perciò esprimibile solo sul punto di chiamata Vibelang.
 
 Nella direzione opposta:
 
@@ -417,7 +442,9 @@ La firma esportata oggi passa il valore uniforme di runtime `VbVal`. I qualifica
 
 ## Per approfondire
 
-- [`vibelang-spec.md`](vibelang-spec.md) — la specifica normativa: obiettivi e non-obiettivi (§0), principi normativi (§1), grammatica e regole di canonicità (§3), ownership (§4), effetti (§5), totalità (§6), refinement (§7), interoperabilità C (§10), fasi di implementazione (§15). Attualmente scritta in italiano. Al generatore non dà fastidio.
+- [`vibelang-spec.md`](vibelang-spec.md) — la specifica normativa: obiettivi e non-obiettivi (§0), principi normativi (§1), grammatica e regole di canonicità (§3), ownership (§4), effetti (§5), totalità (§6), refinement (§7), interoperabilità C (§10), fasi di implementazione (§15). Disponibile anche in italiano: [`vibelang-spec.it.md`](vibelang-spec.it.md).
+- [`docs/backend-roadmap.md`](docs/backend-roadmap.md) — il piano per un backend Cranelift accanto a quello C, così che un programma Vibelang puro non abbia bisogno di una toolchain C. Non per questo C viene deprecato: gli header di `exp c` e `--emit-c` sono il motivo per cui resta.
+- [`docs/static-drop-roadmap.md`](docs/static-drop-roadmap.md) — il piano per cancellare il bump allocator. Il checker di ownership sa già dove muore ogni valore; Static Drop è il lavoro di emettere quella conoscenza invece di buttarla via.
 - [`README.md`](README.md) — questa pagina in inglese.
 - `examples/` — il programma di riferimento e un hello world. `tests/` — la suite end-to-end, che è anche la descrizione più affidabile di cosa faccia davvero il compilatore.
 
