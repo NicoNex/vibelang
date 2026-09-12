@@ -136,7 +136,7 @@ The same content as a term, keyed by a stable semantic path instead of a line nu
 
 ```console
 $ vibe check color.vibe --diag=struct
-vibe: ✗ Color.show_c.match match.nonexhaustive ⊨ missing Blue
+✗ Color.show_c.match match.nonexhaustive ⊨ missing Blue
   at: color.vibe:6:3
   msg: this match does not cover Blue
   fix: add `|Blue -> ...`
@@ -241,6 +241,7 @@ type Color = Red | Green | Blue
 show_c (k:&Color) : Str =
   ?k |Red   -> dup "red"
      |Green -> dup "green"
+  end
 
 main : E! Unit =
   out (show_c &Red)
@@ -272,18 +273,27 @@ $ ./ledger
 n=3 tot=20.75 avg=6.91667 top=b
 ```
 
-The whole CLI is three commands. No dashboard, no plugin directory, nothing to log into:
+The whole CLI is seven commands, three of which exist for the generator rather than for you. No dashboard, no plugin directory, nothing to log into:
 
 ```
-vibe check <file.vibe>            type-check only; silent on success
+vibe check <file.vibe>            check only; silent on success
 vibe build <file.vibe> [-o out]   emit C, compile, link
 vibe run   <file.vibe> [-- args]  build and execute
+vibe view  <file.vibe>            print the canonical form, or a projection of it
+vibe deps  <file.vibe>            callers and callees, one line each
+vibe proof <file.vibe>            the open refinement obligations, by semantic path
+vibe patch <file.vibe> <path> [<hash> <node>]
+                                  read a node, or replace it if the hash still matches
 
   --diag=prose|struct|json        diagnostic rendering (default: prose)
+  --prove                         discharge obligations with z3 (§7.3)
+  --prove-timeout=<secs>          solver budget per obligation (default 5)
+  --sig-only|--explicit|--flow    which projection to print (view)
+  --lib                           build a static library and its C header
   --emit-c                        keep the generated C next to the output
 ```
 
-`cargo test` runs the end-to-end suite: every example must type-check, the reference program must produce exactly the output above, a type error must report `type.mismatch`, a double move must report `own.use_after_move`, and an owned `{r with ...}` must not copy.
+`cargo test` runs the end-to-end suite — 93 tests, and they are the most reliable description of what the compiler actually does: every example must check, the reference program must produce exactly the output above, a type error must report `type.mismatch`, a double move must report `own.use_after_move`, an owned `{r with ...}` must not copy, a frame that cannot leak must release what it allocated, and a C program must link the library `--lib` builds.
 
 ---
 
