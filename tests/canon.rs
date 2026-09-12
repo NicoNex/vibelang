@@ -96,9 +96,9 @@ fn the_whole_corpus_checks() {
             }
             let name = p.file_name().expect("a name").to_string_lossy().to_string();
             // these exist to be rejected, for reasons of their own
-            if ["bad.vibe", "blank.vibe", "move.vibe", "capture.vibe", "move_let.vibe",
+            if ["bad.vibe", "move.vibe", "capture.vibe", "move_let.vibe",
                 "move_pat.vibe", "refine_bad.vibe", "total_growing.vibe",
-                "total_no_measure.vibe", "total_arena.vibe"]
+                "total_no_measure.vibe", "total_arena.vibe", "diverge.vibe"]
                 .contains(&name.as_str())
             {
                 continue;

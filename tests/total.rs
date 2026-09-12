@@ -51,3 +51,21 @@ fn recursion_inside_an_arena_is_still_recursion() {
     assert!(!ok, "a recursive call inside an `arena` block must still need a measure");
     assert!(out.contains("total.no_measure"), "expected total.no_measure, got:\n{out}");
 }
+
+/// Divergence is an effect (spec §6.1). A function whose result is `E!` may
+/// recurse for ever; a pure one may not, because every static guarantee in the
+/// language rests on the pure fragment terminating.
+#[test]
+fn an_effectful_function_may_never_return() {
+    let (ok, out) = check("tests/diverge_ok.vibe");
+    assert!(ok, "an event loop is not a bug:\n{out}");
+}
+
+#[test]
+fn a_pure_function_may_not() {
+    let (ok, out) = check("tests/diverge.vibe");
+    assert!(!ok, "{out}");
+    assert!(out.contains("total.no_measure"), "{out}");
+    assert!(out.contains("spin_pure"), "the pure one is the one to blame:\n{out}");
+    assert!(!out.contains("Diverge.serve"), "the effectful one must not be reported:\n{out}");
+}

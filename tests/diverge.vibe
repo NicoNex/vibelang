@@ -1,0 +1,11 @@
+mod Diverge
+
+;; An event loop is supposed not to terminate. The signature already says this
+;; function is effectful, and divergence is one of the effects (spec §6.1), so
+;; no decreasing measure is required and none is inferred.
+serve (port:U16) : E! Unit =
+  out (show port) ;
+  serve port
+
+;; A pure function has no such licence: the static reasoning rests on purity.
+spin_pure (n:U64) : U64 = spin_pure n

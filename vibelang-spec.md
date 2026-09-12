@@ -63,6 +63,7 @@ Ogni simbolo è scelto per essere un token singolo nei tokenizer comuni e per no
 | `&` | prestito (borrow) | Rust, C |
 | `%` | misura di terminazione | aritmetico, mai strutturale in ML |
 | `<-` | bind monadico in blocco effettoso | Haskell, Rust |
+| `;` | sequenziamento: termina un bind, concatena due espressioni | C, Rust |
 | `{ }` | letterale di record e update | universale |
 | `[ ]` | letterale di lista e pattern su lista | universale |
 | `( )` | raggruppamento, tupla, firma parametro | universale |
@@ -78,7 +79,7 @@ Commenti: `;;` fino a fine riga. Scelto perché non collide con nessun commento 
 L'insieme completo. Ogni keyword è una parola inglese comune (prior alto, 1-2 token).
 
 ```
-mod  ext  exp  type  ghost  let  in  E!  own  ref
+mod  ext  exp  type  ghost  let  in  end  E!  own  ref  arena  with
 True False
 ```
 
@@ -94,7 +95,21 @@ Nota: `own` e `ref` compaiono solo nelle firme `exp c`. Dentro il linguaggio l'o
 
 ## 3. Grammatica
 
-EBNF, forma canonica. L'indentazione è significativa (offside rule).
+EBNF. **L'indentazione non è significativa**: nessuna offside rule, nessun
+token `INDENT`/`DEDENT`, nessun conteggio di spazi. Un generatore che sbaglia a
+contare gli spazi deve comunque produrre un programma che compila, perché un
+errore di parsing costa un retry intero e i retry sono la metrica contro cui
+questo linguaggio è ottimizzato.
+
+I costrutti multi-ramo si chiudono con `end`, il sequenziamento monadico usa
+`;`. Resta un solo `NL` significativo, e non è una regola di conteggio: un a
+capo termina una dichiarazione di primo livello. Senza di esso la
+giustapposizione inghiotte il nome della dichiarazione successiva, e
+`f : U64 = 1` seguito da `g : U64 = 2` si analizza come `1 g` — un misparse
+silenzioso, non un errore. Vale solo fuori da ogni parentesi e da ogni `end`,
+solo quando i token già formano un'espressione, e solo se il token successivo
+potrebbe iniziarne una: un a capo prima di un operatore binario, prima di un
+`|` in una dichiarazione di tipo o prima di una misura `%` è una continuazione.
 
 ```ebnf
 module      = "mod" ModName NL { decl } ;
@@ -119,9 +134,10 @@ ghostdecl   = "ghost" fundecl ;
 expr        = app | match | bind | letexpr | lambda | literal | record
             | expr binop expr | expr "|>" expr ;
 app         = atom { atom } ;           (* giustapposizione, curried *)
-match       = "?" expr NL INDENT arm { arm } DEDENT ;
+match       = "?" expr arm { arm } "end" ;
 arm         = "|" pattern "->" expr ;
-bind        = name "<-" expr NL expr ;  (* solo in contesto E! *)
+bind        = name "<-" expr ";" expr ; (* solo in contesto E! *)
+seq         = expr ";" expr ;           (* `a ; b` è `_ <- a ; b` *)
 letexpr     = "let" name "=" expr "in" expr ;
 lambda      = "\\" name { name } "->" expr ;
 
@@ -136,22 +152,31 @@ type        = TypeName { type }
             | "E!" type
             | "(" type { "," type } ")" ;
 
-extblock    = "ext" "c" StringLit NL INDENT { extsig } DEDENT ;
-extsig      = name ":" type [ "," refine ] ;
+extblock    = "ext" "c" StringLit { extsig } "end" ;
+extsig      = name ":" type [ "," refine ] NL ;
 expdecl     = "exp" "c" name { "," name } ;
 ```
 
 ### 3.1 Regole di canonicità
 
+La canonicità riguarda la **struttura**, non il layout. Il whitespace non
+raggiunge l'AST: indentazione, righe vuote e colonna di partenza di una
+dichiarazione sono liberi. Costringere il generatore a contarli produceva
+errori di parsing su programmi per il resto corretti, cioè esattamente il costo
+che P5 esiste per evitare.
+
 Il parser **rifiuta**, non normalizza:
 
-- indentazione diversa da 2 spazi per livello;
 - parentesi ridondanti;
-- spazio diverso da uno singolo attorno agli operatori binari;
 - `let ... in` dove un binding top-level sarebbe equivalente;
-- riga vuota multipla.
+- un `match` o un blocco `ext c` non chiuso da `end`;
+- un binding `<-` non terminato da `;`.
 
-Motivazione: se il parser normalizzasse, esisterebbero più forme valide per lo stesso programma, violando P1 e introducendo punti di scelta per il generatore.
+Motivazione invariata: se il parser normalizzasse la struttura, esisterebbero
+più forme valide per lo stesso programma, violando P1 e introducendo punti di
+scelta per il generatore. Il layout non è un punto di scelta, perché non
+cambia il programma: `vibe view` ne stampa uno, e nessuno è obbligato a
+scriverlo a mano.
 
 ---
 
@@ -230,7 +255,32 @@ La v0.1 ha un solo effetto (`E!`, indistinto). La suddivisione (`IO`, `Alloc`, `
 
 ### 6.1 Requisito
 
-Ogni funzione deve terminare. Ogni funzione ricorsiva richiede una misura decrescente su un ordine ben fondato.
+**La divergenza è un effetto.** Da questo discendono due regole, e nessun
+costrutto nuovo:
+
+1. **Le funzioni pure devono essere totali.** Ogni funzione pura ricorsiva
+   richiede una misura decrescente su un ordine ben fondato, inferita (§6.2) o
+   scritta con `%`. È ciò su cui poggia tutto il ragionamento statico: un
+   solver che ragiona su una funzione che potrebbe non terminare non sta
+   dimostrando niente.
+2. **Le funzioni effettose (`E!`) sono esentate.** Possono omettere la misura e
+   ricorrere all'infinito. Un event loop o un server sono progettati per non
+   terminare, e la firma lo dichiara già: la non-terminazione è uno degli
+   effetti che `E!` annuncia.
+
+L'alternativa era aggiungere `while` o `loop`, cioè un costrutto in più e un
+punto di scelta in più per il generatore — esattamente ciò che l'Obiettivo 1
+vieta. La ricorsione in coda che già esiste basta:
+
+```
+serve (port:U16) : E! Unit =
+  req <- wait_request port ;
+  handle_request req ;
+  serve port    ;; ricorsione infinita ammessa: la funzione è E!
+```
+
+Il confine è netto e leggibile nella firma. `serve` non termina e lo dice;
+`amt (t:&Tx) : F64` termina e lo dice.
 
 ### 6.2 Inferenza
 
@@ -240,6 +290,7 @@ La misura è **inferita** quando esiste un parametro scalare che decresce sintat
 go (k:Nat) (a b:U64) : U64 =
   ?k |0 -> a
      |_ -> go (k-1) b (a+b)        ;; misura inferita: k
+  end
 ```
 
 Quando l'inferenza fallisce, il compilatore la richiede e si scrive con `%`:
@@ -247,7 +298,9 @@ Quando l'inferenza fallisce, il compilatore la richiede e si scrive con `%`:
 ```
 sum_to (k:Nat) (n:Nat, k<=n) (acc:U64) : U64 =
   ?k==n |True  -> acc
-        |False -> sum_to (k+1) n (acc+k) %(n-k)
+        |False -> sum_to (k+1) n (acc+k)
+  end
+  %(n-k)
 ```
 
 ### 6.3 Solo misure decrescenti
@@ -303,6 +356,7 @@ ghost fib_spec (n:Nat) : Nat =
   ?n |0 -> 0
      |1 -> 1
      |k -> fib_spec (k-1) + fib_spec (k-2)
+  end
 ```
 
 ### 7.5 Via d'uscita
@@ -326,6 +380,7 @@ get_checked : &Vec a -> Size -> Res OutOfBounds &a
 ?scrutinee
  |pat1 -> expr1
  |pat2 -> expr2
+end
 ```
 
 ### 8.2 Esaustività
@@ -341,6 +396,7 @@ L'informazione guadagnata da un ramo entra nel contesto del solver per quel ramo
  |Er e  -> warn (show e)
  |Ok [] -> Er Void
  |Ok ts -> mean &ts        ;; len ts > 0 già provato: i rami Er e Ok [] sono esclusi
+end
 ```
 
 Nessun controllo esplicito di lista vuota, e `mean` è comunque sicura.
@@ -495,6 +551,7 @@ go k a b =
    |0 -> a
    |_ -> go (k-1) b (a+b)        ;; |- k-1 : Nat   (k != 0)
                                  ;; |- a+b < 2^64  [inv, da n<=93]
+  end
   %k                             ;; |- k-1 < k     [inferita]
 ```
 
@@ -600,6 +657,7 @@ mod Ledger
 
 ext c "stdio.h"
   puts : &CStr -> E! I32
+end
 
 type Tx  = { sku:Str, qty:U32, price:F64, qty>0, price>0.0 }
 type Err = Bad Str | Num Str | Void
@@ -609,12 +667,15 @@ parse (ln:&Str) : Res Err Tx =
    |[s,q,p] -> ?(parse_u32 q, parse_f64 p)
                 |(Some n, Some v) -> mk (dup s) n v
                 |_                -> Er (Num (dup ln))
+               end
    |_       -> Er (Bad (dup ln))
+  end
 
 mk (s:Str) (n:U32) (v:F64) : Res Err Tx =
   ?(n>0 && v>0.0)
    |True  -> Ok {sku=s, qty=n, price=v}
    |False -> Er (Bad s)
+  end
 
 amt   (t:&Tx)      : F64 = t.price * f64 t.qty
 total (ts:&Vec Tx) : F64 = ts |> map amt |> sum
@@ -623,17 +684,19 @@ mean (ts:&Vec Tx, len ts>0) : F64 = total ts / f64 (len ts)
 top  (ts:&Vec Tx, len ts>0) : &Tx = ts |> max_by amt
 
 load (p:&Str) : E! Res Err (Vec Tx) =
-  txt <- read p
+  txt <- read p ;
   ?txt |> lines |> map parse |> seq
    |Er e  -> Er e
    |Ok [] -> Er Void
    |Ok ts -> Ok ts
+  end
 
 main : E! Unit =
-  r <- load "ledger.csv"
+  r <- load "ledger.csv" ;
   ?r |Er e  -> warn (show e)
      |Ok ts -> out (fmt "n={} tot={} avg={} top={}"
                         (len ts) (total &ts) (mean &ts) (top &ts).sku)
+  end
 
 exp c mean, total
 ```

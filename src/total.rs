@@ -1,7 +1,13 @@
-//! Termination (spec §6). Every recursive function needs a measure that
+//! Termination (spec §6). A *pure* recursive function needs a measure that
 //! decreases on a well-founded order at each recursive call. The measure is
 //! inferred when a parameter decreases syntactically everywhere (§6.2), and
 //! otherwise written by hand with `%`.
+//!
+//! Divergence is an effect. A function marked `E!` may recurse for ever, and is
+//! exempt: an event loop or a server is supposed not to terminate, and the
+//! alternative was a `while` construct, which is one more thing for a generator
+//! to choose wrong. Purity is what the static reasoning rests on, and purity is
+//! exactly what this still enforces.
 //!
 //! ponytail: the order is a single linear expression over the parameters, not a
 //! lexicographic tuple (§6.4). A mutually recursive group is accepted when every
@@ -12,6 +18,19 @@
 use crate::ast::*;
 use crate::diag::{Diag, Span};
 use std::collections::HashMap;
+
+/// Whether this function is allowed not to terminate: its declared result is
+/// effectful, so divergence is among the effects it announces.
+fn diverges(f: &FunDecl) -> bool {
+    fn effectful(t: &Ty) -> bool {
+        match t {
+            Ty::Eff(_) => true,
+            Ty::Fun(_, r) => effectful(r),
+            _ => false,
+        }
+    }
+    f.ret.as_ref().is_some_and(effectful)
+}
 
 pub fn check(m: &Module) -> Vec<Diag> {
     let funs: Vec<&FunDecl> = m.funs().collect();
@@ -45,6 +64,9 @@ pub fn check(m: &Module) -> Vec<Diag> {
     for i in 0..n {
         if !reach[i][i] {
             continue; // not recursive: nothing to prove
+        }
+        if diverges(funs[i]) {
+            continue; // effectful: non-termination is one of the effects (§6.1)
         }
         let f = funs[i];
         let path = format!("{}.{}", f.home, f.name);

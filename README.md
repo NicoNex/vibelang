@@ -20,7 +20,9 @@ parse (ln:&Str) : Res Err Tx =
    |[s,q,p] -> ?(parse_u32 q, parse_f64 p)
                 |(Some n, Some v) -> mk (dup s) n v
                 |_                -> Er (Num (dup ln))
+               end
    |_       -> Er (Bad (dup ln))
+  end
 ```
 
 This is not C with the sugar removed. It is the lowest-variance syntax possible for a statistical generator, bolted to a compiler that turns a `.vibe` file into a native executable through C. That compiler exists, and it runs:
@@ -44,13 +46,15 @@ A **programming language** is the notation instructions are written in. A **comp
 
 **The premise.** Every language you have heard of was designed around a person writing it — decades of research into which notation humans find readable, memorable, forgiving. Vibelang assumes the first draft is written by a machine, and read by a person who then approves it or sends it back. Every choice on this page is that one inversion, followed to the end.
 
-**One way to write each thing.** Most languages let you spell the same idea three or four ways, and taste picks between them. A generator has no taste; it has a probability distribution. Two equally valid spellings is a coin flip, and a coin flip in the middle of a program is a bug waiting for its turn. So the parser rejects the variants instead of accepting them and tidying up afterwards: declarations start in column 1, parentheses you did not need are an error, a second consecutive blank line is an error. Other languages ship a formatter, which is a tool for forgiving you. Vibelang's formatter is the error message.
+**One way to write each thing.** Most languages let you spell the same idea three or four ways, and taste picks between them. A generator has no taste; it has a probability distribution. Two equally valid spellings is a coin flip, and a coin flip in the middle of a program is a bug waiting for its turn. So the parser rejects the variants instead of accepting them and tidying up afterwards: parentheses you did not need are an error, a match that is not closed is an error. Other languages ship a formatter, which is a tool for forgiving you. Vibelang's formatter is the error message.
+
+The one thing the parser is *not* strict about is whitespace, and that is the same argument running the other way. Indentation is not structure here: a match ends at `end`, a binding ends at `;`, and any layout that puts the tokens in that order is the same program. A model that miscounts spaces has not made a mistake about the program, so it should not pay a retry for one.
 
 **Four things it will not compile.** In plain terms:
 
 - **A choice with a case missing.** The code handles red and green; blue also exists. Most languages will let that ship, and fall over the first time blue turns up. Vibelang refuses the file and names blue.
 - **Using a value after you gave it away.** Every value has exactly one owner. Pass it on and you no longer hold it; using it again is selling the same car twice, and the compiler is standing there at the second sale.
-- **A loop that might never stop.** Anything that calls itself has to exhibit some quantity that strictly shrinks at every call, so the bottom is reachable. No shrinking quantity, no program.
+- **A loop that might never stop.** Anything *pure* that calls itself has to exhibit some quantity that strictly shrinks at every call, so the bottom is reachable. A function marked as touching the outside world is exempt, because a server is supposed to run for ever — the signature says which kind you are looking at.
 - **Dividing by something that might be zero.** The checked operations hand back a result that is either a number or a failure, and there is no way to look away from the failure.
 
 The load-bearing word is **before**. None of these are run-time checks that fire once the bad case finally arrives. They are settled while nothing is running, about every run that could ever happen. The industry default is to learn the same facts at three in the morning, from a customer, or from neither — and a test only covers the cases somebody thought to write down.
@@ -90,11 +94,11 @@ Human readability is not ignored. It is a *derived* goal, to be served by projec
 
 This is the section where a language README usually lists adjectives. Here it is a list of things that will stop you, all of them checked by the code in `src/` and covered by `cargo test`.
 
-- **Canonical form, enforced not normalized.** Declarations start in column 1; redundant parentheses are an error; two blank lines in a row are an error. The parser rejects and hands back a `fix`; it never quietly reformats. (Three rules today, not the spec's full §3.1 list.)
+- **Canonical structure, enforced not normalized.** Redundant parentheses are an error; an unclosed `?` match or `ext c` block is an error; a `<-` binding without its `;` is an error. The parser rejects and hands back a `fix`; it never quietly reformats. Layout is deliberately excluded: whitespace does not reach the AST, so indentation, blank lines and the column a declaration starts in are all free.
 - **Hindley–Milner inference.** The classical algorithm that deduces every type from how a value is used instead of being told. Full inference over ADTs — *algebraic data types*, a type declared as a fixed list of alternatives, each allowed to carry data — with payloads, records, tuples and lists. Signatures are declared; bodies are inferred.
 - **Exhaustive pattern matching.** A missing constructor is a compile error that names the constructor and the arm to add.
 - **Effects, propagated not inferred.** A function is pure until it is marked `E!`. Calling something effectful from a pure function is an error; the compiler will not quietly promote you.
-- **Termination.** Every recursive function needs a measure that decreases at each call. The compiler infers it when a parameter decreases syntactically, and asks for `%expr` when it cannot.
+- **Termination, for the pure fragment.** Every recursive *pure* function needs a measure that decreases at each call. The compiler infers it when a parameter decreases syntactically, and asks for `%expr` when it cannot. Divergence is an effect: an `E!` function may recurse for ever, which is how an event loop is written without the language growing a `while`.
 - **Affine use of owned values.** *Affine* means a value may be used once and not twice. `&` parameters are borrows — lent for the duration of the call and still yours afterwards; everything else is owned and consumed by its first use. Using it twice is an error whose `fix` is `&x` or `dup x`. A `{r with ...}` update on a uniquely owned record mutates in place instead of copying.
 - **Arithmetic and indexing that can fail in the type system.** `add_checked`, `sub_checked`, `mul_checked`, `div_checked` and `get_checked` return `Res Fault a`, so overflow, division by zero and an out-of-range index are values you have to match on. (Bare `+` is still unchecked; the spec's plan is for the proof solver described below to discharge these obligations instead.)
 - **Machine-first diagnostics.** `--diag=prose` for you, `--diag=struct` and `--diag=json` for whatever is generating the code.
@@ -178,7 +182,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - `vibe build --lib`: a static archive plus that header, linkable from C with no initialisation call
 - the `vibe` CLI: `check`, `build`, `run`, `view` — a `.vibe` file to a native executable via C
 - the agent surface of §13.3: `vibe patch` (semantic path, hash-guarded, refused unless the result still compiles), `vibe deps` (callers and callees), `vibe proof` (open obligations by path)
-- termination checking: inferred measures, and `%expr` when inference gives up
+- termination checking for the pure fragment: inferred measures, `%expr` when inference gives up, and `E!` functions exempt because divergence is an effect (§6.1)
 - refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH), with proved obligations cached in a sibling `.vibe-proofs` by the hash of the question asked, and a per-obligation solver budget (`--prove-timeout=`, 5 seconds by default) that reports giving up instead of pretending to refute (§16.5)
 - the projection views: `vibe view` (canonical form, byte-identical on every `.vibe` file in the repository, comments included), `--sig-only`, `--explicit`, `--flow`
 - escape analysis for closures — deciding which values outlive the call that built them: a closure whose value reaches the result owns its captures, one consumed during the call reads them
@@ -292,6 +296,7 @@ mod Ledger
 
 ext c "stdio.h"
   puts : &CStr -> E! I32
+end
 
 type Tx  = { sku:Str, qty:U32, price:F64, qty>0, price>0.0 }
 type Err = Bad Str | Num Str | Void
@@ -301,12 +306,15 @@ parse (ln:&Str) : Res Err Tx =
    |[s,q,p] -> ?(parse_u32 q, parse_f64 p)
                 |(Some n, Some v) -> mk (dup s) n v
                 |_                -> Er (Num (dup ln))
+               end
    |_       -> Er (Bad (dup ln))
+  end
 
 mk (s:Str) (n:U32) (v:F64) : Res Err Tx =
   ?(n>0 && v>0.0)
    |True  -> Ok {sku=s, qty=n, price=v}
    |False -> Er (Bad s)
+  end
 
 amt   (t:&Tx)      : F64 = t.price * f64 t.qty
 total (ts:&Vec Tx) : F64 = ts |> map amt |> sum
@@ -315,24 +323,26 @@ mean (ts:&Vec Tx, len ts>0) : F64 = total ts / f64 (len ts)
 top  (ts:&Vec Tx, len ts>0) : &Tx = ts |> max_by amt
 
 load (p:&Str) : E! Res Err (Vec Tx) =
-  txt <- read p
+  txt <- read p ;
   ?txt |> lines |> map parse |> seq
    |Er e  -> Er e
    |Ok [] -> Er Void
    |Ok ts -> Ok ts
+  end
 
 main : E! Unit =
-  r <- load "ledger.csv"
+  r <- load "ledger.csv" ;
   ?r |Er e  -> warn (show e)
      |Ok ts -> out (fmt "n={} tot={} avg={} top={}"
                         (len ts) (total &ts) (mean &ts) (top &ts).sku)
+  end
 
 exp c mean, total
 ```
 
 `mean` and `top` demand `len ts > 0` in their signatures, and nothing in `main` checks it. The design intent is that `load` has already ruled out `Ok []`, that this fact enters the solver's context on the `Ok ts` branch, and that a redundant check would itself be a dead-branch error.
 
-Be clear about why it compiles *today*, though: refinements are type-checked and then asserted at run time, so no proof is being performed. This program is the target that keeps the pipeline honest — not evidence that the proof exists.
+Be clear about how much of that is real *today*: `vibe check --prove` discharges most of it, and the two obligations in `main` are still open, because proving them needs `main` to know what `load`'s `Ok []` branch already ruled out — a postcondition, which spec §7.1 has no syntax for. This program is the target that keeps the pipeline honest, and the [Status](#status) section says exactly where it stands.
 
 One deviation from the published spec: the draft writes `u32` and `f64` as parsing conversions overloaded on strings. Vibelang has no overloading — a language principle, not an implementation gap — so string parsing is `parse_u32` / `parse_f64` : `&Str -> Opt U32` / `&Str -> Opt F64`. The code above is the corrected form.
 
@@ -382,6 +392,7 @@ The C boundary is deliberately the one place where the guarantees stop, and it h
 ext c "sqlite3.h" link "sqlite3"
   sqlite3_open : &CStr -> E! I32
   sqlite3_exec : (n:Size, n>0) -> E! I32
+end
 ```
 
 `link` names a library for the linker; `pkg` resolves one through `pkg-config`. Every `ext c` signature is mandatorily `E!`: the checker cannot know what a C function does, so it assumes the worst by construction. Refinements on an `ext` signature are *assumed* — checked at the Vibelang call sites, and not one step beyond.

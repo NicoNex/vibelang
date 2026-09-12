@@ -1,0 +1,6 @@
+mod DivergeOk
+
+;; effectful and recursive, with nothing that decreases
+serve (port:U16) : E! Unit =
+  out (show port) ;
+  serve port
