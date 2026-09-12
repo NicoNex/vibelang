@@ -137,3 +137,25 @@ fn a_library_with_no_exports_is_refused() {
     assert!(!ok, "a library with no `exp c` has no symbols:\n{out}");
     assert!(out.contains("no `exp c`"), "{out}");
 }
+
+/// An `ext c` symbol used as a value, not called directly. The compiler used to
+/// emit C that referenced a wrapper it never defined, so the error arrived from
+/// `cc`, about a generated file, which is the one place a compiler error must
+/// never come from.
+#[test]
+fn an_ext_symbol_can_be_passed_as_a_value() {
+    let dir = std::env::temp_dir().join("vibe-extvalue-test");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let exe = dir.join("ext_value");
+    let (ok, out) = vibe(&[
+        "build",
+        "--emit-c",
+        "tests/ext_value.vibe",
+        "-o",
+        exe.to_str().expect("utf-8"),
+    ]);
+    assert!(ok, "the generated C must compile:\n{out}");
+    let c = std::fs::read_to_string(exe.with_extension("c")).expect("the emitted C");
+    assert!(c.contains("static VbVal vbe_perror("), "the wrapper must be defined:\n{c}");
+    assert!(c.contains("perror(vb_as_cstr(a[0]))"), "and it must call the C function:\n{c}");
+}

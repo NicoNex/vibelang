@@ -14,3 +14,5 @@
 /tests/dangle
 /tests/taint
 /tests/ident_c
+/tests/ext_value
+/tests/diverge

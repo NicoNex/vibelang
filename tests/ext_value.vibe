@@ -1,0 +1,13 @@
+mod ExtValue
+
+;; `perror` is passed to `each` rather than called, so it needs a closure form.
+;; Without one the emitted C references a `vbe_perror` nothing defines, and the
+;; failure surfaces as a `cc` error about a generated file (spec §10.1).
+ext c "stdio.h"
+  perror : &CStr -> E! Unit
+end
+
+all_ (xs:&Vec CStr) : E! Unit = each perror xs
+
+main : E! Unit =
+  all_ &(single (to_cstr "vibe"))

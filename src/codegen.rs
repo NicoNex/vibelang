@@ -271,6 +271,12 @@ impl<'a> Gen<'a> {
                     cname(&n),
                     body
                 ));
+            } else if let Some(sig) = self.ck.ext.get(&n).cloned() {
+                // An `ext c` symbol used as a value, not called directly: `each
+                // perror xs`. Without this the emitted C references a `vbe_`
+                // that nothing defines, and the failure surfaces as a `cc`
+                // error about the generated file (spec §10.1).
+                o.push_str(&self.ext_wrapper(&sig));
             } else if let Some(ci) = self.ck.data.ctors.get(&n) {
                 let args: Vec<String> = (0..ci.args.len()).map(|i| format!("a[{}]", i)).collect();
                 o.push_str(&format!(
@@ -889,6 +895,52 @@ impl<'a> Gen<'a> {
         }
         let _ = span;
         cur
+    }
+
+    /// The closure form of an `ext c` symbol: unbox the arguments, call the C
+    /// function, box what comes back. Same boundary rules as a direct call —
+    /// a type that cannot cross it is an error here too, not a wrapper that
+    /// silently does the wrong thing.
+    fn ext_wrapper(&mut self, sig: &ExtSig) -> String {
+        let (ps, ret) = flatten_fn(&sig.ty);
+        let mut cargs = Vec::new();
+        for (i, t) in ps.iter().enumerate() {
+            match c_unbox(t, &format!("a[{i}]")) {
+                Some(v) => cargs.push(v),
+                None => {
+                    self.errors.push(
+                        Diag::error(
+                            sig.span,
+                            "ffi.type",
+                            &format!("`{}` cannot cross the C boundary", ty_show(t)),
+                        )
+                        .with_fix("use a scalar, Bool, Char, Str, CStr or `Ptr a` at the C boundary"),
+                    );
+                    cargs.push("0".into());
+                }
+            }
+        }
+        let call = format!("{}({})", sig.symbol, cargs.join(", "));
+        let inner = strip_eff(&ret);
+        let body = if is_unit(&inner) {
+            format!("{call}; return vb_unit();")
+        } else {
+            match c_box(&inner, &call) {
+                Some(b) => format!("return {b};"),
+                None => {
+                    self.errors.push(
+                        Diag::error(
+                            sig.span,
+                            "ffi.type",
+                            &format!("`{}` cannot come back from C", ty_show(&inner)),
+                        )
+                        .with_fix("return a scalar, Bool, Char, CStr or `Ptr a`"),
+                    );
+                    "return vb_unit();".to_string()
+                }
+            }
+        };
+        format!("static VbVal vbe_{}(VbVal *a) {{ (void)a; {} }}\n", cname(&sig.name), body)
     }
 
     fn ext_call(&mut self, sig: &ExtSig, args: &[Expr], out: &mut String) -> String {
