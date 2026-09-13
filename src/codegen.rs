@@ -30,7 +30,6 @@ pub struct Gen<'a> {
     releasable: HashSet<String>,
 }
 
-type G<X> = Result<X, Diag>;
 
 /// name -> (arity, C call template). `$0`..`$n` are the arguments, `$P` the
 /// semantic path used in run-time obligation messages.
@@ -330,7 +329,6 @@ impl<'a> Gen<'a> {
         self.tail(&f.body, &mut body);
         self.pop_scope();
 
-        let uses_params = if params.is_empty() { String::new() } else { String::new() };
         // Nothing the body allocates outlives it unless it escapes, and the
         // only escape the runtime cannot see is a pointer handed to C, which
         // `escape::releasable` has already ruled out (spec §4.6).
@@ -340,12 +338,11 @@ impl<'a> Gen<'a> {
             ("", "")
         };
         format!(
-            "{}static VbVal vbf_{}(VbVal *a) {{\n  (void)a;\n{}{}{}{}  VbVal vbret = vb_unit();\n  for (;;) {{\n{}  }}\n{}  return vbret;\n}}\n\n",
+            "{}static VbVal vbf_{}(VbVal *a) {{\n  (void)a;\n{}{}{}  VbVal vbret = vb_unit();\n  for (;;) {{\n{}  }}\n{}  return vbret;\n}}\n\n",
             self.line(f.span),
             cname(&f.name),
             mark,
             head,
-            uses_params,
             pre,
             indent(&body, 4),
             release

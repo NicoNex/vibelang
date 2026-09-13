@@ -21,9 +21,6 @@ impl Ty {
     pub fn unit() -> Ty {
         Ty::Con("Unit".into(), vec![])
     }
-    pub fn con(n: &str) -> Ty {
-        Ty::Con(n.into(), vec![])
-    }
 }
 
 #[derive(Clone, Debug)]

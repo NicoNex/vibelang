@@ -14,7 +14,6 @@ type R<X> = Result<X, Diag>;
 pub struct Checked {
     pub data: Data,
     pub ext: HashMap<String, ExtSig>,
-    pub ext_block_of: HashMap<String, usize>,
     pub sigs: HashMap<String, Scheme>,
     /// Which `let`, `<-` and pattern binders hold an affine value, keyed by the
     /// span of the expression they scope over and their name. Ownership has no
@@ -36,7 +35,6 @@ pub fn prelude_module() -> Module {
 pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
     let mut c = Checker::new();
     let mut ext: HashMap<String, ExtSig> = HashMap::new();
-    let mut ext_block_of: HashMap<String, usize> = HashMap::new();
 
     // 1. Data declarations: prelude first, then the module.
     let prelude = prelude_module();
@@ -57,7 +55,7 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
     for (name, sig) in PRELUDE_SIGS {
         let ty = parse_type(sig);
         let mut vars = HashMap::new();
-        let t = c.from_ty(&ty, &mut vars);
+        let t = c.lower_ty(&ty, &mut vars);
         let s = c.generalise(&t);
         c.sigs.insert(name.to_string(), s);
     }
@@ -68,10 +66,10 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
         let info = c.data.ctors[&name].clone();
         let mut vars: HashMap<String, T> = HashMap::new();
         let owner_args: Vec<T> =
-            info.params.iter().map(|p| c.from_ty(&Ty::Var(p.clone()), &mut vars)).collect();
+            info.params.iter().map(|p| c.lower_ty(&Ty::Var(p.clone()), &mut vars)).collect();
         let mut ty = T::Con(info.owner.clone(), owner_args);
         for a in info.args.iter().rev() {
-            let at = c.from_ty(a, &mut vars);
+            let at = c.lower_ty(a, &mut vars);
             ty = T::Fun(Box::new(at), Box::new(ty));
         }
         let s = c.generalise(&ty);
@@ -79,10 +77,10 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
     }
 
     // 4. `ext c` signatures. Everything crossing the C boundary is `E!` (spec §5.2).
-    for (bi, block) in m.exts().enumerate() {
+    for block in m.exts() {
         for sig in &block.sigs {
             let mut vars = HashMap::new();
-            let t = c.from_ty(&sig.ty, &mut vars);
+            let t = c.lower_ty(&sig.ty, &mut vars);
             if !returns_eff(&t) {
                 c.errors.push(
                     Diag::error(
@@ -97,7 +95,6 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
             let s = c.generalise(&t);
             c.sigs.insert(sig.name.clone(), s);
             ext.insert(sig.name.clone(), sig.clone());
-            ext_block_of.insert(sig.name.clone(), bi);
         }
     }
 
@@ -112,13 +109,13 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
         let mut vars = HashMap::new();
         let fully_annotated = f.ret.is_some() && f.params.iter().all(|p| p.ty.is_some());
         let mut ty = match &f.ret {
-            Some(r) => c.from_ty(r, &mut vars),
+            Some(r) => c.lower_ty(r, &mut vars),
             None => c.fresh(Kind::Any),
         };
         for p in f.params.iter().rev() {
             for _ in 0..p.names.len() {
                 let pt = match &p.ty {
-                    Some(t) => c.from_ty(t, &mut vars),
+                    Some(t) => c.lower_ty(t, &mut vars),
                     None => c.fresh(Kind::Any),
                 };
                 ty = T::Fun(Box::new(pt), Box::new(ty));
@@ -145,7 +142,7 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
         c.push_scope();
         for (fname, fty) in &r.fields {
             let mut vars = HashMap::new();
-            let t = c.from_ty(fty, &mut vars);
+            let t = c.lower_ty(fty, &mut vars);
             c.define(fname, Scheme::mono(t));
         }
         for pred in &r.refines {
@@ -189,7 +186,7 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
                 (k, is_affine_t(&c.resolve(t)))
             })
             .collect();
-        Ok(Checked { data: c.data, ext, ext_block_of, sigs: c.sigs, affine })
+        Ok(Checked { data: c.data, ext, sigs: c.sigs, affine })
     } else {
         c.errors.sort_by_key(|d| (d.span.file, d.span.line, d.span.col));
         Err(c.errors)
@@ -228,7 +225,6 @@ fn collect_type(c: &mut Checker, t: &TypeDecl) {
                 c.data.ctors.insert(
                     v.name.clone(),
                     CtorInfo {
-                        name: v.name.clone(),
                         owner: t.name.clone(),
                         params: t.params.clone(),
                         args: v.args.clone(),
@@ -613,7 +609,7 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
             match rec.fields.iter().find(|(n, _)| n == f) {
                 Some((_, ty)) => {
                     let mut vars = HashMap::new();
-                    Ok(c.from_ty(ty, &mut vars))
+                    Ok(c.lower_ty(ty, &mut vars))
                 }
                 None => {
                     let mut d = Diag::error(
@@ -699,7 +695,7 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                 match rec.fields.iter().find(|(n, _)| n == fname) {
                     Some((_, fty)) => {
                         let mut vars = HashMap::new();
-                        let want = c.from_ty(fty, &mut vars);
+                        let want = c.lower_ty(fty, &mut vars);
                         let got = infer(c, fexpr, path)?;
                         c.unify(&got, &want, fexpr.span, &format!(" (field `{}`)", fname))?;
                     }
@@ -795,10 +791,10 @@ fn bind_pattern(c: &mut Checker, p: &Pat, expected: &T, span: Span, path: &str) 
             }
             let mut vars: HashMap<String, T> = HashMap::new();
             let owner_args: Vec<T> =
-                info.params.iter().map(|q| c.from_ty(&Ty::Var(q.clone()), &mut vars)).collect();
+                info.params.iter().map(|q| c.lower_ty(&Ty::Var(q.clone()), &mut vars)).collect();
             c.unify(expected, &T::Con(info.owner.clone(), owner_args), span, " (constructor pattern)")?;
             for (sp, aty) in args.iter().zip(info.args.iter()) {
-                let at = c.from_ty(aty, &mut vars);
+                let at = c.lower_ty(aty, &mut vars);
                 bind_pattern(c, sp, &at, span, path)?;
             }
             Ok(())

@@ -31,7 +31,7 @@ pub fn render(m: &Module, ck: &Checked, mode: Mode) -> String {
     out.push_str(&format!("mod {}\n", m.name));
     for g in groups(&m.decls, mode) {
         out.push('\n');
-        decl_group(&mut out, m, ck, mode, &g);
+        decl_group(&mut out, ck, mode, &g);
     }
     out
 }
@@ -40,7 +40,7 @@ pub fn render(m: &Module, ck: &Checked, mode: Mode) -> String {
 
 /// Declarations that sit on adjacent source lines and print on one line each
 /// form an aligned group; every other boundary gets one blank line.
-fn groups<'a>(decls: &'a [Decl], mode: Mode) -> Vec<Vec<&'a Decl>> {
+fn groups(decls: &[Decl], mode: Mode) -> Vec<Vec<&Decl>> {
     let mut gs: Vec<Vec<&Decl>> = Vec::new();
     for d in decls {
         let joins = match (gs.last().and_then(|g| g.last()), d) {
@@ -74,7 +74,7 @@ fn oneline(f: &FunDecl, mode: Mode) -> bool {
     head(f, 0, 0, 0).len() + 1 + P.flat(&f.body, 0).len() <= WIDTH
 }
 
-fn decl_group(out: &mut String, m: &Module, ck: &Checked, mode: Mode, g: &[&Decl]) {
+fn decl_group(out: &mut String, ck: &Checked, mode: Mode, g: &[&Decl]) {
     match g[0] {
         Decl::Type(_) => {
             let w = g
@@ -108,7 +108,7 @@ fn decl_group(out: &mut String, m: &Module, ck: &Checked, mode: Mode, g: &[&Decl
                 }
             }
             for f in fs {
-                fundecl(out, m, ck, mode, f, nw, pw, rw);
+                fundecl(out, ck, mode, f, nw, pw, rw);
             }
         }
         Decl::Ext(_) => {
@@ -239,7 +239,6 @@ fn head(f: &FunDecl, nw: usize, pw: usize, rw: usize) -> String {
 
 fn fundecl(
     out: &mut String,
-    m: &Module,
     ck: &Checked,
     mode: Mode,
     f: &FunDecl,
@@ -248,7 +247,7 @@ fn fundecl(
     rw: usize,
 ) {
     if mode == Mode::Explicit {
-        for l in explicit_notes(m, ck, f) {
+        for l in explicit_notes(ck, f) {
             out.push_str(&format!(";; {l}\n"));
         }
     }
@@ -273,7 +272,7 @@ fn fundecl(
 /// refinements and measures are *not* discharged yet (see types.rs).
 /// ponytail: no borrow, copy or proof information exists in the bootstrap, so
 /// `--explicit` does not invent any. It grows when infer starts recording it.
-fn explicit_notes(m: &Module, ck: &Checked, f: &FunDecl) -> Vec<String> {
+fn explicit_notes(ck: &Checked, f: &FunDecl) -> Vec<String> {
     let mut v = Vec::new();
     if let Some(s) = ck.sigs.get(&f.name) {
         v.push(format!("{}.{} : {}", f.home, f.name, s.ty.show()));

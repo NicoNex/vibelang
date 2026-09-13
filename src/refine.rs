@@ -682,7 +682,7 @@ impl<'a> Gen<'a> {
                 self.hyps.push(format!("(= {a} {b})"));
             }
         }
-        if ty.as_deref().map_or(true, is_container) {
+        if ty.as_deref().is_none_or(is_container) {
             let ln = self.len_sym(n);
             let lv = self.len_sym(v);
             self.hyps.push(format!("(= {ln} {lv})"));

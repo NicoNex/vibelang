@@ -82,7 +82,6 @@ pub struct RecordInfo {
 
 #[derive(Clone, Debug)]
 pub struct CtorInfo {
-    pub name: String,
     pub owner: String,
     pub params: Vec<String>,
     pub args: Vec<Ty>,
@@ -190,7 +189,6 @@ pub struct Checker {
     pub env: Vec<HashMap<String, Scheme>>,
     pub data: Data,
     pub sigs: HashMap<String, Scheme>,
-    pub ext_names: HashMap<String, ExtSig>,
     pub errors: Vec<Diag>,
     /// Every `let`, `<-` and pattern binder, keyed by the span of the
     /// expression it scopes over plus its name, with the type it was given.
@@ -210,7 +208,6 @@ impl Checker {
             env: vec![HashMap::new()],
             data: Data::default(),
             sigs: HashMap::new(),
-            ext_names: HashMap::new(),
             errors: Vec::new(),
             binds: Vec::new(),
             pending_matches: Vec::new(),
@@ -382,16 +379,18 @@ impl Checker {
 
     /// Convert a surface type to an inference type. `&T` is erased, aliases are
     /// normalised, and named type variables map through `vars`.
-    pub fn from_ty(&mut self, t: &Ty, vars: &mut HashMap<String, T>) -> T {
+    /// Lower a written type into an inference type, sharing one variable per
+    /// name in `vars`.
+    pub fn lower_ty(&mut self, t: &Ty, vars: &mut HashMap<String, T>) -> T {
         match t {
-            Ty::Ref(inner) => self.from_ty(inner, vars),
-            Ty::Eff(inner) => T::Eff(Box::new(self.from_ty(inner, vars))),
+            Ty::Ref(inner) => self.lower_ty(inner, vars),
+            Ty::Eff(inner) => T::Eff(Box::new(self.lower_ty(inner, vars))),
             Ty::Fun(a, b) => {
-                let a = self.from_ty(a, vars);
-                let b = self.from_ty(b, vars);
+                let a = self.lower_ty(a, vars);
+                let b = self.lower_ty(b, vars);
                 T::Fun(Box::new(a), Box::new(b))
             }
-            Ty::Tuple(ts) => T::Tuple(ts.iter().map(|x| self.from_ty(x, vars)).collect()),
+            Ty::Tuple(ts) => T::Tuple(ts.iter().map(|x| self.lower_ty(x, vars)).collect()),
             Ty::Var(n) => vars
                 .entry(n.clone())
                 .or_insert_with(|| {
@@ -402,7 +401,7 @@ impl Checker {
                 .clone(),
             Ty::Con(n, args) => {
                 let n = normalise_type_name(n);
-                T::Con(n, args.iter().map(|x| self.from_ty(x, vars)).collect())
+                T::Con(n, args.iter().map(|x| self.lower_ty(x, vars)).collect())
             }
         }
     }
@@ -459,7 +458,7 @@ pub fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a String>) -> 
     let mut best: Option<(usize, String)> = None;
     for c in candidates {
         let d = edit_distance(name, c);
-        if d <= 2.max(name.len() / 3) && best.as_ref().map_or(true, |(bd, _)| d < *bd) {
+        if d <= 2.max(name.len() / 3) && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
             best = Some((d, c.clone()));
         }
     }
