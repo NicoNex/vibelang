@@ -53,10 +53,39 @@ pub struct Lexer<'a> {
     pos: usize,
     line: usize,
     line_start: usize,
+    comments: Vec<Comment>,
+}
+
+/// A `;;` comment and where it sat. The lexer throws comments away — they carry
+/// no meaning — but `vibe view` needs them back to round-trip a file, so it
+/// keeps them on the side rather than in the token stream.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Comment {
+    pub line: usize,
+    /// 0-based byte column of the `;`.
+    pub col: usize,
+    /// `true` when nothing but whitespace precedes it on its line.
+    pub own_line: bool,
+    /// The comment itself, `;;` included, newline excluded.
+    pub text: String,
 }
 
 pub fn lex(src: &str, file: usize) -> Result<Vec<Token>, Diag> {
-    Lexer { src: src.as_bytes(), file, pos: 0, line: 1, line_start: 0 }.run()
+    lex_full(src, file).map(|(t, _)| t)
+}
+
+/// `lex`, plus the comments it discarded.
+pub fn lex_full(src: &str, file: usize) -> Result<(Vec<Token>, Vec<Comment>), Diag> {
+    let mut l = Lexer {
+        src: src.as_bytes(),
+        file,
+        pos: 0,
+        line: 1,
+        line_start: 0,
+        comments: Vec::new(),
+    };
+    let toks = l.run()?;
+    Ok((toks, l.comments))
 }
 
 impl<'a> Lexer<'a> {
@@ -73,7 +102,7 @@ impl<'a> Lexer<'a> {
         *self.src.get(self.pos + off).unwrap_or(&0)
     }
 
-    fn run(mut self) -> Result<Vec<Token>, Diag> {
+    fn run(&mut self) -> Result<Vec<Token>, Diag> {
         let mut out: Vec<Token> = Vec::new();
         let mut blank_run = 0usize;
         loop {
@@ -84,9 +113,21 @@ impl<'a> Lexer<'a> {
                     b' ' | b'\t' | b'\r' => self.pos += 1,
                     b';' if self.at(1) == b';' => {
                         commented = true;
+                        let start = self.pos;
                         while self.peek() != b'\n' && self.pos < self.src.len() {
                             self.pos += 1;
                         }
+                        let col = start - self.line_start;
+                        self.comments.push(Comment {
+                            line: self.line,
+                            col,
+                            own_line: self.src[self.line_start..start]
+                                .iter()
+                                .all(|b| b.is_ascii_whitespace()),
+                            text: String::from_utf8_lossy(&self.src[start..self.pos])
+                                .trim_end()
+                                .to_string(),
+                        });
                     }
                     _ => break,
                 }

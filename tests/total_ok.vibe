@@ -3,14 +3,17 @@ mod TotalOk
 ;; measure inferred: k decreases at the only recursive call
 fib (k:U64) (a b:U64) : U64 =
   ?k |0 -> a
-     |_ -> fib (k-1) b (a+b)
+     |_ -> fib (k - 1) b (a + b)
 
 ;; k grows towards n, so the measure is written out
 sum_to (k:U64) (n:U64) (acc:U64) : U64 =
-  ?k==n |True  -> acc
-        |False -> sum_to (k+1) n (acc+k) %(n-k)
+  ?(k==n)
+   |True  -> acc
+   |False -> sum_to (k + 1) n (acc + k)
+  %(n - k)
 
 ;; not recursive: nothing to prove
 twice (x:U64) : U64 = x + x
 
-main : E! Unit = out (show (fib 10 0 1 + sum_to 0 4 0 + twice 1))
+main : E! Unit =
+  out (show (fib 10 0 1 + sum_to 0 4 0 + twice 1))

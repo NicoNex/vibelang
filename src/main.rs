@@ -8,6 +8,11 @@
 //! vibe proof <file> [--prove]
 //! vibe patch <file> <path> [<hash> <new-node>]
 
+// A `Diag` is a few hundred bytes and every fallible function returns one. The
+// error path of a compiler is cold by definition, so paying an allocation to
+// shrink it would buy nothing and cost a `Box` at every construction site.
+#![allow(clippy::result_large_err)]
+
 mod ast;
 mod codegen;
 mod diag;
@@ -154,12 +159,20 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     let mut files = Files::new();
     let fid = files.add(&o.file.display().to_string(), &src);
 
-    let toks = lexer::lex(&src, fid).map_err(|d| Fail::Diags(diags(&[d], &files, o.fmt)))?;
+    let (toks, comments) =
+        lexer::lex_full(&src, fid).map_err(|d| Fail::Diags(diags(&[d], &files, o.fmt)))?;
     let module = parser::parse(toks).map_err(|d| Fail::Diags(diags(&[d], &files, o.fmt)))?;
     let checked = infer::check(&module).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
     // A projection is a reading tool: it works on code that does not yet prove.
     if o.cmd == "view" {
-        print!("{}", view::render(&module, &checked, o.view));
+        let r = view::render(&module, &checked, o.view);
+        // Only the canonical projection lines up with the file, so only it can
+        // put the comments back; the others rewrite the program (§13.1).
+        let r = match o.view {
+            view::Mode::Canon => view::reattach(&r, &src, &comments),
+            _ => r,
+        };
+        print!("{r}");
         return Ok(ExitCode::SUCCESS);
     }
     if o.cmd == "deps" {

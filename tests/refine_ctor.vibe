@@ -1,10 +1,10 @@
 mod RefineCtor
+
 ;; a refinement of a value bound by a constructor pattern (spec §8.3): the
 ;; `Ok []` arm above is what discharges `len xs > 0` below.
-
 type Err = Void
 
-head (v:&Vec U64, len v > 0) : U64 = get v 0
+head (v:&Vec U64, len v>0) : U64 = get v 0
 
 pick (r:&Res Err (Vec U64)) : U64 =
   ?r |Er e  -> 0
@@ -12,7 +12,8 @@ pick (r:&Res Err (Vec U64)) : U64 =
      |Ok xs -> head xs
 
 ;; the record invariant of a payload travels through the binding too
-type Tx  = { qty:U32, qty > 0 }
+type Tx  = { qty:U32, qty>0 }
 type Box = B Tx
 
-rate (b:&Box) : U32 = ?b |B t -> 100 / t.qty
+rate (b:&Box) : U32 =
+  ?b |B t -> 100 / t.qty

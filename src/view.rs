@@ -14,6 +14,7 @@
 
 use crate::ast::*;
 use crate::infer::Checked;
+use crate::lexer::Comment;
 
 const WIDTH: usize = 80;
 
@@ -682,4 +683,49 @@ fn esc(c: char) -> String {
 
 fn quote(s: &str) -> String {
     format!("\"{}\"", s.chars().map(esc).collect::<String>())
+}
+
+// --------------------------------------------------------------- comments
+
+/// Put the comments back into a canonical rendering.
+///
+/// The canonical projection reproduces the file line for line, and the lexer
+/// drops a comment-only line entirely, so the rendered lines line up with the
+/// source lines that are not comment-only. Walking the two together puts every
+/// comment back where it was, at the column it was written in.
+///
+/// ponytail: the alignment is the whole mechanism, so it is also the whole
+/// ceiling — if the two ever disagree on how many lines there are, the file was
+/// not canonical to begin with and this hands back the rendering untouched
+/// rather than guessing. Only `--canon` round-trips; `--explicit` and `--flow`
+/// rewrite the program, and a comment has no line to come back to.
+pub fn reattach(rendered: &str, src: &str, comments: &[Comment]) -> String {
+    if comments.is_empty() {
+        return rendered.to_string();
+    }
+    let ends_nl = rendered.ends_with('\n');
+    let mut lines = rendered.lines();
+    let mut out: Vec<String> = Vec::new();
+    for n in 1..=src.lines().count() {
+        match comments.iter().find(|c| c.line == n) {
+            Some(c) if c.own_line => out.push(format!("{}{}", sp(c.col), c.text)),
+            here => {
+                let Some(l) = lines.next() else { return rendered.to_string() };
+                match here {
+                    // never let a trailing comment touch the code, even if the
+                    // rendering grew past the column it was written at
+                    Some(c) => out.push(format!("{}{}", pad(l, c.col.max(l.len() + 1)), c.text)),
+                    None => out.push(l.to_string()),
+                }
+            }
+        }
+    }
+    if lines.next().is_some() {
+        return rendered.to_string(); // not a canonical file: leave it alone
+    }
+    let mut s = out.join("\n");
+    if ends_nl {
+        s.push('\n');
+    }
+    s
 }

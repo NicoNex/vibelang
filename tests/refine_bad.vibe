@@ -1,4 +1,5 @@
 mod RefineBad
 ;; nothing constrains b, so the div0 obligation stays open
 
+;; nothing constrains b, so the div0 obligation stays open
 div_any (a:U64) (b:U64) : U64 = a / b

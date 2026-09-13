@@ -456,6 +456,13 @@ impl Parser {
         let ret = if self.eat_sym(":") { Some(self.ty()?) } else { None };
         self.expect_sym("=")?;
         let body = self.body()?;
+        // `%measure` may sit on its own indented line under the body (spec
+        // §13.1 renders it that way), so a newline in front of it is part of
+        // the declaration, not the end of it.
+        if self.at_newline() && self.toks.get(self.i + 1).is_some_and(|t| t.is_sym("%") && t.col > 0)
+        {
+            self.i += 1;
+        }
         let measure = if self.eat_sym("%") { Some(self.expr()?) } else { None };
         self.end_of_line()?;
         Ok(FunDecl { name, ghost, params, ret, body, measure, span })

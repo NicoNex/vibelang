@@ -51,3 +51,40 @@ fn explicit_shows_inferred_types() {
     assert!(out.contains(";; Ledger.total : (Vec Tx) -> F64"), "missing inferred type:\n{out}");
     assert!(out.contains(";; |- len ts>0 [checked at run time]"), "missing refinement:\n{out}");
 }
+
+/// Every `.vibe` file in the repository that is meant to parse is already in
+/// canonical form, comments included. This is the property that makes `view` a
+/// projection rather than a formatter: reading a file and printing it back is
+/// the identity, so a structured edit is the only thing that changes a file.
+#[test]
+fn every_file_round_trips_byte_for_byte() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    // these two exist to be rejected, so they never reach the projection
+    let broken = ["bad.vibe", "blank.vibe"];
+    let mut seen = 0;
+    for dir in ["examples", "tests"] {
+        for e in std::fs::read_dir(root.join(dir)).expect("the directory exists") {
+            let p = e.expect("readable entry").path();
+            if p.extension().is_none_or(|x| x != "vibe") {
+                continue;
+            }
+            let name = p.file_name().expect("a file name").to_string_lossy().to_string();
+            if broken.contains(&name.as_str()) {
+                continue;
+            }
+            let rel = format!("{dir}/{name}");
+            assert_eq!(view(&[&rel]), source(&rel), "{rel} is not in canonical form");
+            seen += 1;
+        }
+    }
+    assert!(seen >= 10, "expected the whole corpus, walked {seen} files");
+}
+
+/// The lexer throws comments away, so the only reason they come back is that
+/// `view` puts them back (§13.1).
+#[test]
+fn comments_survive_the_round_trip() {
+    let out = view(&["tests/total_ok.vibe"]);
+    assert!(out.contains(";; measure inferred: k decreases at the only recursive call"), "{out}");
+    assert!(out.contains(";; not recursive: nothing to prove"), "{out}");
+}

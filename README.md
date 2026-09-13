@@ -150,7 +150,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - the agent surface of §13.3: `vibe patch` (semantic path, hash-guarded, refused unless the result still compiles), `vibe deps` (callers and callees), `vibe proof` (open obligations by path)
 - termination checking: inferred measures, and `%expr` when inference gives up
 - refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH)
-- the projection views: `vibe view` (canonical form, byte-identical on the examples), `--sig-only`, `--explicit`, `--flow`
+- the projection views: `vibe view` (canonical form, byte-identical on every `.vibe` file in the repository, comments included), `--sig-only`, `--explicit`, `--flow`
 - `arena a in ...` blocks, which release everything they allocated when they end
 - refinements of values bound by a constructor pattern: an arm learns the constructor tag, the payload's length, and the payload's record invariant
 - the spec's Appendix A reference program compiles and runs
@@ -164,7 +164,6 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 
 - a full borrow checker, and escape analysis for closures
 - freeing memory outside an `arena` block
-- comments surviving a `view` round-trip (the lexer discards them)
 - a module system beyond a single file
 
 Several of these are being worked on in parallel, so this list moves faster than the prose above it.

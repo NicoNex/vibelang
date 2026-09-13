@@ -2,8 +2,8 @@ mod Inplace
 
 type Tx = { sku:Str, qty:U32 }
 
-bump (t:Tx) : Tx = {t with qty = t.qty + 1}
+bump (t:Tx) : Tx = {t with qty=t.qty + 1}
 
 main : E! Unit =
-  let t = {sku = dup "a", qty = 1} in
+  let t = {sku=dup "a", qty=1} in
   out (fmt "{}\n" (bump t).qty)

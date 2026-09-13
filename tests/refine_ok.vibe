@@ -1,10 +1,11 @@
 mod RefineOk
 ;; every obligation here follows from the signature
 
-safe_div (a:U64) (b:U64, b != 0) : U64 = a / b
+;; every obligation here follows from the signature
+safe_div (a:U64) (b:U64, b!=0) : U64 = a / b
 
-first (v:&Vec U64, len v > 0) : U64 = get v 0
+first (v:&Vec U64, len v>0) : U64 = get v 0
 
-small (a:U8, a <= 100) (b:U8, b <= 100) : U8 = a + b
+small (a:U8, a<=100) (b:U8, b<=100) : U8 = a + b
 
-gap (a:Nat) (b:Nat, a >= b) : Nat = a - b
+gap (a:Nat) (b:Nat, a>=b) : Nat = a - b
