@@ -83,6 +83,19 @@ impl Parser {
             false
         }
     }
+    /// `c` in `ext c` / `exp c` is a keyword in that one position only. Making
+    /// it a global keyword would take a single-letter name that §2.3's grammar
+    /// allows and §2.2's keyword set does not claim.
+    fn eat_c(&mut self) -> bool {
+        self.sync();
+        if matches!(&self.cur().tok, Tok::Name(n) if n == "c") {
+            self.i += 1;
+            true
+        } else {
+            false
+        }
+    }
+
     fn eat_kw(&mut self, s: &str) -> bool {
         self.sync();
         if self.cur().is_kw(s) {
@@ -208,7 +221,7 @@ impl Parser {
     fn expdecl(&mut self) -> P<Decl> {
         let span = self.span();
         self.eat_kw("exp");
-        if !self.eat_kw("c") {
+        if !self.eat_c() {
             return Err(self.err("parse.exp", "expected `exp c <name>, <name>`"));
         }
         let mut names = Vec::new();
@@ -360,7 +373,7 @@ impl Parser {
     fn extblock(&mut self) -> P<ExtBlock> {
         let span = self.span();
         self.eat_kw("ext");
-        if !self.eat_kw("c") {
+        if !self.eat_c() {
             return Err(self
                 .err("parse.ext", "expected `ext c \"header.h\"`")
                 .with_fix("write `ext c \"stdio.h\"`"));

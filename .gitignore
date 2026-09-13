@@ -8,3 +8,5 @@
 /tests/arena
 /tests/inplace
 /examples/mathlib
+.vibe-proofs
+/examples/churn

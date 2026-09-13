@@ -11,7 +11,9 @@ use crate::diag::{Diag, Span};
 use crate::infer::Checked;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -69,7 +71,7 @@ pub enum Mode {
     Silent,
 }
 
-pub fn check(m: &Module, ck: &Checked, mode: Mode) -> Vec<Diag> {
+pub fn check(m: &Module, ck: &Checked, mode: Mode, cache: &mut Cache) -> Vec<Diag> {
     let obs = obligations(m, ck);
     if obs.is_empty() || mode == Mode::Silent {
         return Vec::new();
@@ -81,6 +83,11 @@ pub fn check(m: &Module, ck: &Checked, mode: Mode) -> Vec<Diag> {
         );
         return Vec::new();
     }
+    // A fully cached run needs no solver at all, so the missing-solver error
+    // must come after the cache has had its say (§16.5).
+    if obs.iter().all(|o| cache.hit(o)) {
+        return Vec::new();
+    }
     if !have_z3() {
         return vec![Diag::error(
             m.span,
@@ -90,7 +97,9 @@ pub fn check(m: &Module, ck: &Checked, mode: Mode) -> Vec<Diag> {
         .with_path(&m.name)
         .with_fix("install z3, or drop --prove to leave obligations undischarged")];
     }
-    obs.iter().filter_map(discharge).collect()
+    let out: Vec<Diag> = obs.iter().filter_map(|o| discharge(o, cache)).collect();
+    cache.flush();
+    out
 }
 
 fn have_z3() -> bool {
@@ -106,11 +115,66 @@ fn have_z3() -> bool {
 /// as "not proved" rather than as an error, so `vibe proof --prove` degrades to
 /// listing everything instead of claiming a proof it did not get.
 pub fn proved(o: &Ob) -> bool {
-    discharge(o).is_none()
+    discharge(o, &mut Cache::off()).is_none()
 }
 
-fn discharge(o: &Ob) -> Option<Diag> {
-    let out = match z3(&smt(o)) {
+/// Proof certificates, keyed by the hash of the SMT text (spec §16.5). The text
+/// is the whole question — hypotheses, goal, sorts — so a hit means the same
+/// question was already answered `unsat`, and nothing else can collide with it.
+///
+/// Only proofs are cached. A failure may be a timeout, or a program that has
+/// since changed around it, and re-asking costs one solver call.
+pub struct Cache {
+    path: Option<PathBuf>,
+    proved: HashSet<String>,
+    added: bool,
+}
+
+impl Cache {
+    pub fn off() -> Cache {
+        Cache { path: None, proved: HashSet::new(), added: false }
+    }
+
+    /// The cache for a source file: a sibling `.vibe-proofs`, one hash a line.
+    pub fn beside(src: &Path) -> Cache {
+        let path = src.with_file_name(".vibe-proofs");
+        let proved = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        Cache { path: Some(path), proved, added: false }
+    }
+
+    /// Whether this obligation was already proved, by this cache or an earlier
+    /// run.
+    pub fn hit(&self, o: &Ob) -> bool {
+        self.proved.contains(&crate::patch::hash(&smt(o)))
+    }
+
+    /// ponytail: rewrites the whole file rather than appending, and never
+    /// evicts. A stale hash costs one line; the day that matters, sort by
+    /// mtime and truncate.
+    pub fn flush(&self) {
+        if !self.added {
+            return;
+        }
+        if let Some(p) = &self.path {
+            let mut lines: Vec<&str> = self.proved.iter().map(|s| s.as_str()).collect();
+            lines.sort_unstable();
+            let _ = std::fs::write(p, format!("{}\n", lines.join("\n")));
+        }
+    }
+}
+
+fn discharge(o: &Ob, cache: &mut Cache) -> Option<Diag> {
+    let text = smt(o);
+    let key = crate::patch::hash(&text);
+    if cache.proved.contains(&key) {
+        return None;
+    }
+    let out = match z3(&text) {
         Ok(s) => s,
         Err(e) => {
             return Some(
@@ -120,7 +184,18 @@ fn discharge(o: &Ob) -> Option<Diag> {
         }
     };
     if out.starts_with("unsat") {
+        cache.proved.insert(key);
+        cache.added = true;
         return None;
+    }
+    // `unknown` is not a counterexample: the solver ran out of budget, and
+    // saying so is more useful than a refutation nobody can read (§16.5).
+    if out.starts_with("unknown") || out.starts_with("timeout") {
+        return Some(
+            Diag::error(o.span, "refine.budget", &format!("the solver gave up on: {}", o.msg))
+                .with_path(&o.path)
+                .with_fix("raise --prove-timeout, or add a ghost function that makes the step explicit"),
+        );
     }
     let mut d = Diag::error(o.span, &o.code, &o.msg).with_path(&o.path);
     if let Some(w) = model(&out) {
@@ -132,8 +207,18 @@ fn discharge(o: &Ob) -> Option<Diag> {
     Some(d)
 }
 
+/// Seconds the solver gets per obligation. A budget is what keeps one hard
+/// obligation from becoming the compile time (§16.5).
+static BUDGET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(5);
+
+pub fn set_budget(secs: u64) {
+    BUDGET.store(secs.max(1), std::sync::atomic::Ordering::Relaxed);
+}
+
 fn z3(text: &str) -> Result<String, String> {
+    let t = BUDGET.load(std::sync::atomic::Ordering::Relaxed);
     let mut ch = Command::new("z3")
+        .arg(format!("-T:{t}"))
         .arg("-in")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

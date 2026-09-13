@@ -102,3 +102,54 @@ fn without_the_empty_arm_the_same_call_is_open() {
     assert!(!ok, "`len xs > 0` does not follow from nothing:\n{out}");
     assert!(out.contains("refine.unproven"), "{out}");
 }
+
+/// Certificate caching (spec §16.5). The cache is keyed by the SMT text, which
+/// is the entire question, so a hit cannot be a hit on a different question.
+#[test]
+fn a_proved_obligation_is_not_asked_twice() {
+    if !have_z3() {
+        return;
+    }
+    let dir = std::env::temp_dir().join("vibe-cache-test");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let f = dir.join("refine_ok.vibe");
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/refine_ok.vibe");
+    std::fs::copy(&src, &f).expect("copy");
+    let p = f.to_str().expect("utf-8");
+
+    let (ok, out) = vibe(&["check", "--prove", p]);
+    assert!(ok, "{out}");
+    let cache = std::fs::read_to_string(dir.join(".vibe-proofs")).expect("a cache file");
+    assert_eq!(cache.lines().count(), 4, "one certificate per obligation:\n{cache}");
+
+    // The strongest statement the cache can make: with no solver on PATH the
+    // same file still proves, so nothing was asked again.
+    let o = Command::new(VIBE)
+        .args(["check", "--prove", p])
+        .env("PATH", "/nonexistent")
+        .output()
+        .expect("vibe runs");
+    assert!(
+        o.status.success(),
+        "a fully cached run must need no solver:\n{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+
+    // and an empty cache in the same place does need one
+    std::fs::remove_file(dir.join(".vibe-proofs")).expect("drop the cache");
+    let o = Command::new(VIBE)
+        .args(["check", "--prove", p])
+        .env("PATH", "/nonexistent")
+        .output()
+        .expect("vibe runs");
+    assert!(!o.status.success(), "without a cache the solver is required");
+    assert!(String::from_utf8_lossy(&o.stderr).contains("refine.no-solver"));
+}
+
+#[test]
+fn the_solver_budget_is_a_number_of_seconds() {
+    let (ok, out) = vibe(&["check", "--prove-timeout=nope", "tests/refine_ok.vibe"]);
+    assert!(!ok, "{out}");
+    assert!(out.contains("not a number of seconds"), "{out}");
+}

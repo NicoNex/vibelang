@@ -37,7 +37,7 @@ impl Token {
 }
 
 const KEYWORDS: &[&str] = &[
-    "mod", "ext", "exp", "type", "ghost", "let", "in", "own", "ref", "arena", "with", "c", "True",
+    "mod", "ext", "exp", "type", "ghost", "let", "in", "own", "ref", "arena", "with", "True",
     "False",
 ];
 

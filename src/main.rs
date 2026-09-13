@@ -41,6 +41,7 @@ usage: vibe <check|build|run|view|deps|proof|patch> <file.vibe> [options]
   patch <file> <path> <hash> <node>   replace it, if the hash still matches
   --diag=prose|struct|json   diagnostic rendering (default: prose)
   --prove                    discharge refinement obligations with z3 (§7.3)
+  --prove-timeout=<secs>     solver budget per obligation (default 5)
   --sig-only|--explicit|--flow   projection to print (view; default: canonical)
   -o <path>                  output executable (build)
   --lib                      build a static library plus its C header (build)
@@ -121,6 +122,10 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
             "--emit-c" => o.emit_c = true,
             "--lib" => o.lib = true,
             "--prove" => o.prove = true,
+            _ if a.starts_with("--prove-timeout=") => {
+                let v = &a["--prove-timeout=".len()..];
+                refine::set_budget(v.parse().map_err(|_| format!("`{v}` is not a number of seconds"))?);
+            }
             "--sig-only" => o.view = view::Mode::SigOnly,
             "--explicit" => o.view = view::Mode::Explicit,
             "--flow" => o.view = view::Mode::Flow,
@@ -211,7 +216,8 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         (false, "check") => refine::Mode::Report,
         _ => refine::Mode::Silent,
     };
-    semantic.append(&mut refine::check(&module, &checked, mode));
+    let mut cache = refine::Cache::beside(&o.file);
+    semantic.append(&mut refine::check(&module, &checked, mode, &mut cache));
     if !semantic.is_empty() {
         return Err(Fail::Diags(diags(&semantic, &files, o.fmt)));
     }

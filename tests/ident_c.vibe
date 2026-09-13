@@ -1,0 +1,15 @@
+mod IdentC
+
+;; `c` is a keyword only after `ext` and `exp` (spec §2.2 does not claim it,
+;; and §2.3's grammar allows it as a name).
+ext c "stdio.h"
+  puts : &CStr -> E! I32
+
+type Col = Red | Green | Blue
+
+name (c:&Col) : Str =
+  ?c |Red   -> dup "r"
+     |Green -> dup "g"
+     |Blue  -> dup "b"
+
+exp c name

@@ -36,6 +36,35 @@ It is early. The [Status](#status) section says exactly how early, in the only u
 
 ---
 
+## If none of that meant anything
+
+No prerequisites below. Nothing is simplified either — it is only unpacked.
+
+A **programming language** is the notation instructions are written in. A **compiler** is the program that turns that notation into something a processor can actually run, and — the half that matters here — refuses to do so when the instructions do not add up. Most of a compiler's working life is spent saying no. Vibelang's is spent saying no more often, on purpose.
+
+**The premise.** Every language you have heard of was designed around a person writing it — decades of research into which notation humans find readable, memorable, forgiving. Vibelang assumes the first draft is written by a machine, and read by a person who then approves it or sends it back. Every choice on this page is that one inversion, followed to the end.
+
+**One way to write each thing.** Most languages let you spell the same idea three or four ways, and taste picks between them. A generator has no taste; it has a probability distribution. Two equally valid spellings is a coin flip, and a coin flip in the middle of a program is a bug waiting for its turn. So the parser rejects the variants instead of accepting them and tidying up afterwards: declarations start in column 1, parentheses you did not need are an error, a second consecutive blank line is an error. Other languages ship a formatter, which is a tool for forgiving you. Vibelang's formatter is the error message.
+
+**Four things it will not compile.** In plain terms:
+
+- **A choice with a case missing.** The code handles red and green; blue also exists. Most languages will let that ship, and fall over the first time blue turns up. Vibelang refuses the file and names blue.
+- **Using a value after you gave it away.** Every value has exactly one owner. Pass it on and you no longer hold it; using it again is selling the same car twice, and the compiler is standing there at the second sale.
+- **A loop that might never stop.** Anything that calls itself has to exhibit some quantity that strictly shrinks at every call, so the bottom is reachable. No shrinking quantity, no program.
+- **Dividing by something that might be zero.** The checked operations hand back a result that is either a number or a failure, and there is no way to look away from the failure.
+
+The load-bearing word is **before**. None of these are run-time checks that fire once the bad case finally arrives. They are settled while nothing is running, about every run that could ever happen. The industry default is to learn the same facts at three in the morning, from a customer, or from neither — and a test only covers the cases somebody thought to write down.
+
+(The strongest form of the fourth one — proving the divisor is never zero, so that no check is needed at all — is done by an external solver and is opt-in today. [Status](#status) is exact about which guarantees are which, which is the entire reason that section exists.)
+
+**Errors addressed to a machine.** An ordinary compiler error is a complaint: here is what is wrong, good luck. A Vibelang diagnostic carries a `fix` field, which is not advice but the edit — the exact text to add, and where it goes. The difference is about who is reading. A person bridges the gap between "this match is not exhaustive" and the repair using judgement, and barely notices doing it. A generator pays for that gap with an entire new attempt: regenerate, recompile, re-read the complaint, hope. A `fix` closes the loop inside one diagnostic instead. For the same reason each error is addressed by semantic path (`Color.show_c.match`) rather than by line number — the generator's own last edit has already moved the lines.
+
+**Why it compiles to C.** Vibelang does not emit machine code itself. It emits C, and hands that to the C compiler already sitting on your machine. C is the front door of nearly every library that exists — image decoders, databases, cryptography, the operating system underneath all of them — so going through C inherits sixty years of other people's work instead of spending its first decade rebuilding it badly. The cost is a dependency on a C compiler. The alternative was a language that can do arithmetic and nothing else.
+
+None of these choices makes the language nicer to type. That is not an oversight. It is the design, and you are on the other side of it.
+
+---
+
 ## Why it exists
 
 The languages we use have been optimized for sixty years for one thing: being pleasant for a human to write and read. Syntactic sugar, several ways to say the same thing, conventions inferred from context. An experienced programmer loves all of it. A language model pays for all of it — every syntactic ambiguity is a fork where the generator can take the wrong turn, and every wrong turn is another retry, which is more tokens, more latency, more money.
@@ -62,12 +91,12 @@ Human readability is not ignored. It is a *derived* goal, to be served by projec
 This is the section where a language README usually lists adjectives. Here it is a list of things that will stop you, all of them checked by the code in `src/` and covered by `cargo test`.
 
 - **Canonical form, enforced not normalized.** Declarations start in column 1; redundant parentheses are an error; two blank lines in a row are an error. The parser rejects and hands back a `fix`; it never quietly reformats. (Three rules today, not the spec's full §3.1 list.)
-- **Hindley–Milner inference.** Full type inference over ADTs with payloads, records, tuples and lists. Signatures are declared; bodies are inferred.
+- **Hindley–Milner inference.** The classical algorithm that deduces every type from how a value is used instead of being told. Full inference over ADTs — *algebraic data types*, a type declared as a fixed list of alternatives, each allowed to carry data — with payloads, records, tuples and lists. Signatures are declared; bodies are inferred.
 - **Exhaustive pattern matching.** A missing constructor is a compile error that names the constructor and the arm to add.
 - **Effects, propagated not inferred.** A function is pure until it is marked `E!`. Calling something effectful from a pure function is an error; the compiler will not quietly promote you.
 - **Termination.** Every recursive function needs a measure that decreases at each call. The compiler infers it when a parameter decreases syntactically, and asks for `%expr` when it cannot.
-- **Affine use of owned values.** `&` parameters are borrows for the call; everything else is owned and consumed by its first use. Using it twice is an error whose `fix` is `&x` or `dup x`. A `{r with ...}` update on a uniquely owned record mutates in place instead of copying.
-- **Arithmetic and indexing that can fail in the type system.** `add_checked`, `sub_checked`, `mul_checked`, `div_checked` and `get_checked` return `Res Fault a`, so overflow, division by zero and an out-of-range index are values you have to match on. (Bare `+` is still unchecked; the spec's plan is for the solver to discharge these obligations instead.)
+- **Affine use of owned values.** *Affine* means a value may be used once and not twice. `&` parameters are borrows — lent for the duration of the call and still yours afterwards; everything else is owned and consumed by its first use. Using it twice is an error whose `fix` is `&x` or `dup x`. A `{r with ...}` update on a uniquely owned record mutates in place instead of copying.
+- **Arithmetic and indexing that can fail in the type system.** `add_checked`, `sub_checked`, `mul_checked`, `div_checked` and `get_checked` return `Res Fault a`, so overflow, division by zero and an out-of-range index are values you have to match on. (Bare `+` is still unchecked; the spec's plan is for the proof solver described below to discharge these obligations instead.)
 - **Machine-first diagnostics.** `--diag=prose` for you, `--diag=struct` and `--diag=json` for whatever is generating the code.
 - **A native binary.** Codegen emits C, `cc` links it against a small C runtime, and you get an executable. No GC, no VM, nothing on the target beyond libc and libm.
 - **An explicit C boundary.** `ext c` imports C declarations with `link` / `pkg-config` wiring; `exp c` emits C-ABI symbols and a header.
@@ -76,9 +105,9 @@ This is the section where a language README usually lists adjectives. Here it is
 
 The specification describes more than the compiler currently proves. Every project has this list; most call it the roadmap, phrase it in the future tense and move it to the bottom of the page. Here it sits directly under the feature list, because the distance between the two is what a type checker is for:
 
-- **Refinement types** (`mean (ts:&Vec Tx, len ts>0)`) parse and type-check as boolean expressions in the parameter scope, and are **asserted at run time** unless you ask for proof.
-- **Refinement obligations** are generated for division, indexing, overflow, record invariants and call-site preconditions, and `vibe check --prove` discharges them with `z3`. Without `--prove`, `vibe check` only counts what is left open. A constructor pattern carries its payload into the solver, so an earlier `Ok [] ->` arm is what discharges a later `len ts > 0` — no explicit check, which is the point of the reference program.
-- **Memory.** Allocation is a bump allocator; only an `arena a in ...` block gives memory back, in bulk. Affine checking covers declared parameters, not `let` bindings or pattern variables; there is no full borrow checker and no escape analysis for closures.
+- **Refinement types** — a type carrying a condition it has to satisfy, so `mean (ts:&Vec Tx, len ts>0)` reads "a vector of transactions, and it is not empty". They parse and type-check as boolean expressions in the parameter scope, and are **asserted at run time** unless you ask for proof.
+- **Refinement obligations** are generated for division, indexing, overflow, record invariants and call-site preconditions, and `vibe check --prove` discharges them with `z3` — an SMT solver, which is a program that decides whether a set of arithmetic and logical facts can all hold at once, and therefore whether a condition already follows from what is known. Without `--prove`, `vibe check` only counts what is left open. A constructor pattern carries its payload into the solver, so an earlier `Ok [] ->` arm is what discharges a later `len ts > 0` — no explicit check, which is the point of the reference program.
+- **Memory.** Allocation is a bump allocator — a pointer that walks forward and never back — and most of what it hands out now comes back on its own ([Memory](#memory) explains how). The half §4.6 asks for and does not get is the free one: a closure that cannot outlive the call that made it should live on the stack, and today every closure is on the heap. Nor is there a full borrow checker — affine use is checked, the aliasing rules beyond it are not.
 
 ---
 
@@ -150,10 +179,10 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - the `vibe` CLI: `check`, `build`, `run`, `view` — a `.vibe` file to a native executable via C
 - the agent surface of §13.3: `vibe patch` (semantic path, hash-guarded, refused unless the result still compiles), `vibe deps` (callers and callees), `vibe proof` (open obligations by path)
 - termination checking: inferred measures, and `%expr` when inference gives up
-- refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH)
+- refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH), with proved obligations cached in a sibling `.vibe-proofs` by the hash of the question asked, and a per-obligation solver budget (`--prove-timeout=`, 5 seconds by default) that reports giving up instead of pretending to refute (§16.5)
 - the projection views: `vibe view` (canonical form, byte-identical on every `.vibe` file in the repository, comments included), `--sig-only`, `--explicit`, `--flow`
-- escape analysis for closures: one whose value reaches the result owns its captures, one consumed during the call reads them
-- `arena a in ...` blocks, which release everything they allocated when they end
+- escape analysis for closures — deciding which values outlive the call that built them: a closure whose value reaches the result owns its captures, one consumed during the call reads them
+- `arena a in ...` blocks: a named region you allocate into and discard whole, which releases everything it allocated when it ends
 - automatic release per frame: a function that cannot hand a pointer to C releases everything it allocated when it returns, and the runtime cancels the release when the result is itself heap-allocated
 - refinements of values bound by a constructor pattern: an arm learns the constructor tag, the payload's length, and the payload's record invariant
 - multi-file programs: `Money.cents` is the whole import system, resolved by loading `money.vibe` next to the file that names it, with a flat namespace and a clash reported rather than shadowed (§9)
@@ -327,7 +356,7 @@ This does not scale past a small project, and the spec says so itself. It is the
 
 ## Memory
 
-Allocation is a bump allocator. Freeing is not reference counting and not a garbage collector; it is two questions asked at compile time.
+Allocation is a bump allocator. Freeing is not reference counting and not a garbage collector; it is two questions about whether anything a frame allocated got out of it.
 
 The first is asked by the runtime, dynamically and for free: a frame refuses to release when its own result is a string, object, vector or closure, because that value is exactly what escaped. The second is asked statically, and there is only one thing to ask, because Vibelang has no globals and no mutation of borrowed values: *did this frame hand a pointer to C?* C may keep it for as long as it likes. That taint travels to callers, since the release happens at the outermost frame.
 

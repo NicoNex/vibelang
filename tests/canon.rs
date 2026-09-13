@@ -89,3 +89,20 @@ fn the_whole_corpus_checks() {
         }
     }
 }
+
+/// `c` is a keyword after `ext` and `exp` and nowhere else: §2.2 lists the
+/// complete keyword set and does not claim it, and §2.3's identifier grammar
+/// allows any lower-case word.
+#[test]
+fn c_is_a_name_everywhere_but_after_ext_and_exp() {
+    let o = Command::new(env!("CARGO_BIN_EXE_vibe"))
+        .args(["check", "tests/ident_c.vibe"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("vibe runs");
+    assert!(
+        o.status.success(),
+        "a file that both declares `ext c` and binds `c`:\n{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+}

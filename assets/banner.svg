@@ -1,38 +1,80 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="380" viewBox="0 0 1280 380" role="img" aria-label="Vibelang: a programming language that is not for you">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="480" viewBox="0 0 1280 480" role="img" aria-label="Vibelang: a programming language that is not for you">
   <title>Vibelang</title>
-  <desc>A terminal window showing a vibe check diagnostic: you are the reviewer now.</desc>
+  <desc>Compiler output on a dark slab: the wordmark vibelang, the line "a programming language that is not for you", and a diagnostic card reassigning the reader to reviewer.</desc>
 
-  <style>
-    .m  { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
-    .dim  { fill: #6e7681; }
-    .txt  { fill: #adbac7; }
-    .lit  { fill: #e6edf3; }
-    .grn  { fill: #7ee787; }
-    .red  { fill: #ff7b72; }
-    .yel  { fill: #e3b341; }
-  </style>
+  <defs>
+    <linearGradient id="slab" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#101720"/>
+      <stop offset="0.55" stop-color="#0B1017"/>
+      <stop offset="1" stop-color="#070A0F"/>
+    </linearGradient>
 
-  <!-- background: painted explicitly, no theme queries -->
-  <rect x="0" y="0" width="1280" height="380" fill="#0d1117"/>
-  <rect x="0" y="0" width="1280" height="48" fill="#11161d"/>
-  <line x1="0" y1="48.5" x2="1280" y2="48.5" stroke="#21262d" stroke-width="1"/>
-  <rect x="0.5" y="0.5" width="1279" height="379" fill="none" stroke="#30363d" stroke-width="1"/>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#F0B43C" stop-opacity="0.13"/>
+      <stop offset="0.55" stop-color="#F0B43C" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#F0B43C" stop-opacity="0"/>
+    </radialGradient>
 
-  <!-- title bar -->
-  <text class="m dim" x="32" y="30" font-size="15">~/vibelang</text>
-  <text class="m dim" x="1248" y="30" font-size="15" text-anchor="end">one canonical form per program</text>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.5" fill="#2B3A4C"/>
+    </pattern>
 
-  <!-- prompt -->
-  <text class="m" x="32" y="92" font-size="17"><tspan class="grn">$</tspan><tspan class="txt" xml:space="preserve"> vibe check you.vibe</tspan></text>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000000"/>
+      <stop offset="0.65" stop-color="#6B6B6B"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <mask id="fademask">
+      <rect x="600" y="114" width="680" height="366" fill="url(#fade)"/>
+    </mask>
+
+    <linearGradient id="hair" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2C3948"/>
+      <stop offset="0.7" stop-color="#1A222C"/>
+      <stop offset="1" stop-color="#1A222C" stop-opacity="0"/>
+    </linearGradient>
+
+    <filter id="lift" x="-20%" y="-60%" width="140%" height="260%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+
+    <style>
+      .m { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+      .bright { fill: #F4F7FB; }
+      .mid    { fill: #A9B7C7; }
+      .dim    { fill: #6B7889; }
+      .faint  { fill: #4B5766; }
+      .acc    { fill: #F0B43C; }
+      .accdim { fill: #A07A2A; }
+    </style>
+  </defs>
+
+  <!-- ground: painted explicitly, no theme queries -->
+  <rect x="0" y="0" width="1280" height="480" fill="#0B1017"/>
+  <rect x="0" y="0" width="1280" height="480" fill="url(#slab)"/>
+  <rect x="600" y="114" width="680" height="366" fill="url(#dots)" mask="url(#fademask)" opacity="0.5"/>
+  <ellipse cx="300" cy="250" rx="640" ry="330" fill="url(#glow)"/>
+
+  <!-- masthead -->
+  <text class="m" x="88" y="60" font-size="17" xml:space="preserve"><tspan class="accdim">$ </tspan><tspan class="dim">vibe check you.vibe</tspan></text>
+  <text class="m faint" x="1192" y="60" font-size="15" text-anchor="end" letter-spacing="1.6">ONE CANONICAL FORM PER PROGRAM</text>
+  <rect x="88" y="95" width="1104" height="1" fill="url(#hair)"/>
 
   <!-- wordmark -->
-  <text class="m lit" x="32" y="196" font-size="86" font-weight="700" letter-spacing="12">VIBELANG</text>
-  <text class="m dim" x="36" y="234" font-size="18">a programming language that is not for you</text>
+  <text class="m" x="88" y="268" font-size="128" font-weight="700" letter-spacing="-2"><tspan class="bright">vibe</tspan><tspan class="dim">lang</tspan></text>
+  <rect x="88" y="300" width="128" height="7" fill="#F0B43C"/>
+  <text class="m mid" x="88" y="346" font-size="23">a programming language that is not for you</text>
 
-  <line x1="32" y1="262.5" x2="1248" y2="262.5" stroke="#1c2128" stroke-width="1"/>
+  <!-- diagnostic card -->
+  <g filter="url(#lift)">
+    <rect x="88" y="376" width="1104" height="74" rx="12" fill="#121A24"/>
+  </g>
+  <rect x="88.5" y="376.5" width="1103" height="73" rx="11.5" fill="none" stroke="#243040"/>
+  <rect x="88" y="398" width="3" height="30" fill="#F0B43C"/>
 
-  <!-- diagnostic -->
-  <text class="m" x="32" y="294" font-size="17" xml:space="preserve"><tspan class="dim">vibe: </tspan><tspan class="red">✗ </tspan><tspan class="lit">You.author </tspan><tspan class="yel">role.reassigned </tspan><tspan class="dim">⊨ </tspan><tspan class="grn">you are the reviewer now</tspan></text>
-  <text class="m" x="32" y="320" font-size="17" xml:space="preserve"><tspan class="dim">  msg: </tspan><tspan class="txt">this language was never trying to please you</tspan></text>
-  <text class="m" x="32" y="346" font-size="17" xml:space="preserve"><tspan class="dim">  fix: </tspan><tspan class="txt">read the output; the generator writes the input</tspan></text>
+  <text class="m" x="120" y="408" font-size="17" xml:space="preserve"><tspan class="acc">✗ </tspan><tspan class="bright">You.author </tspan><tspan class="accdim">role.reassigned </tspan><tspan class="faint">⊨ </tspan><tspan class="mid">you are the reviewer now</tspan></text>
+  <text class="m" x="120" y="434" font-size="17" xml:space="preserve"><tspan class="accdim">  fix: </tspan><tspan class="dim">read the output; the generator writes the input</tspan></text>
+  <text class="m faint" x="1160" y="434" font-size="14" text-anchor="end" letter-spacing="0.5">--diag=struct</text>
+
+  <rect x="0.5" y="0.5" width="1279" height="479" fill="none" stroke="#1E2732"/>
 </svg>
