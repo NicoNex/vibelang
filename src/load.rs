@@ -22,33 +22,50 @@ use crate::parser;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// One file, as it was written. Modules keep their qualifiers here: only
+/// `Program::flat` is rewritten, because a projection has to print the program
+/// the way the file spells it.
+pub struct Unit {
+    pub module: Module,
+    pub src: String,
+    pub comments: Vec<Comment>,
+    pub file: usize,
+}
+
 /// The program as the rest of the compiler wants it.
 pub struct Program {
     /// Every module's declarations in one unit, dependencies first. This is
     /// what gets checked, proved and compiled.
     pub flat: Module,
-    /// The file named on the command line, on its own. Projections and patches
-    /// address one file, never the flattened whole.
-    pub root: Module,
-    pub root_src: String,
-    pub root_comments: Vec<Comment>,
+    /// Every file that was read, dependencies first, the root last. Canonicity
+    /// is per file, so it is checked here rather than on the flattened whole.
+    pub units: Vec<Unit>,
+}
+
+impl Program {
+    /// The file named on the command line. Projections and patches address one
+    /// file, never the flattened whole.
+    pub fn root(&self) -> &Unit {
+        self.units.last().expect("a program has at least its root")
+    }
 }
 
 /// Read `path` and everything it names, transitively.
 pub fn program(path: &Path, files: &mut Files) -> Result<Program, Vec<Diag>> {
     let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
     let mut l = Loader { dir, files, loaded: HashMap::new(), order: Vec::new() };
-    let (root, root_src, root_comments) = l.read(path, None)?;
-    l.follow(&root)?;
+    let root = l.read(path, None)?;
+    l.follow(&root.module)?;
 
     let mut decls = Vec::new();
     let mut home: HashMap<String, String> = HashMap::new();
     let mut errors = Vec::new();
     // dependencies first, so a reader of the flattened unit sees a definition
     // before its use even though the checker does not require it
-    let order: Vec<Module> = l.order.drain(..).chain(std::iter::once(root.clone())).collect();
-    for m in order {
-        for d in m.decls {
+    let units: Vec<Unit> = l.order.drain(..).chain(std::iter::once(root)).collect();
+    for u in &units {
+        let m = &u.module;
+        for d in m.decls.iter().cloned() {
             for n in declared(&d) {
                 if let Some(first) = home.get(&n) {
                     errors.push(
@@ -70,13 +87,15 @@ pub fn program(path: &Path, files: &mut Files) -> Result<Program, Vec<Diag>> {
     if !errors.is_empty() {
         return Err(errors);
     }
-    let mut flat = Module { name: root.name.clone(), decls, span: root.span };
+    let root = units.last().expect("the root was pushed last");
+    let mut flat =
+        Module { name: root.module.name.clone(), decls, span: root.module.span };
     let known: Vec<String> = home.values().cloned().collect();
+    // Only the flattened unit is resolved: a projection has to show the program
+    // as it is written, qualifiers included, or `vibe view` would edit the file
+    // every time it printed it.
     resolve(&mut flat, &known);
-    // `root` is deliberately left unresolved: a projection has to show the
-    // program as it is written, qualifiers included, or `vibe view` would edit
-    // the file every time it printed it.
-    Ok(Program { flat, root, root_src, root_comments })
+    Ok(Program { flat, units })
 }
 
 struct Loader<'a> {
@@ -85,15 +104,11 @@ struct Loader<'a> {
     /// module name -> the file it came from, so a second reference is free and
     /// a cycle terminates
     loaded: HashMap<String, PathBuf>,
-    order: Vec<Module>,
+    order: Vec<Unit>,
 }
 
 impl Loader<'_> {
-    fn read(
-        &mut self,
-        path: &Path,
-        at: Option<Span>,
-    ) -> Result<(Module, String, Vec<Comment>), Vec<Diag>> {
+    fn read(&mut self, path: &Path, at: Option<Span>) -> Result<Unit, Vec<Diag>> {
         let src = std::fs::read_to_string(path).map_err(|e| {
             vec![Diag::error(
                 at.unwrap_or_default(),
@@ -118,7 +133,7 @@ impl Loader<'_> {
             .with_fix(&format!("rename the file to {}.vibe, or the module to {stem}", m.name))]);
         }
         self.loaded.insert(m.name.clone(), path.to_path_buf());
-        Ok((m, src, comments))
+        Ok(Unit { module: m, src, comments, file: fid })
     }
 
     /// Load every module `m` names, depth first, so `order` ends up with
@@ -138,8 +153,8 @@ impl Loader<'_> {
                 )
                 .with_fix(&format!("create {name}.vibe, or fix the qualified name"))]);
             };
-            let (dep, _, _) = self.read(&p, Some(span))?;
-            self.follow(&dep)?;
+            let dep = self.read(&p, Some(span))?;
+            self.follow(&dep.module)?;
             self.order.push(dep);
         }
         Ok(())

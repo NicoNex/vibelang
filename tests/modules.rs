@@ -43,7 +43,7 @@ fn a_qualified_name_loads_the_file_it_names() {
 fn a_missing_module_names_the_file_it_wanted() {
     let dir = project(
         "missing",
-        &[("app.vibe", "mod App\n\nmain : E! Unit = out (show (Money.cents 1.0))\n")],
+        &[("app.vibe", "mod App\n\nmain : E! Unit =\n  out (show (Money.cents 1.0))\n")],
     );
     let (ok, out) = vibe_in(&dir, &["check", "app.vibe", "--diag=struct"]);
     assert!(!ok, "{out}");
@@ -53,7 +53,7 @@ fn a_missing_module_names_the_file_it_wanted() {
 
 #[test]
 fn a_module_must_match_its_file_name() {
-    let dir = project("misnamed", &[("app.vibe", "mod Elsewhere\n\nmain : E! Unit = out \"x\"\n")]);
+    let dir = project("misnamed", &[("app.vibe", "mod Elsewhere\n\nmain : E! Unit =\n  out \"x\"\n")]);
     let (ok, out) = vibe_in(&dir, &["check", "app.vibe", "--diag=struct"]);
     assert!(!ok, "the mapping from a qualified name to a file must stay mechanical:\n{out}");
     assert!(out.contains("mod.name"), "{out}");
@@ -67,7 +67,7 @@ fn snake_case_files_hold_pascal_case_modules() {
         "snake",
         &[
             ("money_box.vibe", "mod MoneyBox\n\ntwice (n:I64) : I64 = n * 2\n"),
-            ("app.vibe", "mod App\n\nmain : E! Unit = out (show (MoneyBox.twice 21))\n"),
+            ("app.vibe", "mod App\n\nmain : E! Unit =\n  out (show (MoneyBox.twice 21))\n"),
         ],
     );
     let (ok, out) = vibe_in(&dir, &["run", "app.vibe"]);
@@ -83,7 +83,7 @@ fn one_name_declared_twice_is_reported_not_shadowed() {
             ("money.vibe", MONEY),
             (
                 "app.vibe",
-                "mod App\n\ncents (n:F64) : I64 = 0\n\nmain : E! Unit = out (show (Money.cents 1.0))\n",
+                "mod App\n\ncents (n:F64) : I64 = 0\n\nmain : E! Unit =\n  out (show (Money.cents 1.0))\n",
             ),
         ],
     );
@@ -114,7 +114,7 @@ fn a_diagnostic_names_the_module_that_owns_the_code() {
         "paths",
         &[
             ("money.vibe", "mod Money\n\nhalf (n:I64) (d:I64) : I64 = n / d\n"),
-            ("app.vibe", "mod App\n\nmain : E! Unit = out (show (Money.half 4 2))\n"),
+            ("app.vibe", "mod App\n\nmain : E! Unit =\n  out (show (Money.half 4 2))\n"),
         ],
     );
     let (ok, out) = vibe_in(&dir, &["proof", "app.vibe"]);

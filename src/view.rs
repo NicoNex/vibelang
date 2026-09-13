@@ -14,6 +14,7 @@
 
 use crate::ast::*;
 use crate::infer::Checked;
+use crate::diag::{Diag, Span};
 use crate::lexer::Comment;
 
 const WIDTH: usize = 80;
@@ -727,4 +728,52 @@ pub fn reattach(rendered: &str, src: &str, comments: &[Comment]) -> String {
         s.push('\n');
     }
     s
+}
+
+/// Canonicity (spec §3.1), as one rule instead of a list.
+///
+/// §3.1 enumerates what the parser must reject — indentation that is not two
+/// spaces per level, redundant parentheses, spacing around binary operators, a
+/// `let` that a top-level binding would do, more than one blank line. Checking
+/// them one at a time invites the list and the projection to disagree, and
+/// then there are two canonical forms, which is the thing P1 exists to prevent.
+///
+/// So the rule is the projection: a file is canonical exactly when printing it
+/// gives it back. The fix is then not advice, it is the line to write.
+///
+/// ponytail: this reports the first offending line, not all of them, because
+/// after one line moves the rest may line up again — re-running is cheaper than
+/// guessing. The lexer's own rules (a second blank line, a declaration out of
+/// column 1) still fire earlier and more precisely, and are left where they are.
+pub fn canon(m: &Module, ck: &Checked, src: &str, comments: &[Comment], file: usize) -> Vec<Diag> {
+    let rendered = reattach(&render(m, ck, Mode::Canon), src, comments);
+    if rendered == src {
+        return Vec::new();
+    }
+    let mut want = rendered.lines();
+    for (i, got) in src.lines().enumerate() {
+        let Some(w) = want.next() else {
+            return vec![at(file, i + 1, got, "this line is not part of the canonical form", "")];
+        };
+        if w != got {
+            return vec![at(file, i + 1, got, "this line is not in canonical form", w)];
+        }
+    }
+    match want.next() {
+        Some(w) => vec![at(file, src.lines().count() + 1, "", "the canonical form has more", w)],
+        None => Vec::new(),
+    }
+}
+
+fn at(file: usize, line: usize, got: &str, msg: &str, want: &str) -> Diag {
+    let d = Diag::error(
+        Span { file, line, col: 0, len: got.len().max(1) },
+        "canon.form",
+        msg,
+    );
+    if want.is_empty() {
+        d.with_fix("delete it")
+    } else {
+        d.with_fix(&format!("write it as `{}`", want.trim_end()))
+    }
 }

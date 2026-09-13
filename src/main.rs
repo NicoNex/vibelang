@@ -165,8 +165,10 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     // qualified names and hands the checker one flattened unit.
     let prog =
         load::program(&o.file, &mut files).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
-    let (module, src, comments) = (prog.flat, prog.root_src, prog.root_comments);
-    let root = prog.root;
+    let root = prog.root();
+    let (src, comments) = (root.src.clone(), root.comments.clone());
+    let root = root.module.clone();
+    let module = prog.flat.clone();
     let checked = infer::check(&module).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
     // A projection is a reading tool: it works on code that does not yet prove.
     if o.cmd == "view" {
@@ -191,7 +193,16 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     if o.cmd == "patch" {
         return do_patch(&o, &root, &src);
     }
-    let mut semantic = own::check(&module, &checked);
+    // P1 is the project's whole premise, so canonicity is checked on the same
+    // footing as types (§3.1). The projection defines it: see `view::canon`.
+    // Canonicity is per file, so every file that was read is checked, not just
+    // the one that was named (§3.1).
+    let mut semantic: Vec<Diag> = prog
+        .units
+        .iter()
+        .flat_map(|u| view::canon(&u.module, &checked, &u.src, &u.comments, u.file))
+        .collect();
+    semantic.append(&mut own::check(&module, &checked));
     semantic.append(&mut total::check(&module));
     // Refinements: proved on demand, counted on `check`, quiet on build/run so
     // the program's own output stays clean.
