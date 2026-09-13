@@ -147,6 +147,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - C code generation, and a small C runtime
 - `ext c` FFI with `link` / `pkg-config`, and `exp c` export with a generated header
 - the `vibe` CLI: `check`, `build`, `run`, `view` — a `.vibe` file to a native executable via C
+- the agent surface of §13.3: `vibe patch` (semantic path, hash-guarded, refused unless the result still compiles), `vibe deps` (callers and callees), `vibe proof` (open obligations by path)
 - termination checking: inferred measures, and `%expr` when inference gives up
 - refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH)
 - the projection views: `vibe view` (canonical form, byte-identical on the examples), `--sig-only`, `--explicit`, `--flow`
@@ -163,7 +164,6 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 
 - a full borrow checker, and escape analysis for closures
 - freeing memory outside an `arena` block
-- structured `patch`
 - comments surviving a `view` round-trip (the lexer discards them)
 - a module system beyond a single file
 

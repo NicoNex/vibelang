@@ -4,6 +4,9 @@
 //! vibe build <file> [-o out] [--emit-c] [--diag=...]
 //! vibe run   <file> [--diag=...] [-- args...]
 //! vibe view  <file> [--sig-only|--explicit|--flow]
+//! vibe deps  <file>
+//! vibe proof <file> [--prove]
+//! vibe patch <file> <path> [<hash> <new-node>]
 
 mod ast;
 mod codegen;
@@ -12,6 +15,7 @@ mod infer;
 mod lexer;
 mod own;
 mod parser;
+mod patch;
 mod refine;
 mod total;
 mod types;
@@ -25,7 +29,9 @@ const RT_C: &str = include_str!("../runtime/vibert.c");
 const RT_H: &str = include_str!("../runtime/vibert.h");
 
 const USAGE: &str = "\
-usage: vibe <check|build|run|view> <file.vibe> [options]
+usage: vibe <check|build|run|view|deps|proof|patch> <file.vibe> [options]
+  patch <file> <path>                 print the node's hash and current text
+  patch <file> <path> <hash> <node>   replace it, if the hash still matches
   --diag=prose|struct|json   diagnostic rendering (default: prose)
   --prove                    discharge refinement obligations with z3 (§7.3)
   --sig-only|--explicit|--flow   projection to print (view; default: canonical)
@@ -77,6 +83,8 @@ struct Opts {
     prove: bool,
     view: view::Mode,
     prog_args: Vec<String>,
+    /// positionals after the file: the `patch` path, hash and new node
+    rest: Vec<String>,
 }
 
 fn parse_args(argv: &[String]) -> Result<Opts, String> {
@@ -89,6 +97,7 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
         prove: false,
         view: view::Mode::Canon,
         prog_args: Vec::new(),
+        rest: Vec::new(),
     };
     let mut i = 0;
     let mut positional: Vec<String> = Vec::new();
@@ -122,17 +131,21 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
         }
         i += 1;
     }
-    if positional.len() != 2 {
+    if positional.len() < 2 {
         return Err(USAGE.to_string());
     }
     o.cmd = positional[0].clone();
     o.file = PathBuf::from(&positional[1]);
+    o.rest = positional[2..].to_vec();
+    if o.cmd != "patch" && !o.rest.is_empty() {
+        return Err(format!("`{}` takes one file", o.cmd));
+    }
     Ok(o)
 }
 
 fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     let o = parse_args(argv)?;
-    if !matches!(o.cmd.as_str(), "check" | "build" | "run" | "view") {
+    if !matches!(o.cmd.as_str(), "check" | "build" | "run" | "view" | "deps" | "proof" | "patch") {
         return Err(Fail::Driver(USAGE.to_string()));
     }
 
@@ -148,6 +161,17 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     if o.cmd == "view" {
         print!("{}", view::render(&module, &checked, o.view));
         return Ok(ExitCode::SUCCESS);
+    }
+    if o.cmd == "deps" {
+        print!("{}", patch::deps(&module));
+        return Ok(ExitCode::SUCCESS);
+    }
+    if o.cmd == "proof" {
+        print!("{}", proof(&module, &checked, o.prove));
+        return Ok(ExitCode::SUCCESS);
+    }
+    if o.cmd == "patch" {
+        return do_patch(&o, &module, &src);
     }
     let mut semantic = own::check(&module);
     semantic.append(&mut total::check(&module));
@@ -191,6 +215,68 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
             .map_err(|e| format!("cannot run {}: {e}", exe.display()))?;
         return Ok(ExitCode::from(st.code().unwrap_or(1).clamp(0, 255) as u8));
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `vibe proof` (§13.3): the open obligations, one line each, addressed by the
+/// same semantic path the diagnostics use. With `--prove` the ones z3 closes
+/// are dropped, so what is left is exactly the work remaining.
+fn proof(m: &ast::Module, ck: &infer::Checked, prove: bool) -> String {
+    let obs = refine::obligations(m, ck);
+    let mut out = String::new();
+    for o in &obs {
+        if prove && refine::proved(o) {
+            continue;
+        }
+        out.push_str(&format!("{}\t{}\t{}\n", o.path, o.code, o.msg));
+    }
+    out
+}
+
+/// `vibe patch` (§13.2). With no hash: report the node so the caller can name
+/// it back. With one: replace the node, but only if the file still holds what
+/// the caller last saw, and only if the result still compiles.
+fn do_patch(o: &Opts, m: &ast::Module, src: &str) -> Result<ExitCode, Fail> {
+    let nodes = patch::nodes(m, src);
+    let path = o.rest.first().ok_or("patch needs a semantic path")?;
+    let Some(node) = patch::find(&nodes, path) else {
+        let known: Vec<&str> = nodes.iter().map(|n| n.path.as_str()).collect();
+        return Err(Fail::Driver(format!("no node at `{path}`; this file has: {}", known.join(" "))));
+    };
+    let text = node.text(src);
+    if o.rest.len() == 1 {
+        print!("{}\t{}\n{text}\n", node.path, patch::hash(text));
+        return Ok(ExitCode::SUCCESS);
+    }
+    let (want, new) = match (o.rest.get(1), o.rest.get(2)) {
+        (Some(h), Some(n)) => (h, n),
+        _ => return Err(Fail::Driver("patch needs both a hash and a new node".into())),
+    };
+    let got = patch::hash(text);
+    if *want != got {
+        return Err(Fail::Driver(format!(
+            "stale patch: `{path}` hashes {got}, not {want}; re-read the node and retry"
+        )));
+    }
+    let patched = patch::apply(src, node, new);
+    // The patch is not applied unless the result is a program: canonicity,
+    // types and effects are all re-checked against the file that would be
+    // written, and the original is left alone if any of them refuses.
+    let mut files = Files::new();
+    let fid = files.add(&o.file.display().to_string(), &patched);
+    let verdict = lexer::lex(&patched, fid)
+        .and_then(parser::parse)
+        .map_err(|d| vec![d])
+        .and_then(|pm| infer::check(&pm).map(|_| ()));
+    if let Err(ds) = verdict {
+        return Err(Fail::Diags(format!(
+            "vibe: patch refused, `{}` is unchanged\n{}",
+            o.file.display(),
+            diags(&ds, &files, o.fmt)
+        )));
+    }
+    write(&o.file, &patched)?;
+    println!("{path}\t{}", patch::hash(new.trim_end_matches('\n')));
     Ok(ExitCode::SUCCESS)
 }
 

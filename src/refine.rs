@@ -102,6 +102,13 @@ fn have_z3() -> bool {
         .is_ok()
 }
 
+/// Whether z3 closes this obligation on its own. A missing solver is reported
+/// as "not proved" rather than as an error, so `vibe proof --prove` degrades to
+/// listing everything instead of claiming a proof it did not get.
+pub fn proved(o: &Ob) -> bool {
+    discharge(o).is_none()
+}
+
 fn discharge(o: &Ob) -> Option<Diag> {
     let out = match z3(&smt(o)) {
         Ok(s) => s,
