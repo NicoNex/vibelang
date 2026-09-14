@@ -311,6 +311,8 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
         ExprKind::Bool(_) => Ok(T::con("Bool")),
         ExprKind::Unit => Ok(T::unit()),
         ExprKind::Borrow(inner) => infer(c, inner, path),
+        // The arena name is a scope marker, not a value: nothing can refer to it yet.
+        ExprKind::Arena(_, body) => infer(c, body, path),
 
         ExprKind::Var(n) => {
             if is_special(n) {

@@ -39,3 +39,21 @@ fn unique_update_mutates_in_place() {
     .expect("generated C is kept next to the example");
     assert!(c.contains("vb_set_fields"), "an owned `{{r with ...}}` must not copy:\n{c}");
 }
+
+#[test]
+fn arena_block_releases_in_bulk() {
+    let (ok, out) = vibe(&["run", "tests/arena.vibe"]);
+    assert!(ok, "arena example failed:\n{out}");
+    assert_eq!(out.trim(), "1000");
+    let c = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/.vibe-arena/arena.c"),
+    )
+    .expect("generated C is kept next to the example");
+    assert!(c.contains("vb_mark") && c.contains("vb_release"), "arena must mark and release:\n{c}");
+}
+
+#[test]
+fn consecutive_comment_lines_are_not_blank_lines() {
+    let (ok, out) = vibe(&["check", "tests/arena.vibe"]);
+    assert!(ok, "two comment lines in a row must be canonical:\n{out}");
+}

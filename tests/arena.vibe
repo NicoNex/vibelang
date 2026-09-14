@@ -1,0 +1,10 @@
+mod Arena
+
+;; Everything the block allocates is released when it ends: the result is a
+;; scalar, so nothing escapes.
+big (n:Size) : Size =
+  arena a in
+    len (rev &(range 0 n))
+
+main : E! Unit =
+  out (fmt "{}\n" (big 1000))

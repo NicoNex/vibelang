@@ -598,7 +598,7 @@ impl Parser {
         self.sync();
         match &self.cur().tok {
             Tok::Int(_) | Tok::Float(_) | Tok::Str(_) | Tok::Char(_) | Tok::Name(_) | Tok::Ctor(_) => true,
-            Tok::Kw(k) => matches!(*k, "True" | "False"),
+            Tok::Kw(k) => matches!(*k, "True" | "False" | "arena"),
             Tok::Sym(s) => matches!(*s, "(" | "[" | "{" | "&" | "?" | "\\"),
             _ => false,
         }
@@ -651,6 +651,15 @@ impl Parser {
                 }
                 let body = self.body()?;
                 Ok(Expr::new(ExprKind::Let(n, Box::new(val), Box::new(body)), span))
+            }
+            Tok::Kw("arena") => {
+                self.i += 1;
+                let (n, _) = self.name()?;
+                if !self.eat_kw("in") {
+                    return Err(self.err("parse.arena", "expected `in` after the arena name"));
+                }
+                let body = self.body()?;
+                Ok(Expr::new(ExprKind::Arena(n, Box::new(body)), span))
             }
             Tok::Sym("\\") => {
                 self.i += 1;

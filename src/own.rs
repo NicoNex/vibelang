@@ -111,6 +111,7 @@ impl State {
                 self.walk(b, mode, owned);
             }
             Neg(x) | Not(x) => self.walk(x, mode, owned),
+            Arena(_, body) => self.walk(body, mode, owned),
             Tuple(xs) | List(xs) => {
                 for x in xs {
                     self.walk(x, mode, owned);

@@ -538,6 +538,14 @@ impl<'a> Gen<'a> {
             ExprKind::Bool(b) => format!("vb_bool({})", if *b { "true" } else { "false" }),
             ExprKind::Unit => "vb_unit()".to_string(),
             ExprKind::Borrow(inner) => self.ex(inner, out),
+            ExprKind::Arena(_, body) => {
+                let d = self.fresh();
+                out.push_str(&format!("VbMark {}_m = vb_mark();\n", d));
+                let v = self.ex(body, out);
+                out.push_str(&format!("VbVal {} = {};\n", d, v));
+                out.push_str(&format!("vb_release({}_m, {});\n", d, d));
+                d
+            }
             ExprKind::Neg(x) => {
                 let v = self.ex(x, out);
                 format!("vb_neg({})", v)
@@ -949,6 +957,9 @@ fn free_vars(e: &Expr, bound: &mut HashSet<String>, out: &mut Vec<String>) {
             free_vars(a, bound, out);
             free_vars(b, bound, out);
         }
+        ExprKind::Arena(_, x) => {
+            free_vars(x, bound, out);
+        }
         ExprKind::Neg(x) | ExprKind::Not(x) | ExprKind::Borrow(x) | ExprKind::Field(x, _) => {
             free_vars(x, bound, out)
         }
@@ -1010,6 +1021,7 @@ fn expr_text(e: &Expr) -> String {
         ExprKind::Var(n) => n.clone(),
         ExprKind::Ctor(n) => n.clone(),
         ExprKind::Borrow(x) => format!("&{}", expr_text(x)),
+        ExprKind::Arena(n, b) => format!("arena {} in {}", n, expr_text(b)),
         ExprKind::Neg(x) => format!("-{}", expr_text(x)),
         ExprKind::Not(x) => format!("!{}", expr_text(x)),
         ExprKind::Field(x, f) => format!("{}.{}", expr_text(x), f),

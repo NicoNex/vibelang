@@ -78,10 +78,12 @@ impl<'a> Lexer<'a> {
         let mut blank_run = 0usize;
         loop {
             // Horizontal whitespace and comments.
+            let mut commented = false;
             loop {
                 match self.peek() {
                     b' ' | b'\t' | b'\r' => self.pos += 1,
                     b';' if self.at(1) == b';' => {
+                        commented = true;
                         while self.peek() != b'\n' && self.pos < self.src.len() {
                             self.pos += 1;
                         }
@@ -94,7 +96,15 @@ impl<'a> Lexer<'a> {
                 return Ok(out);
             }
             if self.peek() == b'\n' {
-                let blank = matches!(out.last(), None | Some(Token { tok: Tok::Newline, .. }));
+                // A comment-only line is neither a blank line nor a separator.
+                let blank = !commented
+                    && matches!(out.last(), None | Some(Token { tok: Tok::Newline, .. }));
+                if commented && matches!(out.last(), None | Some(Token { tok: Tok::Newline, .. })) {
+                    self.pos += 1;
+                    self.line += 1;
+                    self.line_start = self.pos;
+                    continue;
+                }
                 if blank {
                     blank_run += 1;
                     // P1: one blank line separates declarations, never two.

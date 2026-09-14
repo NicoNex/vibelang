@@ -105,6 +105,10 @@ int vb_cmp(VbVal a, VbVal b);
 /* --- field / variant access --- */
 VbVal vb_field(VbVal o, uint32_t i);
 uint32_t vb_tag(VbVal o);
+typedef struct { struct VbChunk *chunk; size_t used; } VbMark;
+VbMark vb_mark(void);
+void vb_release(VbMark m, VbVal result);
+
 VbVal vb_set_fields(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals);
 VbVal vb_with(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals);
 

@@ -69,6 +69,8 @@ pub enum ExprKind {
     Record(Option<Box<Expr>>, Vec<(String, Expr)>),
     Field(Box<Expr>, String),
     Borrow(Box<Expr>),
+    /// `arena a in body` — everything the body allocates dies with the block.
+    Arena(String, Box<Expr>),
     Tuple(Vec<Expr>),
     List(Vec<Expr>),
 }

@@ -7,8 +7,11 @@
 #include <string.h>
 
 /* ------------------------------------------------------------ allocator
- * Bump allocator, never freed. Spec fase 3: allocate and do not release.
- * vibec debt: fase 4 (ownership) replaces this with scope-bound arenas. */
+ * Bump allocator. Chunks are released only in bulk, at the end of an `arena`
+ * block (spec 4.5); outside an arena nothing is freed before exit.
+ * ponytail: release is skipped when the block's result is heap-allocated,
+ * because that value outlives the arena. Making that case an error needs the
+ * escape analysis of spec 4.6. */
 
 typedef struct VbChunk { struct VbChunk *next; size_t used, cap; char data[]; } VbChunk;
 static VbChunk *g_chunk = NULL;
@@ -37,6 +40,22 @@ void *vb_alloc(size_t n) {
   g_chunk->used += n;
   memset(p, 0, n);
   return p;
+}
+
+/* An arena mark (VbMark, declared in vibert.h) is the allocation frontier at
+   the start of an `arena` block. */
+VbMark vb_mark(void) { vb_init(); VbMark m; m.chunk = g_chunk; m.used = g_chunk->used; return m; }
+
+/* Release everything allocated since the mark. Values that escape the block
+   would dangle, so a heap-allocated result cancels the release. */
+void vb_release(VbMark m, VbVal result) {
+  if (result.tag == VB_STR || result.tag == VB_OBJ || result.tag == VB_VEC || result.tag == VB_CLOS) return;
+  while (g_chunk && g_chunk != m.chunk) {
+    VbChunk *dead = g_chunk;
+    g_chunk = g_chunk->next;
+    free(dead);
+  }
+  if (g_chunk) g_chunk->used = m.used;
 }
 
 /* ---------------------------------------------------------- constructors */
