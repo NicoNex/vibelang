@@ -1,0 +1,6 @@
+mod RefineChecked
+;; spec 7.5: the checked forms discharge the obligation at run time
+
+d (a:U64) (b:U64) : Res Fault U64 = div_checked a b
+
+g (v:&Vec U64) (i:Size) : Res Fault U64 = get_checked v i

@@ -11,6 +11,7 @@ mod infer;
 mod lexer;
 mod own;
 mod parser;
+mod refine;
 mod total;
 mod types;
 
@@ -24,6 +25,7 @@ const RT_H: &str = include_str!("../runtime/vibert.h");
 const USAGE: &str = "\
 usage: vibe <check|build|run> <file.vibe> [options]
   --diag=prose|struct|json   diagnostic rendering (default: prose)
+  --prove                    discharge refinement obligations with z3 (§7.3)
   -o <path>                  output executable (build)
   --emit-c                   also keep the generated C next to the output
   -- <args...>               arguments passed to the program (run)
@@ -69,6 +71,7 @@ struct Opts {
     out: Option<PathBuf>,
     fmt: DiagFormat,
     emit_c: bool,
+    prove: bool,
     prog_args: Vec<String>,
 }
 
@@ -79,6 +82,7 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
         out: None,
         fmt: DiagFormat::Prose,
         emit_c: false,
+        prove: false,
         prog_args: Vec::new(),
     };
     let mut i = 0;
@@ -91,6 +95,7 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
                 break;
             }
             "--emit-c" => o.emit_c = true,
+            "--prove" => o.prove = true,
             "-h" | "--help" => return Err(USAGE.to_string()),
             "-o" => {
                 i += 1;
@@ -133,6 +138,14 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     let checked = infer::check(&module).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
     let mut semantic = own::check(&module);
     semantic.append(&mut total::check(&module));
+    // Refinements: proved on demand, counted on `check`, quiet on build/run so
+    // the program's own output stays clean.
+    let mode = match (o.prove, o.cmd.as_str()) {
+        (true, _) => refine::Mode::Prove,
+        (false, "check") => refine::Mode::Report,
+        _ => refine::Mode::Silent,
+    };
+    semantic.append(&mut refine::check(&module, &checked, mode));
     if !semantic.is_empty() {
         return Err(Fail::Diags(diags(&semantic, &files, o.fmt)));
     }
