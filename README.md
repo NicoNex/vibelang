@@ -61,8 +61,8 @@ Today the repository contains the **frontend** of the bootstrap compiler (lexer,
 ```bash
 git clone <this-repo> vibelang
 cd vibelang
-cargo build          # compila la libreria (lexer, parser, checker)
-cargo test           # esegue i test del frontend, se presenti
+cargo build          # builds the compiler (lexer, parser, checker, codegen)
+cargo test           # runs the end-to-end tests
 ```
 
 The crate is called `vibec`, and `Cargo.toml` already declares the `vibe` binary pointing at `src/main.rs`: that file does not exist yet, it is the next piece to write (see *Roadmap*).
@@ -70,11 +70,11 @@ The crate is called `vibec`, and `Cargo.toml` already declares the `vibe` binary
 ### Planned UX (not implemented yet)
 
 ```bash
-vibe new mioprogetto        # scaffold di un modulo .vibe
-vibe run ledger.vibe        # compila (via C) ed esegue, un colpo solo
-vibe build                  # emette il binario nativo
-vibe check --diag=json      # solo type-check, diagnostica in JSON per un agente
-vibe view ledger.vibe --explicit   # mostra tipi inferiti, prove, copie implicite
+vibe new myproject          # scaffolds a .vibe module
+vibe run ledger.vibe        # compiles (via C) and runs, in one shot
+vibe build                  # emits the native binary
+vibe check --diag=json      # type-check only, JSON diagnostics for an agent
+vibe view ledger.vibe --explicit   # shows inferred types, proofs, implicit copies
 ```
 
 One static binary, no build system, no configuration file. Like `go build`, not like `cargo` with its graph of feature flags.
@@ -157,7 +157,7 @@ exp c mean, total
 This generates symbols with the C ABI plus a header, with only two possible ownership qualifiers in the exported signature: `own T` (the C caller takes ownership, and `<name>_free` is exported as well) and `ref T` (a borrow valid only for the duration of the call). Preconditions end up in the header as a comment, with an explicit warning that beyond the boundary they are not verified:
 
 ```c
-/* mean — pre: len(ts) > 0   NON VERIFICATA OLTRE IL CONFINE */
+/* mean — pre: len(ts) > 0   NOT VERIFIED ACROSS THE BOUNDARY */
 double Ledger_mean(const Ledger_Vec_Tx *ts);
 ```
 

@@ -2,3 +2,4 @@
 .vibe-*
 /examples/hello
 /examples/ledger
+/.claude/worktrees
