@@ -1,0 +1,4 @@
+mod Hello
+
+main : E! Unit =
+  out "hello from vibelang\n"

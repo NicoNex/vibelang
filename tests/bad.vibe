@@ -1,0 +1,4 @@
+mod Bad
+
+main : E! Unit =
+  out 42

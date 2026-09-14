@@ -544,10 +544,6 @@ impl Parser {
     fn unary(&mut self) -> P<Expr> {
         self.sync();
         let span = self.span();
-        if self.cur().is_sym("&") {
-            self.i += 1;
-            return Ok(Expr::new(ExprKind::Borrow(Box::new(self.unary()?)), span));
-        }
         if self.cur().is_sym("-") {
             self.i += 1;
             return Ok(Expr::new(ExprKind::Neg(Box::new(self.unary()?)), span));
@@ -574,6 +570,13 @@ impl Parser {
     }
 
     fn postfix(&mut self) -> P<Expr> {
+        self.sync();
+        // `&x` binds like an atom, so it can appear as a bare argument.
+        if self.cur().is_sym("&") {
+            let span = self.span();
+            self.i += 1;
+            return Ok(Expr::new(ExprKind::Borrow(Box::new(self.postfix()?)), span));
+        }
         let mut e = self.atom()?;
         loop {
             // `.` binds tighter than application, and must not be preceded by a space.

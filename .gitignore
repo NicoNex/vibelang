@@ -1,3 +1,4 @@
-target/
-*.o
-*.out
+/target
+.vibe-*
+/examples/hello
+/examples/ledger
