@@ -1,0 +1,13 @@
+[package]
+name = "vibec"
+version = "0.2.0"
+edition = "2021"
+description = "Vibelang bootstrap compiler: .vibe -> C -> native executable"
+
+[[bin]]
+name = "vibe"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 2
+panic = "abort"
