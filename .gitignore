@@ -3,3 +3,5 @@
 /examples/hello
 /examples/ledger
 /.claude/worktrees
+/examples/ffi
+/examples/hello.c

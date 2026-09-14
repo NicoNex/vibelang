@@ -29,11 +29,34 @@ usage: vibe <check|build|run> <file.vibe> [options]
   -- <args...>               arguments passed to the program (run)
 ";
 
+/// Driver failures get a `vibe:` prefix; diagnostics are printed verbatim, so
+/// `--diag=json` output stays machine-readable.
+enum Fail {
+    Diags(String),
+    Driver(String),
+}
+
+impl From<String> for Fail {
+    fn from(s: String) -> Fail {
+        Fail::Driver(s)
+    }
+}
+
+impl From<&str> for Fail {
+    fn from(s: &str) -> Fail {
+        Fail::Driver(s.to_string())
+    }
+}
+
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     match run(&argv) {
         Ok(code) => code,
-        Err(e) => {
+        Err(Fail::Diags(s)) => {
+            eprintln!("{s}");
+            ExitCode::FAILURE
+        }
+        Err(Fail::Driver(e)) => {
             eprintln!("vibe: {e}");
             ExitCode::FAILURE
         }
@@ -94,10 +117,10 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
     Ok(o)
 }
 
-fn run(argv: &[String]) -> Result<ExitCode, String> {
+fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     let o = parse_args(argv)?;
     if !matches!(o.cmd.as_str(), "check" | "build" | "run") {
-        return Err(USAGE.to_string());
+        return Err(Fail::Driver(USAGE.to_string()));
     }
 
     let src = std::fs::read_to_string(&o.file)
@@ -105,20 +128,20 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
     let mut files = Files::new();
     let fid = files.add(&o.file.display().to_string(), &src);
 
-    let toks = lexer::lex(&src, fid).map_err(|d| report(&[d], &files, o.fmt))?;
-    let module = parser::parse(toks).map_err(|d| report(&[d], &files, o.fmt))?;
-    let checked = infer::check(&module).map_err(|ds| report(&ds, &files, o.fmt))?;
+    let toks = lexer::lex(&src, fid).map_err(|d| Fail::Diags(diags(&[d], &files, o.fmt)))?;
+    let module = parser::parse(toks).map_err(|d| Fail::Diags(diags(&[d], &files, o.fmt)))?;
+    let checked = infer::check(&module).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
     let mut semantic = own::check(&module);
     semantic.append(&mut total::check(&module));
     if !semantic.is_empty() {
-        return Err(report(&semantic, &files, o.fmt));
+        return Err(Fail::Diags(diags(&semantic, &files, o.fmt)));
     }
     if o.cmd == "check" {
         return Ok(ExitCode::SUCCESS);
     }
 
     let stem = o.file.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or("out".into());
-    let c_src = codegen::generate(&module, &checked, &stem).map_err(|ds| report(&ds, &files, o.fmt))?;
+    let c_src = codegen::generate(&module, &checked, &stem).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
     let exe = o.out.clone().unwrap_or_else(|| o.file.with_extension(""));
 
     // ponytail: build in a sibling directory, no temp-dir crate, no cleanup thread.
@@ -188,7 +211,7 @@ fn cc(dir: &Path, c_path: &Path, exe: &Path, m: &ast::Module) -> Result<(), Stri
     Ok(())
 }
 
-fn report(ds: &[Diag], files: &Files, fmt: DiagFormat) -> String {
+fn diags(ds: &[Diag], files: &Files, fmt: DiagFormat) -> String {
     let body: Vec<String> = ds.iter().map(|d| diag::render(d, files, fmt)).collect();
     match fmt {
         DiagFormat::Json => format!("[{}]", body.join(",")),

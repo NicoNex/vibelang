@@ -38,3 +38,40 @@ fn bad_program_reports_a_diagnostic() {
     assert!(!ok, "a type error must fail the check");
     assert!(out.contains("type.mismatch"), "expected type.mismatch, got:\n{out}");
 }
+
+#[test]
+fn c_ffi_calls_libc() {
+    let (ok, out) = vibe(&["run", "examples/ffi.vibe"]);
+    assert!(ok, "ext c example failed:\n{out}");
+    assert!(out.contains("through libc"), "libc puts must run:\n{out}");
+    assert!(out.contains("puts returned 13"), "its result must come back:\n{out}");
+}
+
+#[test]
+fn exported_functions_get_a_header() {
+    let (ok, out) = vibe(&["build", "examples/ledger.vibe"]);
+    assert!(ok, "build failed:\n{out}");
+    let h = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/.vibe-ledger/ledger.h"),
+    )
+    .expect("a header is generated for `exp c`");
+    assert!(h.contains("double Ledger_mean(VbVal x0);"), "mean must be exported:\n{h}");
+    assert!(h.contains("NOT VERIFIED ACROSS THE BOUNDARY"), "the precondition must be flagged:\n{h}");
+}
+
+#[test]
+fn json_diagnostics_are_json() {
+    let (ok, out) = vibe(&["check", "tests/bad.vibe", "--diag=json"]);
+    assert!(!ok);
+    assert!(out.trim_start().starts_with("[{"), "expected a JSON array, got:\n{out}");
+    assert!(out.contains("\"code\""), "expected a code field, got:\n{out}");
+}
+
+#[test]
+fn emit_c_keeps_the_generated_source() {
+    let (ok, out) = vibe(&["build", "examples/hello.vibe", "--emit-c"]);
+    assert!(ok, "build --emit-c failed:\n{out}");
+    let c = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/hello.c");
+    assert!(c.exists(), "--emit-c must leave the C next to the output");
+    std::fs::remove_file(c).ok();
+}
