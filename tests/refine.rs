@@ -72,3 +72,33 @@ fn an_open_obligation_is_an_error_with_a_counterexample() {
     assert!(out.contains("\u{22a8}"), "counterexample missing:\n{out}");
     assert!(out.contains("fix: RefineBad.div_any.sig += b != 0"), "{out}");
 }
+
+#[test]
+fn a_refinement_survives_a_constructor_pattern() {
+    if !have_z3() {
+        return;
+    }
+    let (ok, out) = vibe(&["check", "--prove", "tests/refine_ctor.vibe"]);
+    assert!(ok, "the `Ok []` arm and the record invariant discharge these:\n{out}");
+}
+
+#[test]
+fn without_the_empty_arm_the_same_call_is_open() {
+    if !have_z3() {
+        return;
+    }
+    // the arm above is what teaches the solver `len xs != 0`; drop it and the
+    // proof must fail, otherwise the previous test proves nothing
+    let src = "mod Neg\n\
+               head (v:&Vec U64, len v > 0) : U64 = get v 0\n\
+               pick (r:&Res Unit (Vec U64)) : U64 =\n  \
+                 ?r |Er e  -> 0\n     \
+                    |Ok xs -> head xs\n";
+    let dir = std::env::temp_dir().join("vibe-refine-ctor");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let f = dir.join("neg.vibe");
+    std::fs::write(&f, src).expect("write");
+    let (ok, out) = vibe(&["check", "--prove", f.to_str().expect("utf-8")]);
+    assert!(!ok, "`len xs > 0` does not follow from nothing:\n{out}");
+    assert!(out.contains("refine.unproven"), "{out}");
+}

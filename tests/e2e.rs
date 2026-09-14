@@ -44,7 +44,15 @@ fn c_ffi_calls_libc() {
     let (ok, out) = vibe(&["run", "examples/ffi.vibe"]);
     assert!(ok, "ext c example failed:\n{out}");
     assert!(out.contains("through libc"), "libc puts must run:\n{out}");
-    assert!(out.contains("puts returned 13"), "its result must come back:\n{out}");
+    // C says only that `puts` returns a nonnegative value on success; the exact
+    // number is the libc's business (glibc gives the byte count, macOS does not)
+    let n: i32 = out
+        .split("puts returned ")
+        .nth(1)
+        .and_then(|t| t.split_whitespace().next())
+        .and_then(|t| t.parse().ok())
+        .unwrap_or_else(|| panic!("its result must come back:\n{out}"));
+    assert!(n >= 0, "puts reported failure: {n}\n{out}");
 }
 
 #[test]

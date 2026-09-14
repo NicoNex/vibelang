@@ -282,6 +282,29 @@ fn range(ty: &str) -> Option<(i128, Option<i128>)> {
     }
 }
 
+fn is_container(ty: &str) -> bool {
+    matches!(ty, "Vec" | "Str" | "List" | "Slice")
+}
+
+/// The sort of a type whose values the solver can talk about directly. `None`
+/// means the value is opaque, so only its length and its invariant travel.
+fn scalar_sort(ty: &str) -> Option<Sort> {
+    match ty {
+        "F32" | "F64" => Some(Sort::Real),
+        "Bool" => Some(Sort::Bool),
+        _ if range(ty).is_some() => Some(Sort::Int),
+        _ => None,
+    }
+}
+
+fn conj(mut parts: Vec<String>) -> String {
+    if parts.len() == 1 {
+        parts.pop().expect("checked non-empty")
+    } else {
+        format!("(and {})", parts.join(" "))
+    }
+}
+
 fn field_tys(info: &crate::types::RecordInfo) -> HashMap<String, String> {
     info.fields
         .iter()
@@ -548,6 +571,7 @@ impl<'a> Gen<'a> {
                 let mut seen: Vec<String> = Vec::new();
                 for (p, body) in arms {
                     let k = self.hyps.len();
+                    let tys = self.tys.clone();
                     for n in &seen {
                         self.hyps.push(n.clone());
                     }
@@ -557,18 +581,23 @@ impl<'a> Gen<'a> {
                     }
                     self.expr(body);
                     self.hyps.truncate(k);
+                    self.tys = tys;
                 }
             }
             _ => {}
         }
     }
 
-    /// What a branch teaches the solver (spec §8.3). ponytail: literal, boolean
-    /// and list-length patterns only. Constructor patterns bind values whose
-    /// refinements stay invisible, so `Ok ts -> mean &ts` does not yet prove.
-    /// Upgrade path: model ADTs as SMT datatypes and propagate field
-    /// refinements through the binding.
+    /// What a branch teaches the solver (spec §8.3). Literal, boolean and
+    /// list-length patterns speak about the scrutinee's own term; a constructor
+    /// pattern goes through `pat_facts`, which names the payload positionally,
+    /// so a refinement of the payload survives the binding.
     fn arm_hyp(&mut self, s: &Option<(String, Sort)>, scrut: &Expr, p: &Pat) -> Option<String> {
+        if let Pat::Ctor(..) = p {
+            let v = as_name(strip(scrut))?;
+            let ty = self.ty_of(scrut);
+            return self.pat_facts(&v, ty, p);
+        }
         let (t, k) = s.clone()?;
         match p {
             Pat::Int(n) if k == Sort::Int => Some(format!("(= {t} {})", int_lit(*n as i128))),
@@ -582,6 +611,82 @@ impl<'a> Gen<'a> {
             }
             _ => None,
         }
+    }
+
+    /// Facts about the value at SMT path `v` (declared type `ty`) when pattern
+    /// `p` matches it. The result is the arm's *guard*: it is negated into the
+    /// arms below, so a later arm learns that an earlier one did not fire.
+    /// Bindings the pattern introduces are pushed straight onto `hyps` instead,
+    /// because they hold only inside this arm and must never be negated.
+    ///
+    /// ponytail: a constructor is a `tag_v` integer plus positional payload
+    /// paths, not a real SMT datatype. That carries tag exclusivity and payload
+    /// refinements, which is what §8.3 asks for. Upgrade path: emit
+    /// `declare-datatypes` if a proof ever needs to reason about a constructor
+    /// no arm names.
+    fn pat_facts(&mut self, v: &str, ty: Option<String>, p: &Pat) -> Option<String> {
+        match p {
+            Pat::Var(n) => {
+                self.bind(n, v, ty);
+                None
+            }
+            Pat::Int(i) => {
+                let (s, _) = self.sym(v.to_string(), Sort::Int);
+                Some(format!("(= {s} {})", int_lit(*i as i128)))
+            }
+            Pat::Bool(b) => {
+                let (s, _) = self.sym(v.to_string(), Sort::Bool);
+                Some(if *b { s } else { format!("(not {s})") })
+            }
+            Pat::List(ps) => {
+                let l = self.len_sym(v);
+                Some(format!("(= {l} {})", ps.len()))
+            }
+            Pat::Ctor(c, args) => {
+                let info = self.ck.data.ctors.get(c)?.clone();
+                let (tag, _) = self.sym(format!("tag_{v}"), Sort::Int);
+                let mut parts = vec![format!("(= {tag} {})", info.tag)];
+                for (i, sub) in args.iter().enumerate() {
+                    let path = format!("{v}_{i}");
+                    let aty = info.args.get(i).and_then(base_name);
+                    if let Some(g) = self.pat_facts(&path, aty, sub) {
+                        parts.push(g);
+                    }
+                }
+                Some(conj(parts))
+            }
+            _ => None,
+        }
+    }
+
+    /// `n` names the value at path `v`. Alias the scalar term when the type has
+    /// one, alias the length for a container (`len` is an opaque symbol keyed on
+    /// the name, so the alias is the only thing that carries `len ts > 0` across
+    /// the binding), and give `n` the context any parameter of that type gets.
+    fn bind(&mut self, n: &str, v: &str, ty: Option<String>) {
+        if n == v {
+            return;
+        }
+        if let Some(t) = &ty {
+            self.tys.insert(n.to_string(), t.clone());
+            if let Some(k) = scalar_sort(t) {
+                let (a, _) = self.sym(n.to_string(), k);
+                let (b, _) = self.sym(v.to_string(), k);
+                self.hyps.push(format!("(= {a} {b})"));
+            }
+        }
+        if ty.as_deref().map_or(true, is_container) {
+            let ln = self.len_sym(n);
+            let lv = self.len_sym(v);
+            self.hyps.push(format!("(= {ln} {lv})"));
+            self.hyps.push(format!("(>= {lv} 0)"));
+        }
+        self.range_hyp(n);
+        self.inv_hyps(n);
+    }
+
+    fn len_sym(&mut self, v: &str) -> String {
+        self.sym(format!("len_{v}"), Sort::Int).0
     }
 
     fn arith(&mut self, e: &Expr, op: &str, a: &Expr, b: &Expr) {

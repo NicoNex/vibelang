@@ -53,7 +53,7 @@ Every design decision falls out of that:
 
 The style guide is therefore empty, and the formatter is the parser refusing the file. The bikeshed is a parse error.
 
-Human readability is not ignored. It is a *derived* goal, to be served by projection tools rather than carved into the syntax. You read the rendering; the generator writes the canonical form. (Those tools do not exist yet. See [Status](#status).)
+Human readability is not ignored. It is a *derived* goal, to be served by projection tools rather than carved into the syntax. You read the rendering; the generator writes the canonical form. (Those tools are `vibe view`. See [Status](#status).)
 
 ---
 
@@ -77,7 +77,7 @@ This is the section where a language README usually lists adjectives. Here it is
 The specification describes more than the compiler currently proves. Every project has this list; most call it the roadmap, phrase it in the future tense and move it to the bottom of the page. Here it sits directly under the feature list, because the distance between the two is what a type checker is for:
 
 - **Refinement types** (`mean (ts:&Vec Tx, len ts>0)`) parse and type-check as boolean expressions in the parameter scope, and are **asserted at run time** unless you ask for proof.
-- **Refinement obligations** are generated for division, indexing, overflow, record invariants and call-site preconditions, and `vibe check --prove` discharges them with `z3`. Without `--prove`, `vibe check` only counts what is left open, and values bound by a constructor pattern do not carry their refinements into the solver yet — so the reference program compiles for a weaker reason than the spec intends.
+- **Refinement obligations** are generated for division, indexing, overflow, record invariants and call-site preconditions, and `vibe check --prove` discharges them with `z3`. Without `--prove`, `vibe check` only counts what is left open. A constructor pattern carries its payload into the solver, so an earlier `Ok [] ->` arm is what discharges a later `len ts > 0` — no explicit check, which is the point of the reference program.
 - **Memory.** Allocation is a bump allocator; only an `arena a in ...` block gives memory back, in bulk. Affine checking covers declared parameters, not `let` bindings or pattern variables; there is no full borrow checker and no escape analysis for closures.
 
 ---
@@ -151,6 +151,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH)
 - the projection views: `vibe view` (canonical form, byte-identical on the examples), `--sig-only`, `--explicit`, `--flow`
 - `arena a in ...` blocks, which release everything they allocated when they end
+- refinements of values bound by a constructor pattern: an arm learns the constructor tag, the payload's length, and the payload's record invariant
 - the spec's Appendix A reference program compiles and runs
 
 **Partial**
@@ -160,7 +161,6 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 
 **Not yet**
 
-- refinements of values bound by a constructor pattern, which is what the reference program's `Ok ts -> mean &ts` actually needs
 - a full borrow checker, and escape analysis for closures
 - freeing memory outside an `arena` block
 - structured `patch`
