@@ -3,6 +3,7 @@
 //! vibe check <file> [--diag=prose|struct|json]
 //! vibe build <file> [-o out] [--emit-c] [--diag=...]
 //! vibe run   <file> [--diag=...] [-- args...]
+//! vibe view  <file> [--sig-only|--explicit|--flow]
 
 mod ast;
 mod codegen;
@@ -14,6 +15,7 @@ mod parser;
 mod refine;
 mod total;
 mod types;
+mod view;
 
 use diag::{DiagFormat, Diag, Files};
 use std::path::{Path, PathBuf};
@@ -23,9 +25,10 @@ const RT_C: &str = include_str!("../runtime/vibert.c");
 const RT_H: &str = include_str!("../runtime/vibert.h");
 
 const USAGE: &str = "\
-usage: vibe <check|build|run> <file.vibe> [options]
+usage: vibe <check|build|run|view> <file.vibe> [options]
   --diag=prose|struct|json   diagnostic rendering (default: prose)
   --prove                    discharge refinement obligations with z3 (§7.3)
+  --sig-only|--explicit|--flow   projection to print (view; default: canonical)
   -o <path>                  output executable (build)
   --emit-c                   also keep the generated C next to the output
   -- <args...>               arguments passed to the program (run)
@@ -72,6 +75,7 @@ struct Opts {
     fmt: DiagFormat,
     emit_c: bool,
     prove: bool,
+    view: view::Mode,
     prog_args: Vec<String>,
 }
 
@@ -83,6 +87,7 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
         fmt: DiagFormat::Prose,
         emit_c: false,
         prove: false,
+        view: view::Mode::Canon,
         prog_args: Vec::new(),
     };
     let mut i = 0;
@@ -96,6 +101,9 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
             }
             "--emit-c" => o.emit_c = true,
             "--prove" => o.prove = true,
+            "--sig-only" => o.view = view::Mode::SigOnly,
+            "--explicit" => o.view = view::Mode::Explicit,
+            "--flow" => o.view = view::Mode::Flow,
             "-h" | "--help" => return Err(USAGE.to_string()),
             "-o" => {
                 i += 1;
@@ -124,7 +132,7 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
 
 fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     let o = parse_args(argv)?;
-    if !matches!(o.cmd.as_str(), "check" | "build" | "run") {
+    if !matches!(o.cmd.as_str(), "check" | "build" | "run" | "view") {
         return Err(Fail::Driver(USAGE.to_string()));
     }
 
@@ -136,6 +144,11 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     let toks = lexer::lex(&src, fid).map_err(|d| Fail::Diags(diags(&[d], &files, o.fmt)))?;
     let module = parser::parse(toks).map_err(|d| Fail::Diags(diags(&[d], &files, o.fmt)))?;
     let checked = infer::check(&module).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
+    // A projection is a reading tool: it works on code that does not yet prove.
+    if o.cmd == "view" {
+        print!("{}", view::render(&module, &checked, o.view));
+        return Ok(ExitCode::SUCCESS);
+    }
     let mut semantic = own::check(&module);
     semantic.append(&mut total::check(&module));
     // Refinements: proved on demand, counted on `check`, quiet on build/run so
