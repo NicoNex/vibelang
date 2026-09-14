@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="380" viewBox="0 0 1280 380" role="img" aria-label="Vibelang: a programming language that is not for you">
+  <title>Vibelang</title>
+  <desc>A terminal window showing a vibe check diagnostic: you are the reviewer now.</desc>
+
+  <style>
+    .m  { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+    .dim  { fill: #6e7681; }
+    .txt  { fill: #adbac7; }
+    .lit  { fill: #e6edf3; }
+    .grn  { fill: #7ee787; }
+    .red  { fill: #ff7b72; }
+    .yel  { fill: #e3b341; }
+  </style>
+
+  <!-- background: painted explicitly, no theme queries -->
+  <rect x="0" y="0" width="1280" height="380" fill="#0d1117"/>
+  <rect x="0" y="0" width="1280" height="48" fill="#11161d"/>
+  <line x1="0" y1="48.5" x2="1280" y2="48.5" stroke="#21262d" stroke-width="1"/>
+  <rect x="0.5" y="0.5" width="1279" height="379" fill="none" stroke="#30363d" stroke-width="1"/>
+
+  <!-- title bar -->
+  <text class="m dim" x="32" y="30" font-size="15">~/vibelang</text>
+  <text class="m dim" x="1248" y="30" font-size="15" text-anchor="end">one canonical form per program</text>
+
+  <!-- prompt -->
+  <text class="m" x="32" y="92" font-size="17"><tspan class="grn">$</tspan><tspan class="txt" xml:space="preserve"> vibe check you.vibe</tspan></text>
+
+  <!-- wordmark -->
+  <text class="m lit" x="32" y="196" font-size="86" font-weight="700" letter-spacing="12">VIBELANG</text>
+  <text class="m dim" x="36" y="234" font-size="18">a programming language that is not for you</text>
+
+  <line x1="32" y1="262.5" x2="1248" y2="262.5" stroke="#1c2128" stroke-width="1"/>
+
+  <!-- diagnostic -->
+  <text class="m" x="32" y="294" font-size="17" xml:space="preserve"><tspan class="dim">vibe: </tspan><tspan class="red">✗ </tspan><tspan class="lit">You.author </tspan><tspan class="yel">role.reassigned </tspan><tspan class="dim">⊨ </tspan><tspan class="grn">you are the reviewer now</tspan></text>
+  <text class="m" x="32" y="320" font-size="17" xml:space="preserve"><tspan class="dim">  msg: </tspan><tspan class="txt">this language was never trying to please you</tspan></text>
+  <text class="m" x="32" y="346" font-size="17" xml:space="preserve"><tspan class="dim">  fix: </tspan><tspan class="txt">read the output; the generator writes the input</tspan></text>
+</svg>

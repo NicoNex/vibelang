@@ -1,3 +1,5 @@
+![Vibelang](assets/banner.svg)
+
 # Vibelang
 
 <sub>Italiano: [README.it.md](README.it.md)</sub>
@@ -5,6 +7,8 @@
 **A programming language that is not for you.**
 
 Vibelang is not designed to be pleasant to write. It is designed to be *generated*: one canonical form per program, no syntactic sugar, a type checker that rejects what it cannot account for, and one metric the rest of language design has never optimized for — the total tokens burned, generation plus diagnostics plus retries, before a program is correct.
+
+The target audience is a statistical model. It has no opinions about brace placement, never opens an issue about the ternary operator, and does not need onboarding. Designing for it is, in that narrow sense, a relief.
 
 You are the reviewer now, not the author. If that sounds like a demotion, you have understood the project correctly.
 
@@ -26,6 +30,8 @@ $ vibe run examples/ledger.vibe
 n=3 tot=20.75 avg=6.91667 top=b
 ```
 
+There is no model in this repository. No API key, no inference, no chat window, nothing that autocompletes. Vibelang is the unglamorous half of the arrangement: the part that reads what the machine wrote and tells it, in a stable machine-readable format, that it is wrong.
+
 It is early. The [Status](#status) section says exactly how early, in the only useful form: a list of what works, a list of what half-works, and a list of what is still paper.
 
 ---
@@ -33,6 +39,8 @@ It is early. The [Status](#status) section says exactly how early, in the only u
 ## Why it exists
 
 The languages we use have been optimized for sixty years for one thing: being pleasant for a human to write and read. Syntactic sugar, several ways to say the same thing, conventions inferred from context. An experienced programmer loves all of it. A language model pays for all of it — every syntactic ambiguity is a fork where the generator can take the wrong turn, and every wrong turn is another retry, which is more tokens, more latency, more money.
+
+All of that research is hospitality, and the guest has stopped turning up to write the first draft.
 
 So Vibelang asks a different question. Not "how convenient is this to write", but **how many tokens does it take, end to end, to arrive at a correct program.** Not source brevity. The cost of the generate-compile-fix loop.
 
@@ -43,13 +51,15 @@ Every design decision falls out of that:
 - **failure at compile time, not at three in the morning** — a non-exhaustive `match`, a use-after-move, an unproven precondition are errors, not surprises;
 - **diagnostics with a mechanically applicable `fix` field** — so the next attempt is an edit, not a guess.
 
+The style guide is therefore empty, and the formatter is the parser refusing the file. The bikeshed is a parse error.
+
 Human readability is not ignored. It is a *derived* goal, to be served by projection tools rather than carved into the syntax. You read the rendering; the generator writes the canonical form. (Those tools do not exist yet. See [Status](#status).)
 
 ---
 
 ## What the compiler enforces today
 
-Everything in this list is checked by the code in `src/` and covered by `cargo test`.
+This is the section where a language README usually lists adjectives. Here it is a list of things that will stop you, all of them checked by the code in `src/` and covered by `cargo test`.
 
 - **Canonical form, enforced not normalized.** Declarations start in column 1; redundant parentheses are an error; two blank lines in a row are an error. The parser rejects and hands back a `fix`; it never quietly reformats. (Three rules today, not the spec's full §3.1 list.)
 - **Hindley–Milner inference.** Full type inference over ADTs with payloads, records, tuples and lists. Signatures are declared; bodies are inferred.
@@ -64,7 +74,7 @@ Everything in this list is checked by the code in `src/` and covered by `cargo t
 
 ### Designed, not yet enforced
 
-The specification describes more than the compiler currently proves. Stated plainly, because that difference is the whole point of a type checker:
+The specification describes more than the compiler currently proves. Every project has this list; most call it the roadmap, phrase it in the future tense and move it to the bottom of the page. Here it sits directly under the feature list, because the distance between the two is what a type checker is for:
 
 - **Refinement types** (`mean (ts:&Vec Tx, len ts>0)`) parse and type-check as boolean expressions in the parameter scope, and are **asserted at run time** unless you ask for proof.
 - **Refinement obligations** are generated for division, indexing, overflow, record invariants and call-site preconditions, and `vibe check --prove` discharges them with `z3`. Without `--prove`, `vibe check` only counts what is left open, and values bound by a constructor pattern do not carry their refinements into the solver yet — so the reference program compiles for a weaker reason than the spec intends.
@@ -73,6 +83,8 @@ The specification describes more than the compiler currently proves. Stated plai
 ---
 
 ## Diagnostics
+
+Most compilers are written as if apologizing to a human. Vibelang files a report.
 
 Prose by default:
 
@@ -124,7 +136,7 @@ vibe: ✗ Move.twice own.use_after_move ⊨ first moved at line 5, column 28
 
 ## Status
 
-Honest state of `main` today. Moving a line from one list to the next is the intended way to edit this section.
+Honest state of `main` today. Moving a line from one list to the next is the intended way to edit this section. No percentage complete, no progress bar, no quarters.
 
 **Works**
 
@@ -157,7 +169,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 
 Several of these are being worked on in parallel, so this list moves faster than the prose above it.
 
-The compiler is blunt about its own maturity at run time, too:
+The compiler is blunt about its own maturity at run time, too, which is more than most of us manage:
 
 ```console
 $ vibe run refine.vibe
@@ -209,6 +221,8 @@ vibe: ✗ Color.show_c.match match.nonexhaustive ⊨ missing Blue
   fix: add `|Blue -> ...`
 ```
 
+The `fix` field is the whole product. It is not advice, it is an edit, and it is addressed to something that does not need to be persuaded.
+
 Apply that `fix` — add `|Blue  -> dup "blue"` under the other arms — and the same file builds and runs:
 
 ```console
@@ -224,7 +238,7 @@ $ ./ledger
 n=3 tot=20.75 avg=6.91667 top=b
 ```
 
-The whole CLI is three commands:
+The whole CLI is three commands. No dashboard, no plugin directory, nothing to log into:
 
 ```
 vibe check <file.vibe>            type-check only; silent on success
@@ -319,13 +333,15 @@ emits C-ABI symbols and a header. Preconditions travel into the header as a comm
 double Ledger_mean(VbVal x0);
 ```
 
+Shouting it in a comment is not verification. It is the most a header can do, and pretending otherwise is how guarantees leak out of a project.
+
 The exported signature currently passes the uniform runtime value `VbVal`. The spec's `own T` / `ref T` ownership qualifiers, and the generated `<name>_free`, are not implemented yet.
 
 ---
 
 ## Further reading
 
-- [`vibelang-spec.md`](vibelang-spec.md) — the normative specification: goals and non-goals (§0), normative principles (§1), grammar and canonicity rules (§3), ownership (§4), effects (§5), totality (§6), refinements (§7), C interop (§10), implementation phases (§15). Currently written in Italian.
+- [`vibelang-spec.md`](vibelang-spec.md) — the normative specification: goals and non-goals (§0), normative principles (§1), grammar and canonicity rules (§3), ownership (§4), effects (§5), totality (§6), refinements (§7), C interop (§10), implementation phases (§15). Currently written in Italian. The generator does not mind.
 - [`README.it.md`](README.it.md) — this page in Italian.
 - `examples/` — the reference program and a hello world. `tests/` — the end-to-end suite, which is also the most reliable description of what the compiler actually does.
 
