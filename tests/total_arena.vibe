@@ -1,0 +1,8 @@
+mod Rec
+
+loop_ (n:U64) : U64 =
+  arena a in
+    loop_ n
+
+main : E! Unit =
+  out (fmt "{}\n" (loop_ 1))

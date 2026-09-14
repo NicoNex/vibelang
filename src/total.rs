@@ -194,6 +194,7 @@ fn walk(e: &Expr, f: &mut dyn FnMut(&Expr)) {
                 walk(x, f);
             }
         }
+        ExprKind::Arena(_, b) => walk(b, f),
         _ => {}
     }
 }

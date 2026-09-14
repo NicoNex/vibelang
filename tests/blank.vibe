@@ -1,0 +1,6 @@
+mod Blank
+
+main : E! Unit =
+
+
+  out "x\n"

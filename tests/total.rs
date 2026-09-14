@@ -44,3 +44,10 @@ fn examples_still_terminate() {
         assert!(ok, "{e} failed to check:\n{out}");
     }
 }
+
+#[test]
+fn recursion_inside_an_arena_is_still_recursion() {
+    let (ok, out) = check("tests/total_arena.vibe");
+    assert!(!ok, "a recursive call inside an `arena` block must still need a measure");
+    assert!(out.contains("total.no_measure"), "expected total.no_measure, got:\n{out}");
+}

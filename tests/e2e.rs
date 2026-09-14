@@ -75,3 +75,10 @@ fn emit_c_keeps_the_generated_source() {
     assert!(c.exists(), "--emit-c must leave the C next to the output");
     std::fs::remove_file(c).ok();
 }
+
+#[test]
+fn two_blank_lines_are_not_canonical() {
+    let (ok, out) = vibe(&["check", "tests/blank.vibe", "--diag=struct"]);
+    assert!(!ok, "two blank lines in a row must be rejected");
+    assert!(out.contains("canon.blankline"), "expected canon.blankline, got:\n{out}");
+}

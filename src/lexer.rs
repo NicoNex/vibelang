@@ -108,7 +108,7 @@ impl<'a> Lexer<'a> {
                 if blank {
                     blank_run += 1;
                     // P1: one blank line separates declarations, never two.
-                    if blank_run > 2 {
+                    if blank_run > 1 {
                         return Err(Diag::error(
                             self.span(self.pos),
                             "canon.blankline",

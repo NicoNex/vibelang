@@ -210,6 +210,8 @@ fn cc(dir: &Path, c_path: &Path, exe: &Path, m: &ast::Module) -> Result<(), Stri
         if !out.status.success() {
             return Err(format!("pkg-config: {}", String::from_utf8_lossy(&out.stderr).trim()));
         }
+        // ponytail: whitespace split, so a flag containing a space (`-I/opt/a b`)
+        // breaks. Parse quoting if a real package ever needs it.
         cmd.args(String::from_utf8_lossy(&out.stdout).split_whitespace().map(String::from));
     }
     for l in &links {
