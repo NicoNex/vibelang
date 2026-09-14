@@ -606,9 +606,9 @@ type Err = Bad Str | Num Str | Void
 
 parse (ln:&Str) : Res Err Tx =
   ?split ',' ln
-   |[s,q,p] -> ?(u32 q, f64 p)
-                |(Ok n, Ok v) -> mk (dup s) n v
-                |_            -> Er (Num (dup ln))
+   |[s,q,p] -> ?(parse_u32 q, parse_f64 p)
+                |(Some n, Some v) -> mk (dup s) n v
+                |_                -> Er (Num (dup ln))
    |_       -> Er (Bad (dup ln))
 
 mk (s:Str) (n:U32) (v:F64) : Res Err Tx =
