@@ -8,8 +8,16 @@
 //! their affinity comes from inference, which records it under the span of the
 //! expression each binder scopes over (`Checked::affine`).
 //!
-//! ponytail: a closure's captures are still reads, not moves. Deciding
-//! otherwise is escape analysis (spec §4.6), which is a separate pass.
+//! A closure that outlives the call owns what it captured (spec §4.6), so a
+//! capture inside an escaping lambda is a move; one inside a lambda that is
+//! consumed during the call — the argument to `map`, say — is a read.
+//!
+//! ponytail: "outlives the call" is read as "its value reaches the result",
+//! through match arms, `let` and `<-` bodies, and any tuple, list or record
+//! built in that position. A lambda stored in a structure that a callee then
+//! returns is missed. §4.6 asks for an error demanding an explicit `move` when
+//! the analysis cannot decide; deciding conservatively costs no soundness here,
+//! because the direction it errs in is "read", and reads are already checked.
 
 use crate::ast::*;
 use crate::diag::{Diag, Span};
@@ -31,12 +39,15 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
     let mut out = Vec::new();
     let mut inplace = HashSet::new();
     for f in m.funs().filter(|f| !f.ghost) {
+        let mut escaping = HashSet::new();
+        escapes(&f.body, &mut escaping);
         let mut st = State {
             moved: HashMap::new(),
             errors: Vec::new(),
             inplace: HashSet::new(),
             path: format!("{}.{}", f.home, f.name),
             ck,
+            escaping,
         };
         let mut owned: Vec<&str> = Vec::new();
         for p in &f.params {
@@ -76,6 +87,9 @@ struct State<'a> {
     inplace: HashSet<(usize, usize, usize)>,
     path: String,
     ck: &'a Checked,
+    /// Lambdas whose value reaches the function's result, so their captures
+    /// outlive the call.
+    escaping: HashSet<(usize, usize, usize)>,
 }
 
 impl State<'_> {
@@ -155,9 +169,13 @@ impl State<'_> {
                 let inner = self.scope(owned, &bound, body.span);
                 self.walk(body, mode, &inner);
             }
-            // ponytail: captures are treated as reads. Escape analysis (spec §4.6)
-            // is what decides whether a closure owns them; it does not exist yet.
-            Lambda(_, body) => self.walk(body, Mode::Borrow, owned),
+            Lambda(_, body) => {
+                let key = (e.span.file, e.span.line, e.span.col);
+                // An escaping closure owns its captures; one that dies with the
+                // call only reads them (spec §4.6).
+                let m = if self.escaping.contains(&key) { Mode::Own } else { Mode::Borrow };
+                self.walk(body, m, owned)
+            }
             Match(scrut, arms) => {
                 self.walk(scrut, Mode::Borrow, owned);
                 // Arms are alternatives: each starts from the state before the
@@ -177,6 +195,23 @@ impl State<'_> {
             }
             Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Ctor(_) => {}
         }
+    }
+}
+
+/// Lambdas in result position: the value of the expression, or of an arm, or a
+/// component of a structure built there.
+fn escapes(e: &Expr, out: &mut HashSet<(usize, usize, usize)>) {
+    use ExprKind::*;
+    match &e.kind {
+        // an inner lambda's captures are the outer lambda's problem, not ours
+        Lambda(..) => {
+            out.insert((e.span.file, e.span.line, e.span.col));
+        }
+        Match(_, arms) => arms.iter().for_each(|(_, b)| escapes(b, out)),
+        Let(_, _, b) | Bind(_, _, b) | Arena(_, b) | Borrow(b) => escapes(b, out),
+        Tuple(xs) | List(xs) => xs.iter().for_each(|x| escapes(x, out)),
+        Record(_, fields) => fields.iter().for_each(|(_, v)| escapes(v, out)),
+        _ => {}
     }
 }
 

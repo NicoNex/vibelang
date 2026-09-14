@@ -152,6 +152,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - termination checking: inferred measures, and `%expr` when inference gives up
 - refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH)
 - the projection views: `vibe view` (canonical form, byte-identical on every `.vibe` file in the repository, comments included), `--sig-only`, `--explicit`, `--flow`
+- escape analysis for closures: one whose value reaches the result owns its captures, one consumed during the call reads them
 - `arena a in ...` blocks, which release everything they allocated when they end
 - automatic release per frame: a function that cannot hand a pointer to C releases everything it allocated when it returns, and the runtime cancels the release when the result is itself heap-allocated
 - refinements of values bound by a constructor pattern: an arm learns the constructor tag, the payload's length, and the payload's record invariant
@@ -160,12 +161,12 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 
 **Partial**
 
-- **ownership** — affine use checking of every owned name: parameters, `let` and `<-` binders, and names a pattern binds, the last two typed by inference since they carry no written type. In-place update of uniquely owned records. Memory is a bump allocator that now releases per frame (see below), but a closure's captures are still reads rather than moves.
-- **refinements** — parsed, type-checked, and asserted at run time. Not proven.
+- **ownership** — affine use checking of every owned name: parameters, `let` and `<-` binders, names a pattern binds, and the captures of a closure that outlives its call. In-place update of uniquely owned records. What is missing is the allocation half of §4.6: a non-escaping closure should live on the stack, and today every closure is heap-allocated.
+- **refinements** — discharged with `vibe check --prove`, asserted at run time otherwise. `--prove` is opt-in rather than the default, and it needs `z3` on PATH.
 
 **Not yet**
 
-- a closure that owns its captures rather than reading them
+- stack allocation for a closure that does not escape (§4.6 wants zero cost; the ownership half of that rule is done, the allocation half is not)
 
 Several of these are being worked on in parallel, so this list moves faster than the prose above it.
 

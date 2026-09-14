@@ -1,0 +1,5 @@
+mod Capture
+
+;; The closure is the result, so it outlives the call and owns what it
+;; captured: `s` cannot be moved into the vector twice (spec §4.6).
+grab (s:Str) : Str -> Vec Str = \x -> push (push (single s) s) x

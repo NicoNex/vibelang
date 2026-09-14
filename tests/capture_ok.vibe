@@ -1,0 +1,7 @@
+mod CaptureOk
+
+;; Escaping, but the capture is moved once, which is what owning it means.
+once (s:Str) : Str -> Vec Str = \x -> push (single s) x
+
+;; Not escaping: the closure dies with the call, so it only reads `s`.
+twice (s:Str) (xs:&Vec Str) : Vec Str = map (\x -> concat &s &x) xs

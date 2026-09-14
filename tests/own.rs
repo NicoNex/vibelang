@@ -78,3 +78,17 @@ fn a_scalar_binder_is_copied() {
     let (ok, out) = vibe(&["check", "tests/own_let.vibe"]);
     assert!(ok, "scalars are copied, so using one twice is not a move:\n{out}");
 }
+
+#[test]
+fn an_escaping_closure_owns_its_captures() {
+    let (ok, out) = vibe(&["check", "tests/capture.vibe", "--diag=struct"]);
+    assert!(!ok, "a closure that outlives the call moves what it captured:\n{out}");
+    assert!(out.contains("own.use_after_move"), "{out}");
+    assert!(out.contains("Capture.grab"), "{out}");
+}
+
+#[test]
+fn a_closure_that_dies_with_the_call_only_reads() {
+    let (ok, out) = vibe(&["check", "tests/capture_ok.vibe"]);
+    assert!(ok, "the argument to `map` is consumed during the call:\n{out}");
+}
