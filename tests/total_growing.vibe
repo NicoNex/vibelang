@@ -1,0 +1,8 @@
+mod TotalGrowing
+
+;; the measure grows instead of shrinking: k-n rises as k rises
+up (k:U64) (n:U64) : U64 =
+  ?k==n |True  -> k
+        |False -> up (k+1) n %(k-n)
+
+main : E! Unit = out (show (up 0 3))

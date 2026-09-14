@@ -10,6 +10,7 @@ mod diag;
 mod infer;
 mod lexer;
 mod parser;
+mod total;
 mod types;
 
 use diag::{DiagFormat, Diag, Files};
@@ -106,6 +107,10 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
     let toks = lexer::lex(&src, fid).map_err(|d| report(&[d], &files, o.fmt))?;
     let module = parser::parse(toks).map_err(|d| report(&[d], &files, o.fmt))?;
     let checked = infer::check(&module).map_err(|ds| report(&ds, &files, o.fmt))?;
+    let term = total::check(&module);
+    if !term.is_empty() {
+        return Err(report(&term, &files, o.fmt));
+    }
     if o.cmd == "check" {
         return Ok(ExitCode::SUCCESS);
     }
