@@ -235,7 +235,7 @@ Le fasi 1–3 sono quelle che rendono il linguaggio già usabile per scrivere e 
 
 ## Licenza
 
-Nessuna licenza è ancora stata scelta. Il progetto è pre-alpha: la superficie del linguaggio, la sintassi e persino la lista dei principi normativi (§1 della specifica) possono ancora cambiare prima che valga la pena impegnarsi su una licenza stabile.
+GPL-3.0-or-later (vedi [LICENSE](LICENSE)). Il progetto resta pre-alpha: la superficie del linguaggio, la sintassi e la lista dei principi normativi (§1 della specifica) possono ancora cambiare — la licenza no.
 
 ---
 

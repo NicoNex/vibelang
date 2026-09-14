@@ -3,6 +3,7 @@ name = "vibec"
 version = "0.2.0"
 edition = "2021"
 description = "Vibelang bootstrap compiler: .vibe -> C -> native executable"
+license = "GPL-3.0-or-later"
 
 [[bin]]
 name = "vibe"
