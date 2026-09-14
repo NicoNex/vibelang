@@ -1,0 +1,710 @@
+#include "vibert.h"
+
+#include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* ------------------------------------------------------------ allocator
+ * Bump allocator, never freed. Spec fase 3: allocate and do not release.
+ * vibec debt: fase 4 (ownership) replaces this with scope-bound arenas. */
+
+typedef struct VbChunk { struct VbChunk *next; size_t used, cap; char data[]; } VbChunk;
+static VbChunk *g_chunk = NULL;
+
+#define VB_CHUNK_MIN (1u << 20)
+
+void vb_init(void) {
+  if (!g_chunk) {
+    g_chunk = malloc(sizeof(VbChunk) + VB_CHUNK_MIN);
+    if (!g_chunk) { fputs("vibe: out of memory\n", stderr); exit(70); }
+    g_chunk->next = NULL; g_chunk->used = 0; g_chunk->cap = VB_CHUNK_MIN;
+  }
+}
+
+void *vb_alloc(size_t n) {
+  n = (n + 15u) & ~(size_t)15u;
+  vb_init();
+  if (g_chunk->used + n > g_chunk->cap) {
+    size_t cap = n > VB_CHUNK_MIN ? n : VB_CHUNK_MIN;
+    VbChunk *c = malloc(sizeof(VbChunk) + cap);
+    if (!c) { fputs("vibe: out of memory\n", stderr); exit(70); }
+    c->next = g_chunk; c->used = 0; c->cap = cap;
+    g_chunk = c;
+  }
+  void *p = g_chunk->data + g_chunk->used;
+  g_chunk->used += n;
+  memset(p, 0, n);
+  return p;
+}
+
+/* ---------------------------------------------------------- constructors */
+
+VbVal vb_unit(void) { VbVal v; v.tag = VB_UNIT; v.v.i = 0; return v; }
+VbVal vb_int(int64_t x) { VbVal v; v.tag = VB_INT; v.v.i = x; return v; }
+VbVal vb_uint(uint64_t x) { VbVal v; v.tag = VB_UINT; v.v.u = x; return v; }
+VbVal vb_float(double x) { VbVal v; v.tag = VB_FLOAT; v.v.f = x; return v; }
+VbVal vb_bool(bool x) { VbVal v; v.tag = VB_BOOL; v.v.b = x; return v; }
+VbVal vb_char(uint32_t x) { VbVal v; v.tag = VB_CHAR; v.v.c = x; return v; }
+VbVal vb_ptr(void *p) { VbVal v; v.tag = VB_PTR; v.v.p = p; return v; }
+VbVal vb_cstr_val(const char *s) { VbVal v; v.tag = VB_CSTR; v.v.p = (void *)s; return v; }
+
+VbVal vb_str(const char *s, size_t n) {
+  VbStr *o = vb_alloc(sizeof(VbStr));
+  o->n = n;
+  o->p = vb_alloc(n + 1);
+  if (n) memcpy(o->p, s, n);
+  o->p[n] = 0;
+  VbVal v; v.tag = VB_STR; v.v.p = o; return v;
+}
+VbVal vb_strz(const char *s) { return vb_str(s ? s : "", s ? strlen(s) : 0); }
+
+VbVal vb_obj(const VbInfo *info, uint32_t tag, uint32_t n, ...) {
+  VbObj *o = vb_alloc(sizeof(VbObj));
+  o->info = info; o->tag = tag; o->n = n;
+  o->f = n ? vb_alloc(sizeof(VbVal) * n) : NULL;
+  va_list ap; va_start(ap, n);
+  for (uint32_t i = 0; i < n; i++) o->f[i] = va_arg(ap, VbVal);
+  va_end(ap);
+  VbVal v; v.tag = VB_OBJ; v.v.p = o; return v;
+}
+
+VbVal vb_clos(VbFn fn, const char *name, uint32_t arity) {
+  VbClos *c = vb_alloc(sizeof(VbClos));
+  c->fn = fn; c->name = name; c->arity = arity; c->nargs = 0;
+  c->args = arity ? vb_alloc(sizeof(VbVal) * arity) : NULL;
+  VbVal v; v.tag = VB_CLOS; v.v.p = c; return v;
+}
+
+/* -------------------------------------------------------------- failures */
+
+void vb_fail(const char *path, const char *what) {
+  fprintf(stderr, "✗ %s %s\n", path ? path : "<program>", what);
+  exit(70);
+}
+void vb_require(bool cond, const char *path, const char *what) {
+  if (!cond) {
+    fprintf(stderr, "✗ %s refuted ⊨ %s\n", path ? path : "<program>", what);
+    fputs("  this obligation is checked at run time in the bootstrap; fase 6 discharges it statically\n",
+          stderr);
+    exit(70);
+  }
+}
+
+/* -------------------------------------------------------------- unboxing */
+
+static void expect(VbVal v, VbTag t, const char *what) {
+  if (v.tag != t) vb_fail("<runtime>", what);
+}
+int64_t vb_as_int(VbVal v) {
+  switch (v.tag) {
+    case VB_INT: return v.v.i;
+    case VB_UINT: return (int64_t)v.v.u;
+    case VB_FLOAT: return (int64_t)v.v.f;
+    case VB_BOOL: return v.v.b ? 1 : 0;
+    case VB_CHAR: return (int64_t)v.v.c;
+    default: vb_fail("<runtime>", "expected an integer"); return 0;
+  }
+}
+uint64_t vb_as_uint(VbVal v) { return (uint64_t)vb_as_int(v); }
+double vb_as_float(VbVal v) {
+  switch (v.tag) {
+    case VB_FLOAT: return v.v.f;
+    case VB_INT: return (double)v.v.i;
+    case VB_UINT: return (double)v.v.u;
+    case VB_BOOL: return v.v.b ? 1.0 : 0.0;
+    case VB_CHAR: return (double)v.v.c;
+    default: vb_fail("<runtime>", "expected a number"); return 0;
+  }
+}
+bool vb_as_bool(VbVal v) { expect(v, VB_BOOL, "expected a Bool"); return v.v.b; }
+void *vb_as_ptr(VbVal v) {
+  if (v.tag == VB_PTR || v.tag == VB_CSTR) return v.v.p;
+  if (v.tag == VB_UNIT) return NULL;
+  vb_fail("<runtime>", "expected a pointer");
+  return NULL;
+}
+const char *vb_as_cstr(VbVal v) {
+  if (v.tag == VB_CSTR || v.tag == VB_PTR) return (const char *)v.v.p;
+  if (v.tag == VB_STR) return ((VbStr *)v.v.p)->p;
+  vb_fail("<runtime>", "expected a CStr");
+  return NULL;
+}
+VbStr *vb_as_str(VbVal v) { expect(v, VB_STR, "expected a Str"); return (VbStr *)v.v.p; }
+VbVec *vb_as_vec(VbVal v) { expect(v, VB_VEC, "expected a Vec"); return (VbVec *)v.v.p; }
+VbObj *vb_as_obj(VbVal v) { expect(v, VB_OBJ, "expected a record or variant"); return (VbObj *)v.v.p; }
+
+/* ----------------------------------------------------------- application */
+
+VbVal vb_apply1(VbVal f, VbVal x) {
+  if (f.tag != VB_CLOS) vb_fail("<runtime>", "this value is not a function");
+  VbClos *c = (VbClos *)f.v.p;
+  VbClos *n = vb_alloc(sizeof(VbClos));
+  *n = *c;
+  n->args = vb_alloc(sizeof(VbVal) * (c->arity ? c->arity : 1));
+  for (uint32_t i = 0; i < c->nargs; i++) n->args[i] = c->args[i];
+  n->args[n->nargs++] = x;
+  if (n->nargs == n->arity) return n->fn(n->args);
+  VbVal v; v.tag = VB_CLOS; v.v.p = n; return v;
+}
+
+VbVal vb_applyn(VbVal f, uint32_t n, VbVal *xs) {
+  for (uint32_t i = 0; i < n; i++) f = vb_apply1(f, xs[i]);
+  return f;
+}
+
+/* ------------------------------------------------------------ arithmetic */
+
+static bool either_float(VbVal a, VbVal b) { return a.tag == VB_FLOAT || b.tag == VB_FLOAT; }
+static bool either_unsigned(VbVal a, VbVal b) { return a.tag == VB_UINT || b.tag == VB_UINT; }
+
+VbVal vb_add(VbVal a, VbVal b) {
+  if (a.tag == VB_STR && b.tag == VB_STR) return vb_concat(a, b);
+  if (either_float(a, b)) return vb_float(vb_as_float(a) + vb_as_float(b));
+  if (either_unsigned(a, b)) return vb_uint(vb_as_uint(a) + vb_as_uint(b));
+  return vb_int(vb_as_int(a) + vb_as_int(b));
+}
+VbVal vb_sub(VbVal a, VbVal b) {
+  if (either_float(a, b)) return vb_float(vb_as_float(a) - vb_as_float(b));
+  if (either_unsigned(a, b)) {
+    uint64_t x = vb_as_uint(a), y = vb_as_uint(b);
+    vb_require(x >= y, "<program>", "unsigned subtraction would wrap");
+    return vb_uint(x - y);
+  }
+  return vb_int(vb_as_int(a) - vb_as_int(b));
+}
+VbVal vb_mul(VbVal a, VbVal b) {
+  if (either_float(a, b)) return vb_float(vb_as_float(a) * vb_as_float(b));
+  if (either_unsigned(a, b)) return vb_uint(vb_as_uint(a) * vb_as_uint(b));
+  return vb_int(vb_as_int(a) * vb_as_int(b));
+}
+VbVal vb_div(VbVal a, VbVal b, const char *path) {
+  if (either_float(a, b)) {
+    double y = vb_as_float(b);
+    vb_require(y != 0.0, path, "b != 0.0");
+    return vb_float(vb_as_float(a) / y);
+  }
+  int64_t y = vb_as_int(b);
+  vb_require(y != 0, path, "b != 0");
+  if (either_unsigned(a, b)) return vb_uint(vb_as_uint(a) / (uint64_t)y);
+  return vb_int(vb_as_int(a) / y);
+}
+VbVal vb_neg(VbVal a) {
+  if (a.tag == VB_FLOAT) return vb_float(-a.v.f);
+  return vb_int(-vb_as_int(a));
+}
+
+int vb_cmp(VbVal a, VbVal b) {
+  if (a.tag == VB_STR && b.tag == VB_STR) {
+    VbStr *x = vb_as_str(a), *y = vb_as_str(b);
+    size_t n = x->n < y->n ? x->n : y->n;
+    int c = memcmp(x->p, y->p, n);
+    if (c) return c < 0 ? -1 : 1;
+    return x->n == y->n ? 0 : (x->n < y->n ? -1 : 1);
+  }
+  if (either_float(a, b)) {
+    double x = vb_as_float(a), y = vb_as_float(b);
+    return x < y ? -1 : (x > y ? 1 : 0);
+  }
+  if (either_unsigned(a, b)) {
+    uint64_t x = vb_as_uint(a), y = vb_as_uint(b);
+    return x < y ? -1 : (x > y ? 1 : 0);
+  }
+  int64_t x = vb_as_int(a), y = vb_as_int(b);
+  return x < y ? -1 : (x > y ? 1 : 0);
+}
+
+bool vb_eq(VbVal a, VbVal b) {
+  if (a.tag == VB_UNIT && b.tag == VB_UNIT) return true;
+  if (a.tag == VB_BOOL && b.tag == VB_BOOL) return a.v.b == b.v.b;
+  if (a.tag == VB_CHAR && b.tag == VB_CHAR) return a.v.c == b.v.c;
+  if (a.tag == VB_OBJ && b.tag == VB_OBJ) {
+    VbObj *x = vb_as_obj(a), *y = vb_as_obj(b);
+    if (x->tag != y->tag || x->n != y->n) return false;
+    for (uint32_t i = 0; i < x->n; i++)
+      if (!vb_eq(x->f[i], y->f[i])) return false;
+    return true;
+  }
+  if (a.tag == VB_VEC && b.tag == VB_VEC) {
+    VbVec *x = vb_as_vec(a), *y = vb_as_vec(b);
+    if (x->n != y->n) return false;
+    for (size_t i = 0; i < x->n; i++)
+      if (!vb_eq(x->a[i], y->a[i])) return false;
+    return true;
+  }
+  return vb_cmp(a, b) == 0;
+}
+
+/* ------------------------------------------------------------ objects */
+
+VbVal vb_field(VbVal o, uint32_t i) {
+  VbObj *x = vb_as_obj(o);
+  vb_require(i < x->n, "<runtime>", "field index in range");
+  return x->f[i];
+}
+uint32_t vb_tag(VbVal o) { return vb_as_obj(o)->tag; }
+
+VbVal vb_with(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals) {
+  VbObj *x = vb_as_obj(o);
+  VbObj *y = vb_alloc(sizeof(VbObj));
+  y->info = x->info; y->tag = x->tag; y->n = x->n;
+  y->f = x->n ? vb_alloc(sizeof(VbVal) * x->n) : NULL;
+  for (uint32_t i = 0; i < x->n; i++) y->f[i] = x->f[i];
+  for (uint32_t i = 0; i < nchanged; i++) y->f[idx[i]] = vals[i];
+  VbVal v; v.tag = VB_OBJ; v.v.p = y; return v;
+}
+
+/* ---------------------------------------------------------------- Vec */
+
+static VbVal wrap_vec(VbVec *w) { VbVal v; v.tag = VB_VEC; v.v.p = w; return v; }
+
+static VbVec *vec_alloc(size_t cap) {
+  VbVec *w = vb_alloc(sizeof(VbVec));
+  w->n = 0; w->cap = cap;
+  w->a = cap ? vb_alloc(sizeof(VbVal) * cap) : NULL;
+  return w;
+}
+static void vec_push(VbVec *w, VbVal x) {
+  if (w->n == w->cap) {
+    size_t cap = w->cap ? w->cap * 2 : 8;
+    VbVal *a = vb_alloc(sizeof(VbVal) * cap);
+    for (size_t i = 0; i < w->n; i++) a[i] = w->a[i];
+    w->a = a; w->cap = cap;
+  }
+  w->a[w->n++] = x;
+}
+
+VbVal vb_vec_new(void) { return wrap_vec(vec_alloc(0)); }
+VbVal vb_single(VbVal x) { VbVec *w = vec_alloc(1); vec_push(w, x); return wrap_vec(w); }
+
+VbVal vb_vec_lit(uint32_t n, ...) {
+  VbVec *w = vec_alloc(n);
+  va_list ap; va_start(ap, n);
+  for (uint32_t i = 0; i < n; i++) vec_push(w, va_arg(ap, VbVal));
+  va_end(ap);
+  return wrap_vec(w);
+}
+
+/* Persistent-by-copy push: the bootstrap has no ownership analysis yet, so
+ * in-place reuse (spec §4.3) is not safe to assume. */
+VbVal vb_push(VbVal v, VbVal x) {
+  VbVec *s = vb_as_vec(v);
+  VbVec *w = vec_alloc(s->n + 1);
+  for (size_t i = 0; i < s->n; i++) vec_push(w, s->a[i]);
+  vec_push(w, x);
+  return wrap_vec(w);
+}
+
+VbVal vb_get(VbVal v, VbVal i, const char *path) {
+  VbVec *s = vb_as_vec(v);
+  uint64_t k = vb_as_uint(i);
+  vb_require(k < s->n, path, "i < len xs");
+  return s->a[k];
+}
+VbVal vb_set(VbVal v, VbVal i, VbVal x, const char *path) {
+  VbVec *s = vb_as_vec(v);
+  uint64_t k = vb_as_uint(i);
+  vb_require(k < s->n, path, "i < len xs");
+  VbVec *w = vec_alloc(s->n);
+  for (size_t j = 0; j < s->n; j++) vec_push(w, s->a[j]);
+  w->a[k] = x;
+  return wrap_vec(w);
+}
+VbVal vb_len(VbVal v) {
+  if (v.tag == VB_STR) return vb_uint(vb_as_str(v)->n);
+  return vb_uint(vb_as_vec(v)->n);
+}
+VbVal vb_map(VbVal f, VbVal v) {
+  VbVec *s = vb_as_vec(v);
+  VbVec *w = vec_alloc(s->n);
+  for (size_t i = 0; i < s->n; i++) vec_push(w, vb_apply1(f, s->a[i]));
+  return wrap_vec(w);
+}
+VbVal vb_filter(VbVal f, VbVal v) {
+  VbVec *s = vb_as_vec(v);
+  VbVec *w = vec_alloc(s->n);
+  for (size_t i = 0; i < s->n; i++)
+    if (vb_as_bool(vb_apply1(f, s->a[i]))) vec_push(w, s->a[i]);
+  return wrap_vec(w);
+}
+VbVal vb_fold(VbVal f, VbVal z, VbVal v) {
+  VbVec *s = vb_as_vec(v);
+  for (size_t i = 0; i < s->n; i++) z = vb_apply1(vb_apply1(f, z), s->a[i]);
+  return z;
+}
+VbVal vb_each(VbVal f, VbVal v) {
+  VbVec *s = vb_as_vec(v);
+  for (size_t i = 0; i < s->n; i++) vb_apply1(f, s->a[i]);
+  return vb_unit();
+}
+VbVal vb_sum(VbVal v) {
+  VbVec *s = vb_as_vec(v);
+  if (s->n == 0) return vb_int(0);
+  VbVal acc = s->a[0];
+  for (size_t i = 1; i < s->n; i++) acc = vb_add(acc, s->a[i]);
+  return acc;
+}
+VbVal vb_max_by(VbVal f, VbVal v, const char *path) {
+  VbVec *s = vb_as_vec(v);
+  vb_require(s->n > 0, path, "len xs > 0");
+  size_t best = 0; VbVal bk = vb_apply1(f, s->a[0]);
+  for (size_t i = 1; i < s->n; i++) {
+    VbVal k = vb_apply1(f, s->a[i]);
+    if (vb_cmp(k, bk) > 0) { best = i; bk = k; }
+  }
+  return s->a[best];
+}
+VbVal vb_min_by(VbVal f, VbVal v, const char *path) {
+  VbVec *s = vb_as_vec(v);
+  vb_require(s->n > 0, path, "len xs > 0");
+  size_t best = 0; VbVal bk = vb_apply1(f, s->a[0]);
+  for (size_t i = 1; i < s->n; i++) {
+    VbVal k = vb_apply1(f, s->a[i]);
+    if (vb_cmp(k, bk) < 0) { best = i; bk = k; }
+  }
+  return s->a[best];
+}
+VbVal vb_sort_by(VbVal f, VbVal v) {
+  VbVec *s = vb_as_vec(v);
+  VbVec *w = vec_alloc(s->n);
+  for (size_t i = 0; i < s->n; i++) vec_push(w, s->a[i]);
+  /* Insertion sort: stable, tiny, and the bootstrap never sorts anything big.
+   * vibec debt: swap for a merge sort if a program sorts more than ~10k items. */
+  for (size_t i = 1; i < w->n; i++) {
+    VbVal x = w->a[i]; VbVal kx = vb_apply1(f, x);
+    size_t j = i;
+    while (j > 0 && vb_cmp(vb_apply1(f, w->a[j - 1]), kx) > 0) { w->a[j] = w->a[j - 1]; j--; }
+    w->a[j] = x;
+  }
+  return wrap_vec(w);
+}
+VbVal vb_rev(VbVal v) {
+  VbVec *s = vb_as_vec(v);
+  VbVec *w = vec_alloc(s->n);
+  for (size_t i = s->n; i > 0; i--) vec_push(w, s->a[i - 1]);
+  return wrap_vec(w);
+}
+VbVal vb_concat_vec(VbVal a, VbVal b) {
+  VbVec *x = vb_as_vec(a), *y = vb_as_vec(b);
+  VbVec *w = vec_alloc(x->n + y->n);
+  for (size_t i = 0; i < x->n; i++) vec_push(w, x->a[i]);
+  for (size_t i = 0; i < y->n; i++) vec_push(w, y->a[i]);
+  return wrap_vec(w);
+}
+VbVal vb_range(VbVal a, VbVal b) {
+  uint64_t lo = vb_as_uint(a), hi = vb_as_uint(b);
+  VbVec *w = vec_alloc(hi > lo ? hi - lo : 0);
+  for (uint64_t i = lo; i < hi; i++) vec_push(w, vb_uint(i));
+  return wrap_vec(w);
+}
+
+/* ---------------------------------------------------------------- Str */
+
+VbVal vb_split(VbVal c, VbVal s) {
+  VbStr *x = vb_as_str(s);
+  char sep = (char)(c.tag == VB_CHAR ? c.v.c : (uint32_t)vb_as_int(c));
+  VbVec *w = vec_alloc(4);
+  size_t start = 0;
+  for (size_t i = 0; i <= x->n; i++) {
+    if (i == x->n || x->p[i] == sep) { vec_push(w, vb_str(x->p + start, i - start)); start = i + 1; }
+  }
+  return wrap_vec(w);
+}
+VbVal vb_lines(VbVal s) {
+  VbStr *x = vb_as_str(s);
+  VbVec *w = vec_alloc(8);
+  size_t start = 0;
+  for (size_t i = 0; i < x->n; i++) {
+    if (x->p[i] == '\n') {
+      size_t end = i;
+      if (end > start && x->p[end - 1] == '\r') end--;
+      vec_push(w, vb_str(x->p + start, end - start));
+      start = i + 1;
+    }
+  }
+  if (start < x->n) vec_push(w, vb_str(x->p + start, x->n - start));
+  return wrap_vec(w);
+}
+VbVal vb_dup(VbVal s) { VbStr *x = vb_as_str(s); return vb_str(x->p, x->n); }
+VbVal vb_concat(VbVal a, VbVal b) {
+  VbStr *x = vb_as_str(a), *y = vb_as_str(b);
+  VbStr *o = vb_alloc(sizeof(VbStr));
+  o->n = x->n + y->n;
+  o->p = vb_alloc(o->n + 1);
+  memcpy(o->p, x->p, x->n);
+  memcpy(o->p + x->n, y->p, y->n);
+  o->p[o->n] = 0;
+  VbVal v; v.tag = VB_STR; v.v.p = o; return v;
+}
+VbVal vb_trim(VbVal s) {
+  VbStr *x = vb_as_str(s);
+  size_t i = 0, j = x->n;
+  while (i < j && (x->p[i] == ' ' || x->p[i] == '\t' || x->p[i] == '\n' || x->p[i] == '\r')) i++;
+  while (j > i && (x->p[j-1] == ' ' || x->p[j-1] == '\t' || x->p[j-1] == '\n' || x->p[j-1] == '\r')) j--;
+  return vb_str(x->p + i, j - i);
+}
+VbVal vb_starts_with(VbVal s, VbVal p) {
+  VbStr *x = vb_as_str(s), *y = vb_as_str(p);
+  return vb_bool(y->n <= x->n && memcmp(x->p, y->p, y->n) == 0);
+}
+VbVal vb_contains(VbVal s, VbVal p) {
+  VbStr *x = vb_as_str(s), *y = vb_as_str(p);
+  if (y->n == 0) return vb_bool(true);
+  if (y->n > x->n) return vb_bool(false);
+  for (size_t i = 0; i + y->n <= x->n; i++)
+    if (memcmp(x->p + i, y->p, y->n) == 0) return vb_bool(true);
+  return vb_bool(false);
+}
+VbVal vb_to_cstr(VbVal s) { return vb_cstr_val(vb_as_str(s)->p); }
+VbVal vb_from_cstr(VbVal p) { return vb_strz((const char *)vb_as_ptr(p)); }
+VbVal vb_chr(VbVal c) { char b = (char)(c.tag == VB_CHAR ? c.v.c : (uint32_t)vb_as_int(c)); return vb_str(&b, 1); }
+
+static void sb_push(VbVec *acc, const char *s, size_t n) {
+  for (size_t i = 0; i < n; i++) vec_push(acc, vb_char((unsigned char)s[i]));
+}
+static VbVal sb_done(VbVec *acc) {
+  char *buf = vb_alloc(acc->n + 1);
+  for (size_t i = 0; i < acc->n; i++) buf[i] = (char)acc->a[i].v.c;
+  return vb_str(buf, acc->n);
+}
+
+static void show_into(VbVec *acc, VbVal v) {
+  char tmp[64];
+  switch (v.tag) {
+    case VB_UNIT: sb_push(acc, "()", 2); break;
+    case VB_INT: sb_push(acc, tmp, (size_t)snprintf(tmp, sizeof tmp, "%lld", (long long)v.v.i)); break;
+    case VB_UINT: sb_push(acc, tmp, (size_t)snprintf(tmp, sizeof tmp, "%llu", (unsigned long long)v.v.u)); break;
+    case VB_FLOAT: sb_push(acc, tmp, (size_t)snprintf(tmp, sizeof tmp, "%g", v.v.f)); break;
+    case VB_BOOL: sb_push(acc, v.v.b ? "True" : "False", v.v.b ? 4 : 5); break;
+    case VB_CHAR: { char c = (char)v.v.c; sb_push(acc, &c, 1); break; }
+    case VB_STR: { VbStr *s = (VbStr *)v.v.p; sb_push(acc, s->p, s->n); break; }
+    case VB_CSTR: { const char *s = (const char *)v.v.p; sb_push(acc, s ? s : "", s ? strlen(s) : 0); break; }
+    case VB_PTR: sb_push(acc, tmp, (size_t)snprintf(tmp, sizeof tmp, "0x%llx", (unsigned long long)(uintptr_t)v.v.p)); break;
+    case VB_CLOS: { VbClos *c = (VbClos *)v.v.p; sb_push(acc, "<", 1); sb_push(acc, c->name, strlen(c->name)); sb_push(acc, ">", 1); break; }
+    case VB_VEC: {
+      VbVec *s = (VbVec *)v.v.p;
+      sb_push(acc, "[", 1);
+      for (size_t i = 0; i < s->n; i++) { if (i) sb_push(acc, ", ", 2); show_into(acc, s->a[i]); }
+      sb_push(acc, "]", 1);
+      break;
+    }
+    case VB_OBJ: {
+      VbObj *o = (VbObj *)v.v.p;
+      const char *name = o->info ? o->info->name : "?";
+      if (o->info && o->info->fields) {
+        sb_push(acc, "{", 1);
+        for (uint32_t i = 0; i < o->n; i++) {
+          if (i) sb_push(acc, ", ", 2);
+          sb_push(acc, o->info->fields[i], strlen(o->info->fields[i]));
+          sb_push(acc, "=", 1);
+          show_into(acc, o->f[i]);
+        }
+        sb_push(acc, "}", 1);
+      } else {
+        sb_push(acc, name, strlen(name));
+        for (uint32_t i = 0; i < o->n; i++) { sb_push(acc, " ", 1); show_into(acc, o->f[i]); }
+      }
+      break;
+    }
+    default: sb_push(acc, "?", 1);
+  }
+}
+
+VbVal vb_show(VbVal v) { VbVec *acc = vec_alloc(32); show_into(acc, v); return sb_done(acc); }
+
+VbVal vb_fmt(VbVal f, uint32_t n, ...) {
+  VbStr *s = vb_as_str(f);
+  VbVal *args = n ? vb_alloc(sizeof(VbVal) * n) : NULL;
+  va_list ap; va_start(ap, n);
+  for (uint32_t i = 0; i < n; i++) args[i] = va_arg(ap, VbVal);
+  va_end(ap);
+  VbVec *acc = vec_alloc(s->n + 16);
+  uint32_t k = 0;
+  for (size_t i = 0; i < s->n; i++) {
+    if (s->p[i] == '{' && i + 1 < s->n && s->p[i + 1] == '}') {
+      if (k < n) show_into(acc, args[k++]); else sb_push(acc, "{}", 2);
+      i++;
+    } else {
+      sb_push(acc, s->p + i, 1);
+    }
+  }
+  return sb_done(acc);
+}
+
+/* -------------------------------------------------------- conversions */
+
+VbVal vb_to_f64(VbVal v) { return vb_float(vb_as_float(v)); }
+VbVal vb_to_f32(VbVal v) { return vb_float((double)(float)vb_as_float(v)); }
+VbVal vb_to_signed(VbVal v, int bits) {
+  int64_t x = v.tag == VB_FLOAT ? (int64_t)v.v.f : vb_as_int(v);
+  switch (bits) {
+    case 8: return vb_int((int8_t)x);
+    case 16: return vb_int((int16_t)x);
+    case 32: return vb_int((int32_t)x);
+    default: return vb_int(x);
+  }
+}
+VbVal vb_to_unsigned(VbVal v, int bits) {
+  uint64_t x = v.tag == VB_FLOAT ? (uint64_t)v.v.f : (uint64_t)vb_as_int(v);
+  switch (bits) {
+    case 8: return vb_uint((uint8_t)x);
+    case 16: return vb_uint((uint16_t)x);
+    case 32: return vb_uint((uint32_t)x);
+    default: return vb_uint(x);
+  }
+}
+
+/* ------------------------------------------------------------ Res / Opt */
+
+const VbInfo vb_info_Ok = {"Ok", 1, NULL};
+const VbInfo vb_info_Er = {"Er", 1, NULL};
+const VbInfo vb_info_Some = {"Some", 1, NULL};
+const VbInfo vb_info_None = {"None", 0, NULL};
+const VbInfo vb_info_Overflow = {"Overflow", 0, NULL};
+const VbInfo vb_info_DivZero = {"DivZero", 0, NULL};
+const VbInfo vb_info_OutOfBounds = {"OutOfBounds", 0, NULL};
+const VbInfo vb_info_BadParse = {"BadParse", 0, NULL};
+
+VbVal vb_ok(VbVal x) { return vb_obj(&vb_info_Ok, 0, 1, x); }
+VbVal vb_er(VbVal x) { return vb_obj(&vb_info_Er, 1, 1, x); }
+VbVal vb_some(VbVal x) { return vb_obj(&vb_info_Some, 0, 1, x); }
+VbVal vb_none(void) { return vb_obj(&vb_info_None, 1, 0); }
+
+VbVal vb_seq(VbVal v) {
+  VbVec *s = vb_as_vec(v);
+  VbVec *w = vec_alloc(s->n);
+  for (size_t i = 0; i < s->n; i++) {
+    VbObj *o = vb_as_obj(s->a[i]);
+    if (o->tag != 0) return s->a[i]; /* the first Er wins */
+    vec_push(w, o->f[0]);
+  }
+  return vb_ok(wrap_vec(w));
+}
+
+VbVal vb_parse_int(VbVal s, int sign) {
+  VbStr *x = vb_as_str(s);
+  if (x->n == 0) return vb_none();
+  char *end = NULL;
+  if (sign) {
+    long long r = strtoll(x->p, &end, 10);
+    if (end != x->p + x->n) return vb_none();
+    return vb_some(vb_int((int64_t)r));
+  }
+  if (x->p[0] == '-') return vb_none();
+  unsigned long long r = strtoull(x->p, &end, 10);
+  if (end != x->p + x->n) return vb_none();
+  return vb_some(vb_uint((uint64_t)r));
+}
+VbVal vb_parse_f64(VbVal s) {
+  VbStr *x = vb_as_str(s);
+  if (x->n == 0) return vb_none();
+  char *end = NULL;
+  double r = strtod(x->p, &end);
+  if (end != x->p + x->n) return vb_none();
+  return vb_some(vb_float(r));
+}
+
+/* ---------------------------------------------------------------- Math */
+
+VbVal vb_abs(VbVal a) {
+  if (a.tag == VB_FLOAT) return vb_float(fabs(a.v.f));
+  if (a.tag == VB_UINT) return a;
+  int64_t x = vb_as_int(a);
+  return vb_int(x < 0 ? -x : x);
+}
+VbVal vb_min(VbVal a, VbVal b) { return vb_cmp(a, b) <= 0 ? a : b; }
+VbVal vb_max(VbVal a, VbVal b) { return vb_cmp(a, b) >= 0 ? a : b; }
+VbVal vb_sqrt(VbVal a) { return vb_float(sqrt(vb_as_float(a))); }
+VbVal vb_pow(VbVal a, VbVal b) { return vb_float(pow(vb_as_float(a), vb_as_float(b))); }
+VbVal vb_floor(VbVal a) { return vb_float(floor(vb_as_float(a))); }
+
+/* ------------------------------------------------------------------ IO */
+
+static int g_argc = 0;
+static char **g_argv = NULL;
+void vb_set_args(int argc, char **argv) { g_argc = argc; g_argv = argv; }
+
+VbVal vb_read(VbVal path) {
+  const char *p = vb_as_str(path)->p;
+  FILE *fh = fopen(p, "rb");
+  if (!fh) { fprintf(stderr, "✗ read ⊨ cannot open %s\n", p); exit(66); }
+  fseek(fh, 0, SEEK_END);
+  long n = ftell(fh);
+  fseek(fh, 0, SEEK_SET);
+  if (n < 0) n = 0;
+  char *buf = vb_alloc((size_t)n + 1);
+  size_t got = fread(buf, 1, (size_t)n, fh);
+  fclose(fh);
+  return vb_str(buf, got);
+}
+VbVal vb_write(VbVal path, VbVal data) {
+  const char *p = vb_as_str(path)->p;
+  VbStr *d = vb_as_str(data);
+  FILE *fh = fopen(p, "wb");
+  if (!fh) { fprintf(stderr, "✗ write ⊨ cannot open %s\n", p); exit(73); }
+  fwrite(d->p, 1, d->n, fh);
+  fclose(fh);
+  return vb_unit();
+}
+VbVal vb_out(VbVal s) { VbStr *x = vb_as_str(s); fwrite(x->p, 1, x->n, stdout); fputc('\n', stdout); return vb_unit(); }
+VbVal vb_warn(VbVal s) { VbStr *x = vb_as_str(s); fwrite(x->p, 1, x->n, stderr); fputc('\n', stderr); return vb_unit(); }
+VbVal vb_argv(void) {
+  VbVec *w = vec_alloc((size_t)(g_argc > 0 ? g_argc : 0));
+  for (int i = 0; i < g_argc; i++) vec_push(w, vb_strz(g_argv[i]));
+  return wrap_vec(w);
+}
+VbVal vb_exit(VbVal code) { exit((int)vb_as_int(code)); }
+
+/* ------------------------------------------------------------- Checked */
+
+VbVal vb_add_checked(VbVal a, VbVal b) {
+  if (either_float(a, b)) return vb_ok(vb_float(vb_as_float(a) + vb_as_float(b)));
+  if (either_unsigned(a, b)) {
+    uint64_t x = vb_as_uint(a), y = vb_as_uint(b);
+    if (x > UINT64_MAX - y) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
+    return vb_ok(vb_uint(x + y));
+  }
+  int64_t x = vb_as_int(a), y = vb_as_int(b), r;
+  if (__builtin_add_overflow(x, y, &r)) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
+  return vb_ok(vb_int(r));
+}
+VbVal vb_sub_checked(VbVal a, VbVal b) {
+  if (either_float(a, b)) return vb_ok(vb_float(vb_as_float(a) - vb_as_float(b)));
+  if (either_unsigned(a, b)) {
+    uint64_t x = vb_as_uint(a), y = vb_as_uint(b);
+    if (x < y) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
+    return vb_ok(vb_uint(x - y));
+  }
+  int64_t x = vb_as_int(a), y = vb_as_int(b), r;
+  if (__builtin_sub_overflow(x, y, &r)) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
+  return vb_ok(vb_int(r));
+}
+VbVal vb_mul_checked(VbVal a, VbVal b) {
+  if (either_float(a, b)) return vb_ok(vb_float(vb_as_float(a) * vb_as_float(b)));
+  if (either_unsigned(a, b)) {
+    uint64_t x = vb_as_uint(a), y = vb_as_uint(b), r;
+    if (__builtin_mul_overflow(x, y, &r)) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
+    return vb_ok(vb_uint(r));
+  }
+  int64_t x = vb_as_int(a), y = vb_as_int(b), r;
+  if (__builtin_mul_overflow(x, y, &r)) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
+  return vb_ok(vb_int(r));
+}
+VbVal vb_div_checked(VbVal a, VbVal b) {
+  if (either_float(a, b)) {
+    double y = vb_as_float(b);
+    if (y == 0.0) return vb_er(vb_obj(&vb_info_DivZero, 1, 0));
+    return vb_ok(vb_float(vb_as_float(a) / y));
+  }
+  int64_t y = vb_as_int(b);
+  if (y == 0) return vb_er(vb_obj(&vb_info_DivZero, 1, 0));
+  if (either_unsigned(a, b)) return vb_ok(vb_uint(vb_as_uint(a) / (uint64_t)y));
+  return vb_ok(vb_int(vb_as_int(a) / y));
+}
+VbVal vb_get_checked(VbVal v, VbVal i) {
+  VbVec *s = vb_as_vec(v);
+  uint64_t k = vb_as_uint(i);
+  if (k >= s->n) return vb_er(vb_obj(&vb_info_OutOfBounds, 2, 0));
+  return vb_ok(s->a[k]);
+}
