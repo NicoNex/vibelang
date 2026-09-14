@@ -153,19 +153,19 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH)
 - the projection views: `vibe view` (canonical form, byte-identical on every `.vibe` file in the repository, comments included), `--sig-only`, `--explicit`, `--flow`
 - `arena a in ...` blocks, which release everything they allocated when they end
+- automatic release per frame: a function that cannot hand a pointer to C releases everything it allocated when it returns, and the runtime cancels the release when the result is itself heap-allocated
 - refinements of values bound by a constructor pattern: an arm learns the constructor tag, the payload's length, and the payload's record invariant
 - multi-file programs: `Money.cents` is the whole import system, resolved by loading `money.vibe` next to the file that names it, with a flat namespace and a clash reported rather than shadowed (§9)
 - the spec's Appendix A reference program compiles and runs
 
 **Partial**
 
-- **ownership** — affine use checking of every owned name: parameters, `let` and `<-` binders, and names a pattern binds, the last two typed by inference since they carry no written type. In-place update of uniquely owned records. Still no escape analysis for closures, and memory is a bump allocator that never frees.
+- **ownership** — affine use checking of every owned name: parameters, `let` and `<-` binders, and names a pattern binds, the last two typed by inference since they carry no written type. In-place update of uniquely owned records. Memory is a bump allocator that now releases per frame (see below), but a closure's captures are still reads rather than moves.
 - **refinements** — parsed, type-checked, and asserted at run time. Not proven.
 
 **Not yet**
 
-- escape analysis for closures, which is what would let a captured value be owned rather than read
-- freeing memory outside an `arena` block
+- a closure that owns its captures rather than reading them
 
 Several of these are being worked on in parallel, so this list moves faster than the prose above it.
 
@@ -321,6 +321,26 @@ gross (euro:F64) : I64 = Money.vat (Money.cents euro) 22
 `Money.vat` resolves by loading `money.vibe` from the same directory. There is no `import` line, no alias and no search path, which removes a construct and, more to the point, a place for a generator to guess. Spec §9 gives v0.1 no visibility system at all, so the loaded modules are flattened into one unit and a name declared twice is a `mod.duplicate` error rather than a silent shadow. Diagnostics keep the module that owns the code, so an obligation raised inside `Money` is still addressed as `Money.half.body/0` from a run rooted at `App`.
 
 This does not scale past a small project, and the spec says so itself. It is the smallest thing that makes two files work.
+
+---
+
+## Memory
+
+Allocation is a bump allocator. Freeing is not reference counting and not a garbage collector; it is two questions asked at compile time.
+
+The first is asked by the runtime, dynamically and for free: a frame refuses to release when its own result is a string, object, vector or closure, because that value is exactly what escaped. The second is asked statically, and there is only one thing to ask, because Vibelang has no globals and no mutation of borrowed values: *did this frame hand a pointer to C?* C may keep it for as long as it likes. That taint travels to callers, since the release happens at the outermost frame.
+
+Everything else releases on return. `examples/churn.vibe` builds and discards a five-thousand-element vector two thousand times:
+
+```console
+$ /usr/bin/time -l ./churn
+10000000
+        1556480  maximum resident set size
+```
+
+The same program with the release suppressed peaks at 325 MB. The number that matters is not the ratio, it is that it is flat: the loop no longer grows.
+
+The ceiling is whole-function granularity. A tail-recursive loop marks once and releases once, so its own iterations still accumulate until it returns; `arena a in ...` is the manual override for that case, and a mark per iteration is the upgrade path.
 
 ---
 

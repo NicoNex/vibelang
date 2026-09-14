@@ -16,6 +16,7 @@
 mod ast;
 mod codegen;
 mod diag;
+mod escape;
 mod infer;
 mod lexer;
 mod load;

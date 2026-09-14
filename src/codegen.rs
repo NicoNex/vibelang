@@ -27,6 +27,7 @@ pub struct Gen<'a> {
     cur_path: String,
     /// `{r with ...}` sites where `r` is uniquely owned (spec §4.3).
     inplace: HashSet<(usize, usize, usize)>,
+    releasable: HashSet<String>,
 }
 
 type G<X> = Result<X, Diag>;
@@ -140,6 +141,7 @@ pub fn generate(m: &Module, ck: &Checked, file: &str) -> Result<String, Vec<Diag
         cur_params: Vec::new(),
         cur_path: String::new(),
         inplace: crate::own::inplace_updates(m, ck),
+        releasable: crate::escape::releasable(m, ck),
     };
     for (rn, r) in &ck.data.records {
         for (i, (fname, _)) in r.fields.iter().enumerate() {
@@ -329,14 +331,24 @@ impl<'a> Gen<'a> {
         self.pop_scope();
 
         let uses_params = if params.is_empty() { String::new() } else { String::new() };
+        // Nothing the body allocates outlives it unless it escapes, and the
+        // only escape the runtime cannot see is a pointer handed to C, which
+        // `escape::releasable` has already ruled out (spec §4.6).
+        let (mark, release) = if self.releasable.contains(&f.name) {
+            ("  VbMark vbm = vb_mark();\n", "  vb_release(vbm, vbret);\n")
+        } else {
+            ("", "")
+        };
         format!(
-            "{}static VbVal vbf_{}(VbVal *a) {{\n  (void)a;\n{}{}{}  VbVal vbret = vb_unit();\n  for (;;) {{\n{}  }}\n  return vbret;\n}}\n\n",
+            "{}static VbVal vbf_{}(VbVal *a) {{\n  (void)a;\n{}{}{}{}  VbVal vbret = vb_unit();\n  for (;;) {{\n{}  }}\n{}  return vbret;\n}}\n\n",
             self.line(f.span),
             cname(&f.name),
+            mark,
             head,
             uses_params,
             pre,
-            indent(&body, 4)
+            indent(&body, 4),
+            release
         )
     }
 

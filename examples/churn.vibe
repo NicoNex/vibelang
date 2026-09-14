@@ -1,0 +1,13 @@
+mod Churn
+
+;; Each call builds a vector and throws it away. Nothing escapes, so the frame
+;; releases it on the way out; without that this would allocate unboundedly.
+work (n:Size) : Size = len (rev &(range 0 n))
+
+spin (k:U64) (acc:Size) : Size =
+  ?k |0 -> acc
+     |_ -> spin (k - 1) (acc + work 5000)
+  %k
+
+main : E! Unit =
+  out (show (spin 2000 0))
