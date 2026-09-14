@@ -1,0 +1,8 @@
+mod Move
+
+join (a:Str) (b:Str) : Str = concat &a &b
+
+twice (s:Str) : Str = join s s
+
+main : E! Unit =
+  out (twice (dup "x"))

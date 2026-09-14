@@ -9,6 +9,7 @@ mod codegen;
 mod diag;
 mod infer;
 mod lexer;
+mod own;
 mod parser;
 mod types;
 
@@ -106,6 +107,10 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
     let toks = lexer::lex(&src, fid).map_err(|d| report(&[d], &files, o.fmt))?;
     let module = parser::parse(toks).map_err(|d| report(&[d], &files, o.fmt))?;
     let checked = infer::check(&module).map_err(|ds| report(&ds, &files, o.fmt))?;
+    let ownership = own::check(&module);
+    if !ownership.is_empty() {
+        return Err(report(&ownership, &files, o.fmt));
+    }
     if o.cmd == "check" {
         return Ok(ExitCode::SUCCESS);
     }
