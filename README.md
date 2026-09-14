@@ -55,6 +55,7 @@ Everything in this list is checked by the code in `src/` and covered by `cargo t
 - **Hindley–Milner inference.** Full type inference over ADTs with payloads, records, tuples and lists. Signatures are declared; bodies are inferred.
 - **Exhaustive pattern matching.** A missing constructor is a compile error that names the constructor and the arm to add.
 - **Effects, propagated not inferred.** A function is pure until it is marked `E!`. Calling something effectful from a pure function is an error; the compiler will not quietly promote you.
+- **Termination.** Every recursive function needs a measure that decreases at each call. The compiler infers it when a parameter decreases syntactically, and asks for `%expr` when it cannot.
 - **Affine use of owned values.** `&` parameters are borrows for the call; everything else is owned and consumed by its first use. Using it twice is an error whose `fix` is `&x` or `dup x`. A `{r with ...}` update on a uniquely owned record mutates in place instead of copying.
 - **Arithmetic and indexing that can fail in the type system.** `add_checked`, `sub_checked`, `mul_checked`, `div_checked` and `get_checked` return `Res Fault a`, so overflow, division by zero and an out-of-range index are values you have to match on. (Bare `+` is still unchecked; the spec's plan is for the solver to discharge these obligations instead.)
 - **Machine-first diagnostics.** `--diag=prose` for you, `--diag=struct` and `--diag=json` for whatever is generating the code.
@@ -65,9 +66,9 @@ Everything in this list is checked by the code in `src/` and covered by `cargo t
 
 The specification describes more than the compiler currently proves. Stated plainly, because that difference is the whole point of a type checker:
 
-- **Refinement types** (`mean (ts:&Vec Tx, len ts>0)`) parse and type-check as boolean expressions in the parameter scope, and are **asserted at run time**. They are not discharged to a solver yet, so an unproven obligation fails late rather than never compiling at all.
-- **Totality.** Termination is not checked. Nothing stops you writing a loop that never ends.
-- **Memory.** Allocation is a bump allocator that never frees. Affine checking covers declared parameters, not `let` bindings or pattern variables; there is no full borrow checker and no escape analysis.
+- **Refinement types** (`mean (ts:&Vec Tx, len ts>0)`) parse and type-check as boolean expressions in the parameter scope, and are **asserted at run time** unless you ask for proof.
+- **Refinement obligations** are generated for division, indexing, overflow, record invariants and call-site preconditions, and `vibe check --prove` discharges them with `z3`. Without `--prove`, `vibe check` only counts what is left open, and values bound by a constructor pattern do not carry their refinements into the solver yet — so the reference program compiles for a weaker reason than the spec intends.
+- **Memory.** Allocation is a bump allocator; only an `arena a in ...` block gives memory back, in bulk. Affine checking covers declared parameters, not `let` bindings or pattern variables; there is no full borrow checker and no escape analysis for closures.
 
 ---
 
@@ -133,7 +134,11 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - structured diagnostics (`--diag=prose|struct|json`) with semantic path, witness and mechanical `fix`
 - C code generation, and a small C runtime
 - `ext c` FFI with `link` / `pkg-config`, and `exp c` export with a generated header
-- the `vibe` CLI: `check`, `build`, `run` — a `.vibe` file to a native executable via C
+- the `vibe` CLI: `check`, `build`, `run`, `view` — a `.vibe` file to a native executable via C
+- termination checking: inferred measures, and `%expr` when inference gives up
+- refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH)
+- the projection views: `vibe view` (canonical form, byte-identical on the examples), `--sig-only`, `--explicit`, `--flow`
+- `arena a in ...` blocks, which release everything they allocated when they end
 - the spec's Appendix A reference program compiles and runs
 
 **Partial**
@@ -143,10 +148,11 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 
 **Not yet**
 
-- termination checking
-- discharging refinement obligations to an SMT solver
-- the projection views (`vibe view`)
+- refinements of values bound by a constructor pattern, which is what the reference program's `Ok ts -> mean &ts` actually needs
+- a full borrow checker, and escape analysis for closures
+- freeing memory outside an `arena` block
 - structured `patch`
+- comments surviving a `view` round-trip (the lexer discards them)
 - a module system beyond a single file
 
 Several of these are being worked on in parallel, so this list moves faster than the prose above it.
@@ -327,7 +333,7 @@ The exported signature currently passes the uniform runtime value `VbVal`. The s
 
 ## License
 
-None chosen yet. The language surface, the syntax, and the list of normative principles can all still change; picking a license is worth doing once they stop moving.
+GPL-3.0-or-later — see [LICENSE](LICENSE). The language surface can still change; the license will not.
 
 ---
 
