@@ -187,15 +187,19 @@ fn decl_span(d: &Decl) -> Span {
     }
 }
 
-/// The top-level names a declaration introduces. Constructors count: they share
-/// the one namespace with everything else.
+/// The top-level names a declaration introduces. Constructors count, and so do
+/// record field names: the checker resolves a field to its owning record by
+/// name alone, so two modules that both spell a field `qty` would otherwise
+/// meet as a type error somewhere else entirely.
 fn declared(d: &Decl) -> Vec<String> {
     match d {
         Decl::Fun(f) => vec![f.name.clone()],
         Decl::Type(t) => {
             let mut v = vec![t.name.clone()];
-            if let TypeBody::Variants(vs) = &t.body {
-                v.extend(vs.iter().map(|x| x.name.clone()));
+            match &t.body {
+                TypeBody::Variants(vs) => v.extend(vs.iter().map(|x| x.name.clone())),
+                TypeBody::Record(r) => v.extend(r.fields.iter().map(|(n, _)| n.clone())),
+                TypeBody::Opaque => {}
             }
             v
         }

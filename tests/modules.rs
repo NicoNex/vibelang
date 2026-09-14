@@ -134,3 +134,24 @@ fn a_projection_keeps_the_qualifier() {
     assert!(ok, "{out}");
     assert!(out.contains("Money.vat (Money.cents euro)"), "{out}");
 }
+
+/// Fields resolve to their record by name alone, so two modules spelling one
+/// the same way must be caught here rather than surfacing as a type error in a
+/// third place.
+#[test]
+fn a_record_field_declared_twice_is_a_clash_too() {
+    let dir = project(
+        "fields",
+        &[
+            ("a.vibe", "mod A\n\ntype Ta = { qty:U32 }\n\nmk : Ta = {qty=1}\n"),
+            (
+                "b.vibe",
+                "mod B\n\ntype Tb = { qty:F64 }\n\nmain : E! Unit =\n  out (show (A.mk.qty))\n",
+            ),
+        ],
+    );
+    let (ok, out) = vibe_in(&dir, &["check", "b.vibe", "--diag=struct"]);
+    assert!(!ok, "{out}");
+    assert!(out.contains("mod.duplicate"), "{out}");
+    assert!(out.contains("`qty` is declared in both"), "{out}");
+}
