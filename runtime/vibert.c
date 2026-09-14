@@ -47,9 +47,17 @@ void *vb_alloc(size_t n) {
 VbMark vb_mark(void) { vb_init(); VbMark m; m.chunk = g_chunk; m.used = g_chunk->used; return m; }
 
 /* Release everything allocated since the mark. Values that escape the block
-   would dangle, so a heap-allocated result cancels the release. */
+   would dangle, so a result that carries a pointer cancels the release.
+   VB_CSTR and VB_PTR belong in that list as much as the boxed types do:
+   `to_cstr (concat a b)` points into a string this frame allocated, and
+   releasing under it hands the caller freed memory. */
 void vb_release(VbMark m, VbVal result) {
-  if (result.tag == VB_STR || result.tag == VB_OBJ || result.tag == VB_VEC || result.tag == VB_CLOS) return;
+  switch (result.tag) {
+    case VB_STR: case VB_OBJ: case VB_VEC: case VB_CLOS: case VB_CSTR: case VB_PTR:
+      return;
+    default:
+      break;
+  }
   while (g_chunk && g_chunk != m.chunk) {
     VbChunk *dead = g_chunk;
     g_chunk = g_chunk->next;

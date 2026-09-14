@@ -66,3 +66,24 @@ fn releasing_does_not_change_the_answer() {
     let o = Command::new(&exe).output().expect("the built program runs");
     assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "10000000");
 }
+
+/// A result that carries a pointer — `CStr` and `Ptr`, not only the boxed
+/// types — must cancel the release, or the caller is handed freed memory.
+#[test]
+fn a_returned_pointer_cancels_the_release() {
+    let dir = std::env::temp_dir().join("vibe-escape-tests");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let exe = dir.join("dangle");
+    let o = Command::new(VIBE)
+        .args(["run", "tests/dangle.vibe", "-o"])
+        .arg(&exe)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("vibe runs");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&o.stdout).trim(),
+        "hello there world",
+        "the frame released memory its own result still points into"
+    );
+}

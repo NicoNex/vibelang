@@ -1,0 +1,10 @@
+mod Dangle
+
+;; `to_cstr` points into the string `concat` allocated in this frame, so the
+;; result carries a pointer and the frame must not release under it.
+join (a:&Str) (b:&Str) : CStr = to_cstr (concat a b)
+
+main : E! Unit =
+  let p = join "hello " "there world" in
+  let junk = len (rev &(range 0 4000)) in
+  out (from_cstr p)

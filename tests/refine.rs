@@ -153,3 +153,27 @@ fn the_solver_budget_is_a_number_of_seconds() {
     assert!(!ok, "{out}");
     assert!(out.contains("not a number of seconds"), "{out}");
 }
+
+/// A binder that shadows a refined name must not inherit its hypotheses. This
+/// is the one failure mode that matters more than any missed proof: the wrong
+/// answer here is `unsat` on something false.
+#[test]
+fn a_shadowing_binder_does_not_inherit_a_refinement() {
+    if !have_z3() {
+        return;
+    }
+    let (ok, out) = vibe(&["check", "--prove", "tests/shadow.vibe", "--diag=struct"]);
+    assert!(!ok, "`n>0` is about the parameter, not about whatever `Ok n` bound:\n{out}");
+    assert!(out.contains("div0"), "{out}");
+    assert!(out.contains("n.1=0"), "the counterexample must be about the inner `n`:\n{out}");
+}
+
+/// and the outer name still works where nothing shadows it
+#[test]
+fn an_unshadowed_refinement_still_discharges() {
+    if !have_z3() {
+        return;
+    }
+    let (ok, out) = vibe(&["check", "--prove", "tests/refine_ok.vibe"]);
+    assert!(ok, "{out}");
+}

@@ -10,3 +10,7 @@
 /examples/mathlib
 .vibe-proofs
 /examples/churn
+/examples/shop/app
+/tests/dangle
+/tests/taint
+/tests/ident_c

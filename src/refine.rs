@@ -295,6 +295,16 @@ struct Gen<'a> {
     fun: String,
     /// names the enclosing signature binds — a goal over only these is fixable
     params: Vec<String>,
+    /// Source name -> the symbol standing for it. A binder that reuses a name
+    /// already in scope gets a symbol of its own, because inheriting the
+    /// symbol would inherit the hypotheses: with `(n:U64, n>0)` in the
+    /// signature, an `|Ok n ->` arm would discharge `100 / n` for an `n` the
+    /// pattern rebound to anything at all. That is not imprecision, it is a
+    /// false proof.
+    renames: HashMap<String, String>,
+    /// every name bound so far in this function, so shadowing is detectable
+    seen: HashSet<String>,
+    shadows: usize,
 }
 
 pub fn obligations(m: &Module, ck: &Checked) -> Vec<Ob> {
@@ -312,6 +322,9 @@ pub fn obligations(m: &Module, ck: &Checked) -> Vec<Ob> {
             obs: Vec::new(),
             fun: format!("{}.{}", f.home, f.name),
             params: Vec::new(),
+            renames: HashMap::new(),
+            seen: HashSet::new(),
+            shadows: 0,
         };
         for p in &f.params {
             for n in &p.names {
@@ -319,6 +332,7 @@ pub fn obligations(m: &Module, ck: &Checked) -> Vec<Ob> {
                     g.tys.insert(n.clone(), t);
                 }
                 g.params.push(n.clone());
+                g.seen.insert(n.clone());
             }
         }
         // the signature's own refinements are hypotheses inside the body
@@ -423,6 +437,26 @@ fn is_checked(name: &str) -> bool {
 }
 
 impl<'a> Gen<'a> {
+    /// The symbol standing for a source name here.
+    fn var(&self, n: &str) -> String {
+        self.renames.get(n).cloned().unwrap_or_else(|| n.to_string())
+    }
+
+    /// Introduce `n`, giving it a fresh symbol if the name is already taken.
+    fn fresh_name(&mut self, n: &str) -> String {
+        if self.seen.insert(n.to_string()) {
+            self.renames.remove(n);
+            return n.to_string();
+        }
+        self.shadows += 1;
+        // `.` is a legal SMT-LIB simple-symbol character and `#` is not, and a
+        // Vibelang identifier is `[a-z][a-zA-Z0-9_]*`, so this cannot collide
+        // with a name the program wrote.
+        let sym = format!("{n}.{}", self.shadows);
+        self.renames.insert(n.to_string(), sym.clone());
+        sym
+    }
+
     fn sym(&mut self, name: String, k: Sort) -> (String, Sort) {
         let k = *self.syms.entry(name.clone()).or_insert(k);
         (name, k)
@@ -484,8 +518,9 @@ impl<'a> Gen<'a> {
             ExprKind::Float(f) => Some((real_lit(*f), Sort::Real)),
             ExprKind::Bool(b) => Some((b.to_string(), Sort::Bool)),
             ExprKind::Var(n) => {
-                let k = self.tys.get(n).map(|t| sort_of(t)).unwrap_or(Sort::Int);
-                Some(self.sym(n.clone(), k))
+                let v = self.var(n);
+                let k = self.tys.get(&v).map(|t| sort_of(t)).unwrap_or(Sort::Int);
+                Some(self.sym(v, k))
             }
             ExprKind::Borrow(i) => self.term(i),
             ExprKind::Field(b, f) => {
@@ -531,7 +566,7 @@ impl<'a> Gen<'a> {
                 let (f, args) = flatten(e);
                 let name = as_name(f)?;
                 if name == "len" && args.len() == 1 {
-                    let v = as_name(strip(args[0]))?;
+                    let v = self.var(&as_name(strip(args[0]))?);
                     return Some(self.sym(format!("len_{v}"), Sort::Int));
                 }
                 if let (Some(to), 1) = (conv(&name), args.len()) {
@@ -549,7 +584,7 @@ impl<'a> Gen<'a> {
     /// obvious. Drives the overflow rules; `None` means "do not guess".
     fn ty_of(&self, e: &Expr) -> Option<String> {
         match &e.kind {
-            ExprKind::Var(n) => self.tys.get(n).cloned(),
+            ExprKind::Var(n) => self.tys.get(&self.var(n)).cloned(),
             ExprKind::Borrow(i) | ExprKind::Neg(i) => self.ty_of(i),
             ExprKind::Field(_, f) => self
                 .ck
@@ -640,22 +675,32 @@ impl<'a> Gen<'a> {
                 }
             }
             ExprKind::Lambda(_, b) => self.expr(b),
-            ExprKind::Bind(_, v, rest) => {
+            ExprKind::Bind(n, v, rest) => {
                 self.expr(v);
+                let saved = self.renames.clone();
+                self.fresh_name(n);
                 self.expr(rest);
+                self.renames = saved;
             }
             ExprKind::Let(n, v, rest) => {
                 self.expr(v);
                 let k = self.hyps.len();
-                if let Some((t, s)) = self.term(v) {
-                    let (sym, _) = self.sym(n.clone(), s);
+                // the value is translated before the name is introduced, so a
+                // `let x = x + 1` still reads the outer `x`
+                let val = self.term(v);
+                let ty = self.ty_of(v);
+                let saved = self.renames.clone();
+                let sym = self.fresh_name(n);
+                if let Some((t, s)) = val {
+                    let (sym, _) = self.sym(sym.clone(), s);
                     self.hyps.push(format!("(= {sym} {t})"));
                 }
-                if let Some(t) = self.ty_of(v) {
-                    self.tys.insert(n.clone(), t);
+                if let Some(t) = ty {
+                    self.tys.insert(sym, t);
                 }
                 self.expr(rest);
                 self.hyps.truncate(k);
+                self.renames = saved;
             }
             ExprKind::Match(scrut, arms) => {
                 self.expr(scrut);
@@ -686,7 +731,7 @@ impl<'a> Gen<'a> {
     /// so a refinement of the payload survives the binding.
     fn arm_hyp(&mut self, s: &Option<(String, Sort)>, scrut: &Expr, p: &Pat) -> Option<String> {
         if let Pat::Ctor(..) = p {
-            let v = as_name(strip(scrut))?;
+            let v = self.var(&as_name(strip(scrut))?);
             let ty = self.ty_of(scrut);
             return self.pat_facts(&v, ty, p);
         }
@@ -697,7 +742,7 @@ impl<'a> Gen<'a> {
                 Some(if *b { t } else { format!("(not {t})") })
             }
             Pat::List(ps) => {
-                let v = as_name(strip(scrut))?;
+                let v = self.var(&as_name(strip(scrut))?);
                 let (l, _) = self.sym(format!("len_{v}"), Sort::Int);
                 Some(format!("(= {l} {})", ps.len()))
             }
@@ -756,25 +801,26 @@ impl<'a> Gen<'a> {
     /// the name, so the alias is the only thing that carries `len ts > 0` across
     /// the binding), and give `n` the context any parameter of that type gets.
     fn bind(&mut self, n: &str, v: &str, ty: Option<String>) {
-        if n == v {
+        let sym = self.fresh_name(n);
+        if sym == v {
             return;
         }
         if let Some(t) = &ty {
-            self.tys.insert(n.to_string(), t.clone());
+            self.tys.insert(sym.clone(), t.clone());
             if let Some(k) = scalar_sort(t) {
-                let (a, _) = self.sym(n.to_string(), k);
+                let (a, _) = self.sym(sym.clone(), k);
                 let (b, _) = self.sym(v.to_string(), k);
                 self.hyps.push(format!("(= {a} {b})"));
             }
         }
         if ty.as_deref().is_none_or(is_container) {
-            let ln = self.len_sym(n);
+            let ln = self.len_sym(&sym);
             let lv = self.len_sym(v);
             self.hyps.push(format!("(= {ln} {lv})"));
             self.hyps.push(format!("(>= {lv} 0)"));
         }
-        self.range_hyp(n);
-        self.inv_hyps(n);
+        self.range_hyp(&sym);
+        self.inv_hyps(&sym);
     }
 
     fn len_sym(&mut self, v: &str) -> String {
@@ -833,6 +879,7 @@ impl<'a> Gen<'a> {
         }
         if name == "get" && args.len() == 2 {
             if let (Some(v), Some((ti, _))) = (as_name(strip(args[0])), self.term(args[1])) {
+                let v = self.var(&v);
                 let (l, _) = self.sym(format!("len_{v}"), Sort::Int);
                 self.hyps.push(format!("(>= {l} 0)"));
                 self.push(
@@ -859,6 +906,7 @@ impl<'a> Gen<'a> {
                 sub.insert(p.clone(), t);
             }
             if let Some(v) = as_name(strip(a)) {
+                let v = self.var(&v);
                 let (l, _) = self.sym(format!("len_{v}"), Sort::Int);
                 len_sub.insert(format!("len_{p}"), l);
             }
