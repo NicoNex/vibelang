@@ -12,12 +12,28 @@
 use crate::ast::*;
 use crate::diag::{Diag, Span};
 use crate::types::is_num;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub fn check(m: &Module) -> Vec<Diag> {
+    run(m).0
+}
+
+/// Spans of `{r with ...}` updates whose base is a uniquely owned value, so
+/// codegen can mutate in place instead of copying (spec §4.3).
+pub fn inplace_updates(m: &Module) -> HashSet<(usize, usize, usize)> {
+    run(m).1
+}
+
+fn run(m: &Module) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) {
     let mut out = Vec::new();
+    let mut inplace = HashSet::new();
     for f in m.funs().filter(|f| !f.ghost) {
-        let mut st = State { moved: HashMap::new(), errors: Vec::new(), path: format!("{}.{}", m.name, f.name) };
+        let mut st = State {
+            moved: HashMap::new(),
+            errors: Vec::new(),
+            inplace: HashSet::new(),
+            path: format!("{}.{}", m.name, f.name),
+        };
         let mut owned: Vec<&str> = Vec::new();
         for p in &f.params {
             if p.ty.as_ref().is_some_and(is_affine) {
@@ -29,8 +45,9 @@ pub fn check(m: &Module) -> Vec<Diag> {
         }
         st.walk(&f.body, Mode::Own, &owned);
         out.append(&mut st.errors);
+        inplace.extend(st.inplace.drain());
     }
-    out
+    (out, inplace)
 }
 
 /// Scalars are copied, not moved. Everything with a payload is affine.
@@ -55,6 +72,7 @@ enum Mode {
 struct State {
     moved: HashMap<String, Span>,
     errors: Vec<Diag>,
+    inplace: HashSet<(usize, usize, usize)>,
     path: String,
 }
 
@@ -100,6 +118,13 @@ impl State {
             }
             Record(base, fields) => {
                 if let Some(b) = base {
+                    // `{r with f = v}` on a value we own and have not moved yet
+                    // is a mutation, not a copy.
+                    if let Var(n) = &b.kind {
+                        if mode == Mode::Own && owned.contains(&n.as_str()) && !self.moved.contains_key(n) {
+                            self.inplace.insert((e.span.file, e.span.line, e.span.col));
+                        }
+                    }
                     self.walk(b, mode, owned);
                 }
                 for (_, v) in fields {

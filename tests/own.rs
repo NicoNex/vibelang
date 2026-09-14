@@ -27,3 +27,15 @@ fn repeated_borrows_are_fine() {
     let (ok, out) = vibe(&["check", "examples/ledger.vibe"]);
     assert!(ok, "borrowing the same value repeatedly must be allowed:\n{out}");
 }
+
+#[test]
+fn unique_update_mutates_in_place() {
+    let (ok, out) = vibe(&["run", "tests/inplace.vibe"]);
+    assert!(ok, "in-place example failed:\n{out}");
+    assert_eq!(out.trim(), "2");
+    let c = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/.vibe-inplace/inplace.c"),
+    )
+    .expect("generated C is kept next to the example");
+    assert!(c.contains("vb_set_fields"), "an owned `{{r with ...}}` must not copy:\n{c}");
+}

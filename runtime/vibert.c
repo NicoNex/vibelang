@@ -245,6 +245,15 @@ VbVal vb_field(VbVal o, uint32_t i) {
 }
 uint32_t vb_tag(VbVal o) { return vb_as_obj(o)->tag; }
 
+/* Uniquely owned update (spec 4.3): mutate in place, no allocation. The
+   compiler only emits this where ownership analysis proved the base is not
+   shared. */
+VbVal vb_set_fields(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals) {
+  VbObj *x = vb_as_obj(o);
+  for (uint32_t i = 0; i < nchanged; i++) x->f[idx[i]] = vals[i];
+  return o;
+}
+
 VbVal vb_with(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals) {
   VbObj *x = vb_as_obj(o);
   VbObj *y = vb_alloc(sizeof(VbObj));

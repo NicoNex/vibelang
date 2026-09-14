@@ -25,6 +25,8 @@ pub struct Gen<'a> {
     cur_fn: String,
     cur_params: Vec<String>,
     cur_path: String,
+    /// `{r with ...}` sites where `r` is uniquely owned (spec §4.3).
+    inplace: HashSet<(usize, usize, usize)>,
 }
 
 type G<X> = Result<X, Diag>;
@@ -137,6 +139,7 @@ pub fn generate(m: &Module, ck: &Checked, file: &str) -> Result<String, Vec<Diag
         cur_fn: String::new(),
         cur_params: Vec::new(),
         cur_path: String::new(),
+        inplace: crate::own::inplace_updates(m),
     };
     for (rn, r) in &ck.data.records {
         for (i, (fname, _)) in r.fields.iter().enumerate() {
@@ -696,9 +699,15 @@ impl<'a> Gen<'a> {
                     idx.join(", ")
                 ));
                 out.push_str(&format!("VbVal {}_vs[] = {{{}}};\n", d, vals.join(", ")));
+                let upd = if self.inplace.contains(&(span.file, span.line, span.col)) {
+                    "vb_set_fields"
+                } else {
+                    "vb_with"
+                };
                 out.push_str(&format!(
-                    "VbVal {} = vb_with({}, {}, {}_ix, {}_vs);\n",
+                    "VbVal {} = {}({}, {}, {}_ix, {}_vs);\n",
                     d,
+                    upd,
                     bv,
                     idx.len(),
                     d,
