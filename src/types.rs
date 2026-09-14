@@ -1,9 +1,9 @@
 //! Types, unification, the prelude, and inference.
 //!
 //! Bootstrap simplifications, all deliberate:
-//!   * `&T` is erased — there is no borrow checker yet (spec fase 4).
+//!   * `&T` is erased — affine use is checked in `own`, but there is no full
+//!     borrow checker (spec fase 4).
 //!   * refinements are checked at run time, not discharged to SMT (spec fase 6).
-//!   * termination measures are parsed and ignored (spec fase 5).
 
 use crate::ast::*;
 use crate::diag::{Diag, Span};

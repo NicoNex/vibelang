@@ -11,6 +11,7 @@ mod infer;
 mod lexer;
 mod own;
 mod parser;
+mod total;
 mod types;
 
 use diag::{DiagFormat, Diag, Files};
@@ -107,9 +108,10 @@ fn run(argv: &[String]) -> Result<ExitCode, String> {
     let toks = lexer::lex(&src, fid).map_err(|d| report(&[d], &files, o.fmt))?;
     let module = parser::parse(toks).map_err(|d| report(&[d], &files, o.fmt))?;
     let checked = infer::check(&module).map_err(|ds| report(&ds, &files, o.fmt))?;
-    let ownership = own::check(&module);
-    if !ownership.is_empty() {
-        return Err(report(&ownership, &files, o.fmt));
+    let mut semantic = own::check(&module);
+    semantic.append(&mut total::check(&module));
+    if !semantic.is_empty() {
+        return Err(report(&semantic, &files, o.fmt));
     }
     if o.cmd == "check" {
         return Ok(ExitCode::SUCCESS);
