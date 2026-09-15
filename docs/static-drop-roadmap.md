@@ -402,7 +402,7 @@ This is the task that fixes the event loop, and it is the reason the whole plan 
 
 **Interfaces:** `DropSite.at` for a back-edge drop is the span of the self-tail-call expression. The backend must emit the free *before* the parameter assignments it precedes, not after.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -423,23 +423,23 @@ spin (k:U64) (s:Str) : U32 =
   %k
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cargo test --test drop`
 Expected: FAIL — no drop, because the arm neither moves `s` nor returns it.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Recognise the self-tail-call in `walk` with the same test codegen uses (`ExprKind::App` whose head is `Var(n)` with `n == f.name`, not shadowed, arity matching). Walk the argument expressions first, then record a drop at that span for every parameter still owned and not moved by them.
 
 Note the ordering hazard: `concat &s "x"` *borrows* `s` to build the new value, so the drop must be sequenced after the new argument has been computed and before the assignment overwrites the parameter. Encode that in the site, not in a convention the backend has to remember.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `cargo test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/own.rs tests/drop.rs tests/drop_loop.vibe

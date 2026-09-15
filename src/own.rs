@@ -43,6 +43,19 @@ pub struct DropSite {
     pub name: String,
     pub at: Span,
     pub path: String,
+    pub when: DropWhen,
+}
+
+/// Where the free goes relative to the expression at `at`. The back edge is the
+/// case the backend cannot guess: `spin (k-1) (concat &s "x")` *reads* `s` to
+/// build the new argument, so the free belongs between the argument and the
+/// assignment that overwrites the parameter with it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DropWhen {
+    /// after the expression at `at`, which is the end of the value's scope
+    ScopeEnd,
+    /// before the parameter assignments of the self-tail-call at `at`
+    BackEdge,
 }
 
 /// Where every owned value dies. The same traversal that reports affine misuse
@@ -120,6 +133,8 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             sigs: &sigs,
             escaping,
             leaves,
+            fun: f.name.clone(),
+            arity: f.params.iter().map(|p| p.names.len()).sum(),
         };
         let mut owned: Vec<(&str, bool)> = Vec::new();
         for p in &f.params {
@@ -137,6 +152,7 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
                     name: (*n).to_string(),
                     at: f.body.span,
                     path: st.path.clone(),
+                    when: DropWhen::ScopeEnd,
                 });
             }
         }
@@ -331,6 +347,10 @@ struct State<'a> {
     escaping: HashSet<(usize, usize, usize)>,
     /// Names whose value can leave through the result: never dropped here.
     leaves: HashSet<String>,
+    /// This function's name and how many arguments a saturated call takes: a
+    /// call matching both is the back edge codegen compiles to `continue`.
+    fun: String,
+    arity: usize,
 }
 
 impl State<'_> {
@@ -443,6 +463,12 @@ impl State<'_> {
             Field(x, _) => self.walk(x, Mode::Borrow, owned),
             App(h, args) => {
                 self.walk(h, Mode::Borrow, owned);
+                // A saturated self-call is not a call: codegen overwrites the
+                // parameters and loops (§11.2). A parameter still owned here is
+                // about to be unreachable, so it dies on this edge — after the
+                // new argument has read it, before the assignment.
+                let back_edge = matches!(&h.kind, Var(n)
+                    if *n == self.fun && args.len() == self.arity && !owned.iter().any(|(x, _)| *x == n));
                 // The callee's signature decides each argument: a position it
                 // declared `&` is read for the duration of the call, so what is
                 // passed there is not moved, whether or not the call site wrote
@@ -462,6 +488,18 @@ impl State<'_> {
                         mode
                     };
                     self.walk(a, m, owned);
+                }
+                if back_edge {
+                    for (n, _) in owned {
+                        if !self.moved.contains_key(*n) && !self.leaves.contains(*n) {
+                            self.drops.push(DropSite {
+                                name: (*n).to_string(),
+                                at: e.span,
+                                path: self.path.clone(),
+                                when: DropWhen::BackEdge,
+                            });
+                        }
+                    }
                 }
             }
             Binop(_, a, b) => {
@@ -516,6 +554,7 @@ impl State<'_> {
                         name: n.clone(),
                         at: body.span,
                         path: self.path.clone(),
+                        when: DropWhen::ScopeEnd,
                     });
                 }
                 // The name leaves scope here: a later binder of the same name
@@ -569,6 +608,7 @@ impl State<'_> {
                             name: n,
                             at,
                             path: self.path.clone(),
+                            when: DropWhen::ScopeEnd,
                         });
                     }
                 }

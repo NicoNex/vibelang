@@ -48,7 +48,12 @@ pub fn render(m: &Module, ck: &Checked, mode: Mode) -> String {
 fn drops(m: &Module, ck: &Checked) -> String {
     crate::own::drop_points(m, ck)
         .iter()
-        .map(|d| format!("{}.body: drop {}\n", d.path, d.name))
+        .map(|d| match d.when {
+            crate::own::DropWhen::ScopeEnd => format!("{}.body: drop {}\n", d.path, d.name),
+            crate::own::DropWhen::BackEdge => {
+                format!("{}.body: drop {} before the back edge\n", d.path, d.name)
+            }
+        })
         .collect()
 }
 

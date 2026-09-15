@@ -54,3 +54,12 @@ fn a_value_that_leaves_through_the_return_is_never_dropped() {
         "`r.s` is a pointer into `r`, so `r` outlives the frame too:\n{d}"
     );
 }
+
+#[test]
+fn a_parameter_replaced_on_the_back_edge_is_dropped_each_iteration() {
+    let d = drops("tests/drop_loop.vibe");
+    assert!(
+        d.contains("DropLoop.spin.body: drop s before the back edge"),
+        "the old `s` dies on the edge, not when the frame finally returns:\n{d}"
+    );
+}

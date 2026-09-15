@@ -1,0 +1,10 @@
+mod DropLoop
+
+;; The back edge: each iteration builds a new `s` and overwrites the parameter
+;; with it. The old one is nobody's after that, so it is freed before the
+;; assignment — once per iteration, not once per frame.
+spin (k:U64) (s:Str) : U32 =
+  ?k |0 -> u32 (len &s)
+     |_ -> spin (k - 1) (concat &s "x")
+  end
+  %k
