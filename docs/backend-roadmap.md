@@ -486,7 +486,7 @@ git commit -m "feat(refine): prove postconditions in the callee, assume them at 
 
 **Files:**
 - Modify: `examples/ledger.vibe` (add the postcondition to `load`)
-- Modify: `README.md` (the Status lists), `README.it.md` (kept in sync), `vibelang-spec.md` Appendix A if the reference program text is duplicated there
+- Modify: `README.md` (the Status lists), `vibelang-spec.md` Appendix A if the reference program text is duplicated there
 - Test: `tests/refine.rs`
 
 **Interfaces:**
@@ -525,12 +525,12 @@ Expected: PASS, including `reference_program_runs` in `tests/e2e.rs` still print
 
 - [ ] **Step 5: Move the README lines**
 
-In `README.md`, `refinements` moves out of **Partial**; the reference program section's paragraph beginning *"Be clear about why it compiles today"* is now false and must be rewritten to say what is actually true after this task. Mirror into `README.it.md`. Moving a line from one list to the next is the documented way to edit that section.
+In `README.md`, `refinements` moves out of **Partial**; the reference program section's paragraph beginning *"Be clear about why it compiles today"* is now false and must be rewritten to say what is actually true after this task. Moving a line from one list to the next is the documented way to edit that section.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add examples/ledger.vibe README.md README.it.md tests/refine.rs
+git add examples/ledger.vibe README.md tests/refine.rs
 git commit -m "feat(refine): the reference program proves with no open obligations"
 ```
 
@@ -928,7 +928,7 @@ Read before starting: the Cranelift API changes shape between minor releases. Ev
 
 **Files:**
 - Modify: `Cargo.toml`, `Cargo.lock`
-- Modify: `README.md`, `README.it.md`
+- Modify: `README.md`
 
 **Interfaces:**
 - Produces: the dependency set every later task builds on.
@@ -970,7 +970,7 @@ Look up the current version on crates.io rather than copying one from here; writ
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Cargo.toml Cargo.lock .github/workflows README.md README.it.md
+git add Cargo.toml Cargo.lock .github/workflows README.md
 git commit -m "build: cranelift behind a feature; the dependency graph is no longer empty"
 ```
 
@@ -1417,7 +1417,7 @@ The `--lib` path, built under Cranelift, linked from a C program with `cc -std=c
 **Files:**
 - Modify: `tests/backends.rs`
 - Modify: `Cargo.toml` (make `cranelift` a default feature, if Task 3.0a's recommendation is being followed)
-- Modify: `README.md`, `README.it.md` (Status)
+- Modify: `README.md` (Status)
 
 **Interfaces:**
 - Produces: the property the whole plan exists to establish.
@@ -1454,7 +1454,7 @@ Add the Cranelift backend to **Works**, with the exact statement of what it does
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tests/backends.rs Cargo.toml Cargo.lock README.md README.it.md
+git add tests/backends.rs Cargo.toml Cargo.lock README.md
 git commit -m "test(backends): the two backends agree on every example"
 ```
 
