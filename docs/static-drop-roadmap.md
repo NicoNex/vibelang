@@ -268,7 +268,7 @@ Placement is therefore per arm, on the join edge. This is the general shape of c
 
 **Interfaces:** `DropSite.at` for an arm drop is the span of that arm's body, so the backend can attach the free to the statement that assigns the arm's result.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -291,23 +291,23 @@ pick (b:Bool) (s:Str) : U32 =
   end
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cargo test --test drop`
 Expected: FAIL — either no drop or two.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In the `Match` arm of `walk`, the loop already restarts `self.moved` from `before` for each arm. Inside that loop, after walking the arm body, record a drop for every name that is in `visible`, absent from `self.moved`, and **present in the union `after`** — that last condition is what distinguishes "this arm kept it" from "no arm ever consumed it", the second case belonging to the enclosing scope's drop, not to the arms.
 
 Because `after` is only complete once every arm has been walked, this needs two passes over the arms, or a deferred fixup after the loop. Two passes is clearer; the traversal is not hot.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `cargo test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/own.rs tests/drop.rs tests/drop_arm.vibe

@@ -463,13 +463,37 @@ impl State<'_> {
                 // match, and a value moved in any arm is moved after it.
                 let before = self.moved.clone();
                 let mut after = before.clone();
+                let mut kept: Vec<(String, Span)> = Vec::new();
                 for (p, body) in arms {
                     self.moved = before.clone();
                     let bound = pat_names(p);
                     let visible = self.scope(owned, &bound, body.span);
                     self.walk(body, mode, &visible);
+                    for (n, _) in &visible {
+                        if !self.moved.contains_key(*n) {
+                            kept.push(((*n).to_string(), body.span));
+                        }
+                    }
                     for (k, v) in self.moved.drain() {
                         after.entry(k).or_insert(v);
+                    }
+                }
+                // An arm that still owns a value another arm consumed frees it
+                // where the arm ends: after the match, the consuming path would
+                // free it a second time. A value no arm consumes is nobody's
+                // business here — the scope that binds it drops it.
+                //
+                // ponytail: a payload the pattern binds is part of the
+                // scrutinee, so it is freed with the scrutinee and never here.
+                // Upgrade path: drop a payload separately once a value can be
+                // taken apart, which needs Task 8's per-type `_Drop_T`.
+                for (n, at) in kept {
+                    if after.contains_key(&n) {
+                        self.drops.push(DropSite {
+                            name: n,
+                            at,
+                            path: self.path.clone(),
+                        });
                     }
                 }
                 self.moved = after;

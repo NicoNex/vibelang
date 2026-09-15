@@ -33,3 +33,13 @@ fn a_value_given_away_is_not_dropped_by_the_giver() {
         "`eat` owns its parameter and drops it:\n{d}"
     );
 }
+
+#[test]
+fn an_arm_that_keeps_the_value_drops_it_and_the_arm_that_gives_it_away_does_not() {
+    let d = drops("tests/drop_arm.vibe");
+    let lines: Vec<&str> = d
+        .lines()
+        .filter(|l| l.starts_with("DropArm.pick") && l.contains("drop s"))
+        .collect();
+    assert_eq!(lines.len(), 1, "exactly one arm still owns `s`:\n{d}");
+}

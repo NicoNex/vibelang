@@ -1,0 +1,11 @@
+mod DropArm
+
+;; One arm hands `s` on and one only reads it. The arm that still owns it at its
+;; end is the one that frees it, and it frees it there — not after the match,
+;; where the other path would free it a second time.
+eat (s:Str) : U32 = u32 (len &s)
+
+pick (b:Bool) (s:Str) : U32 =
+  ?b |True  -> eat s
+     |False -> u32 (len &s)
+  end
