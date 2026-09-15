@@ -17,8 +17,11 @@ pub struct Checked {
     pub sigs: HashMap<String, Scheme>,
     /// Which `let`, `<-` and pattern binders hold an affine value, keyed by the
     /// span of the expression they scope over and their name. Ownership has no
-    /// other way to know: a binder has no written type (spec §4.2).
-    pub affine: HashMap<(usize, usize, usize, String), bool>,
+    /// other way to know: a binder has no written type (spec §4.2). The value
+    /// is the resolved base type name — empty when the type has no single head
+    /// — so `own` can tell which repair actually type-checks; an absent key
+    /// means the binder is not affine.
+    pub affine: HashMap<(usize, usize, usize, String), String>,
 }
 
 pub fn parse_type(src: &str) -> Ty {
@@ -205,9 +208,9 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
         let affine = c
             .binds
             .iter()
-            .map(|(sp, n, t)| {
+            .filter_map(|(sp, n, t)| {
                 let k = (sp.file, sp.line, sp.col, n.clone());
-                (k, is_affine_t(&c.resolve(t)))
+                affine_base(&c.resolve(t)).map(|b| (k, b))
             })
             .collect();
         Ok(Checked {
@@ -930,18 +933,23 @@ fn pat_names(p: &Pat) -> Vec<String> {
 
 /// The inferred-type twin of `own::is_affine`: scalars are copied, everything
 /// with a payload is moved. An unresolved variable is treated as affine, so an
-/// unknown is reported rather than waved through.
-fn is_affine_t(t: &T) -> bool {
+/// unknown is reported rather than waved through. `Some(name)` is the base type
+/// name, empty when there is no single head; `None` means not affine.
+fn affine_base(t: &T) -> Option<String> {
     match t {
         T::Con(n, _) => {
-            !(crate::types::is_num(n)
+            let scalar = crate::types::is_num(n)
                 || matches!(
                     n.as_str(),
                     "Bool" | "Char" | "Unit" | "Nat" | "Size" | "CStr" | "Ptr"
-                ))
+                );
+            (!scalar).then(|| n.clone())
         }
-        T::Var(_) => true,
-        T::Tuple(ts) => ts.iter().any(is_affine_t),
-        T::Fun(..) | T::Eff(_) => false,
+        T::Var(_) => Some(String::new()),
+        T::Tuple(ts) => ts
+            .iter()
+            .any(|x| affine_base(x).is_some())
+            .then(String::new),
+        T::Fun(..) | T::Eff(_) => None,
     }
 }

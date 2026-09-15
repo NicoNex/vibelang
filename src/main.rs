@@ -177,7 +177,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     let prog =
         load::program(&o.file, &mut files).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
     let root = prog.root();
-    let (src, comments) = (root.src.clone(), root.comments.clone());
+    let comments = root.comments.clone();
     let root = root.module.clone();
     let module = prog.flat.clone();
     let checked = infer::check(&module).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
@@ -202,7 +202,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         return Ok(ExitCode::SUCCESS);
     }
     if o.cmd == "patch" {
-        return do_patch(&o, &root, &src);
+        return do_patch(&o, &prog, &files);
     }
     // P1 is the project's whole premise, so canonicity is checked on the same
     // footing as types (§3.1). The projection defines it: see `view::canon`.
@@ -281,8 +281,8 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
 /// same semantic path the diagnostics use. With `--prove` the ones z3 closes
 /// are dropped, so what is left is exactly the work remaining.
 fn proof(m: &ast::Module, ck: &infer::Checked, prove: bool) -> String {
-    let obs = refine::obligations(m, ck);
-    let mut out = String::new();
+    let (obs, skipped) = refine::obligations(m, ck);
+    let mut out = refine::caveats(&obs, skipped);
     for o in &obs {
         if prove && refine::proved(o) {
             continue;
@@ -295,16 +295,34 @@ fn proof(m: &ast::Module, ck: &infer::Checked, prove: bool) -> String {
 /// `vibe patch` (§13.2). With no hash: report the node so the caller can name
 /// it back. With one: replace the node, but only if the file still holds what
 /// the caller last saw, and only if the result still compiles.
-fn do_patch(o: &Opts, m: &ast::Module, src: &str) -> Result<ExitCode, Fail> {
-    let nodes = patch::nodes(m, src);
+fn do_patch(o: &Opts, prog: &load::Program, files: &Files) -> Result<ExitCode, Fail> {
+    // Every file the loader read is addressable, not just the one named on the
+    // command line: `App.gross` and `Money.vat` are one program (§9), and a
+    // semantic path already says which module it belongs to.
+    let units: Vec<(&load::Unit, Vec<patch::Node>)> = prog
+        .units
+        .iter()
+        .map(|u| (u, patch::nodes(&u.module, &u.src)))
+        .collect();
     let path = o.rest.first().ok_or("patch needs a semantic path")?;
-    let Some(node) = patch::find(&nodes, path) else {
-        let known: Vec<&str> = nodes.iter().map(|n| n.path.as_str()).collect();
+    let found = units
+        .iter()
+        .find_map(|(u, ns)| patch::find(ns, path).map(|n| (*u, n)));
+    let Some((unit, node)) = found else {
+        let known: Vec<&str> = units
+            .iter()
+            .flat_map(|(_, ns)| ns.iter().map(|n| n.path.as_str()))
+            .collect();
         return Err(Fail::Driver(format!(
-            "no node at `{path}`; this file has: {}",
+            "no node at `{path}`; this program has: {}",
             known.join(" ")
         )));
     };
+    let src = unit.src.as_str();
+    // The unit's file id is how the loader names the file it came from: the
+    // edit lands there, not in the file that happened to be on the command
+    // line.
+    let file = Path::new(&files.names[unit.file]);
     let text = node.text(src);
     if o.rest.len() == 1 {
         print!("{}\t{}\n{text}\n", node.path, patch::hash(text));
@@ -328,8 +346,8 @@ fn do_patch(o: &Opts, m: &ast::Module, src: &str) -> Result<ExitCode, Fail> {
     // The patch is not applied unless the result is a program: canonicity,
     // types and effects are all re-checked against the file that would be
     // written, and the original is left alone if any of them refuses.
-    let mut files = Files::new();
-    let fid = files.add(&o.file.display().to_string(), &patched);
+    let mut fresh = Files::new();
+    let fid = fresh.add(&files.names[unit.file], &patched);
     let verdict = lexer::lex(&patched, fid)
         .and_then(parser::parse)
         .map_err(|d| vec![d])
@@ -337,11 +355,11 @@ fn do_patch(o: &Opts, m: &ast::Module, src: &str) -> Result<ExitCode, Fail> {
     if let Err(ds) = verdict {
         return Err(Fail::Diags(format!(
             "vibe: patch refused, `{}` is unchanged\n{}",
-            o.file.display(),
-            diags(&ds, &files, o.fmt)
+            file.display(),
+            diags(&ds, &fresh, o.fmt)
         )));
     }
-    write(&o.file, &patched)?;
+    write(file, &patched)?;
     println!("{path}\t{}", patch::hash(new.trim_end_matches('\n')));
     Ok(ExitCode::SUCCESS)
 }

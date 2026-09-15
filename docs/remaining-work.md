@@ -14,73 +14,9 @@ code is, so the first step is never a search.
 
 ---
 
-## Small, and worth doing first
-
-These are hours, not days, and every one of them is a real defect rather than a
-missing feature.
-
-### 1. `own.use_after_move` suggests a `fix` that does not apply
-
-`src/own.rs::use_var` offers ``borrow it here with `&x`, or copy it with `dup x` ``
-for every affine value. But `dup` is typed `&Str -> Str` (`src/types.rs`,
-`PRELUDE_SIGS`), so on anything other than a string the suggested edit produces a
-`type.mismatch` — a second retry for a generator that did exactly what the
-diagnostic told it to.
-
-The `fix` field is the project's headline claim: *not advice, an edit*. A `fix`
-that does not apply is worse than no `fix`.
-
-What it needs: `own.rs` knows the declared type of a parameter (`Param::ty`) but
-only a `bool` for `let`, `<-` and pattern binders — `Checked::affine` in
-`src/infer.rs` stores affinity and discards the type. Widen that map's value from
-`bool` to the resolved base type name, then suggest `dup` only when the type is
-`Str`, and `&x` alone otherwise.
-
-### 2. Signed subtraction generates no overflow obligation
-
-`f (a:I64) (b:I64) : I64 = a - b` produces no obligation; the unsigned version
-produces one. See `src/refine.rs::arith`, which handles `-` only for the `Nat` /
-unsigned underflow case. Signed overflow is just as real and the machinery is
-already there.
-
-### 3. An obligation the solver cannot express is dropped silently
-
-`src/refine.rs::term` returns `None` for anything outside linear integer/real
-arithmetic, and `push` then skips the obligation entirely. So a program can pass
-`vibe check --prove` because the compiler could not phrase the question, not
-because the answer was yes.
-
-That is the one failure mode a prover must not have quietly. It does not need the
-fragment widened — it needs the skip counted and reported, so `vibe proof` can
-say *"3 obligations could not be expressed"* instead of nothing.
-
-### 4. `vibe deps` stops at the module boundary
-
-`App.gross` calls `Money.vat` and `Money.cents`; `vibe deps examples/shop/app.vibe`
-prints `App.gross -> -`. `src/patch.rs::deps` filters callees against the current
-module's own functions and drops qualified names on the floor. The loader already
-resolves them, so the fix is to report `Field(Ctor(M), n)` as `M.n` rather than
-discarding it.
-
-### 5. `vibe patch` addresses the root file only
-
-`src/main.rs::do_patch` builds its node table from `prog.root()`. In a multi-file
-program every other module is unaddressable. `load::Program::units` already
-carries each file with its source and its file id, so this is plumbing rather than
-design.
-
-### 6. Floats go to the solver as mathematical reals
-
-`src/refine.rs::Sort::Real` maps `F32`/`F64` to SMT `Real`, which says nothing
-about rounding, precision or NaN. A proof about a float is therefore a proof
-about a number the program does not have. Either move to SMT-LIB floating point
-or say plainly in the diagnostic which obligations are approximated.
-
----
-
 ## Medium
 
-### 7. Postconditions (spec §7.1, §16.8)
+### 1. Postconditions (spec §7.1, §16.8)
 
 The spec puts refinements on parameters only, so a function cannot state anything
 about its result. This is the single reason the reference program still has two
@@ -107,11 +43,11 @@ Two routes, neither chosen:
   is real work and the inference has to be sound or every proof built on it is
   worthless.
 
-Prefer the second, and only after item 3: an inferred postcondition that is
-silently dropped when it cannot be phrased is exactly the failure mode above,
-with more at stake.
+Prefer the second. Note that an inferred postcondition the solver cannot phrase
+must not be dropped quietly: `refine::obligations` now counts what it could not
+express, and an inference built on top of it has to keep that property.
 
-### 8. A tail-recursive loop still accumulates
+### 2. A tail-recursive loop still accumulates
 
 Per-frame release (`src/escape.rs`) marks once at function entry and releases once
 on return, but a self-tail-call compiles to a `for (;;)` with the release
@@ -123,7 +59,7 @@ A mark per iteration needs to know which values cross the back edge. This is the
 same analysis [`static-drop-roadmap.md`](static-drop-roadmap.md) needs; do it
 there rather than twice.
 
-### 9. Generic constructor payloads lose their type
+### 3. Generic constructor payloads lose their type
 
 `src/refine.rs::pat_facts` reads a payload's declared type from `CtorInfo::args`.
 For a monomorphic ADT that gives a concrete type, so a record invariant flows
@@ -132,14 +68,14 @@ the payload's *length* but not its record invariant. Instantiating the
 constructor's type from the scrutinee's would fix it; `ty_of` currently returns a
 base name and throws the arguments away.
 
-### 10. Mutual recursion gets a single linear measure
+### 4. Mutual recursion gets a single linear measure
 
 `src/total.rs` compares one linear expression per function, not a lexicographic
 tuple, so a mutually recursive group where the measure shifts between components
 is rejected. Spec §6.4. The upgrade path is written in the module's own header
 comment.
 
-### 11. `let ... in` where a top-level binding would do (spec §3.1)
+### 5. `let ... in` where a top-level binding would do (spec §3.1)
 
 The one §3.1 rule never implemented. `view::canon` compares token streams, and
 the projection prints a `let` exactly as written, so this needs a judgement the
@@ -150,14 +86,14 @@ audited as a whole.
 
 ## Large, with plans already written
 
-### 12. Implicit drop → [`static-drop-roadmap.md`](static-drop-roadmap.md)
+### 6. Implicit drop → [`static-drop-roadmap.md`](static-drop-roadmap.md)
 
 Delete the bump allocator; deallocate at the point the owner dies. The ownership
 checker already computes that point and discards it. Read the plan's preconditions
 before starting: two properties the current design is safe to get wrong become
 use-after-free and double-free once drops are real.
 
-### 13. Cranelift backend → [`backend-roadmap.md`](backend-roadmap.md)
+### 7. Cranelift backend → [`backend-roadmap.md`](backend-roadmap.md)
 
 A native backend so a pure Vibelang program needs no C toolchain, behind a
 `CodegenBackend` trait, with today's emission moved into `CBackend`. C is not
@@ -168,7 +104,7 @@ Note the plan's own finding — Cranelift alone does not remove the C dependency
 and `runtime/vibert.c` is C source compiled alongside the generated program. That
 is an open question in the plan, not a decision.
 
-### 14. Stack allocation for a closure that does not escape (spec §4.6)
+### 8. Stack allocation for a closure that does not escape (spec §4.6)
 
 The ownership half of §4.6 is enforced — an escaping closure owns its captures
 (`src/own.rs::escapes`). The allocation half is not: every closure is
@@ -198,7 +134,7 @@ Carried from §16, with what has changed since:
   edit anywhere re-asks every question whose text changed.
 - **§16.6 Cyclic structures.** Unchanged.
 - **§16.7 Concurrency.** Out of scope for v0.1. Unchanged.
-- **§16.8 Postconditions.** Item 7 above.
+- **§16.8 Postconditions.** Item 1 above.
 
 ---
 
@@ -214,6 +150,13 @@ Carried from §16, with what has changed since:
   from inside `generate()`. Harmless today, a layering violation the moment there
   is a second backend — [`backend-roadmap.md`](backend-roadmap.md) turns it into
   a task.
+- A proof about an `F32`/`F64` is a proof about a mathematical real, not about
+  the machine float the program has: `refine::Sort::Real` says nothing about
+  rounding, precision or NaN. The diagnostic now says so — obligations carrying a
+  real are reported as approximated — but saying so is not the same as being
+  right. SMT-LIB `FloatingPoint` is the fix, and nobody has priced it.
+- `vibe deps` reports callees across module boundaries but callers (`<-`) only
+  within the root module, because that direction would mean walking every unit.
 - An `ext c` refinement cannot name a parameter, because an `ext` signature is a
   type and has no parameter names. `README.md` and spec §10.1 both say so now;
   the spec draft's `(n:Size, n>0) -> E! I32` was never valid syntax.

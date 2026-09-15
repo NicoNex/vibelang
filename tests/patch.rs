@@ -168,3 +168,60 @@ fn an_unknown_path_lists_what_exists() {
         "the error must name the alternatives:\n{out}"
     );
 }
+
+#[test]
+fn deps_names_a_callee_in_another_module() {
+    let (ok, out) = vibe(&["deps", "examples/shop/app.vibe"]);
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("App.gross -> Money.cents Money.vat"),
+        "a qualified call is a dependency like any other:\n{out}"
+    );
+}
+
+/// A private copy of the two-file example, for the same reason `scratch` makes
+/// one of the reference program: a patch test must not edit what other tests
+/// read. Both files keep their names — a file name is its module name (§9).
+fn scratch_shop(name: &str) -> PathBuf {
+    let from = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/shop");
+    let dir = std::env::temp_dir().join("vibe-patch-tests").join(name);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    for f in ["app.vibe", "money.vibe"] {
+        std::fs::copy(from.join(f), dir.join(f)).expect("copy the shop example");
+    }
+    dir
+}
+
+#[test]
+fn a_node_in_another_module_is_addressable() {
+    let dir = scratch_shop("cross-module");
+    let app = dir.join("app.vibe");
+    let app = app.to_str().expect("utf-8");
+    let (h, text) = node("Money.vat.body", app);
+    assert_eq!(text, "net + net * pct / 100");
+    let (ok, out) = vibe(&[
+        "patch",
+        app,
+        "Money.vat.body",
+        &h,
+        "net * (100 + pct) / 100",
+    ]);
+    assert!(ok, "a node outside the root file must be patchable:\n{out}");
+    // the edit lands in the file the node came from, not the one that was named
+    assert!(
+        std::fs::read_to_string(dir.join("money.vibe"))
+            .expect("read")
+            .contains("net * (100 + pct) / 100"),
+        "the patch must reach money.vibe"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("app.vibe")).expect("read"),
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/shop/app.vibe")
+        )
+        .expect("read"),
+        "the file named on the command line must be untouched"
+    );
+    let (ok, out) = vibe(&["check", app]);
+    assert!(ok, "the patched program must still check:\n{out}");
+}

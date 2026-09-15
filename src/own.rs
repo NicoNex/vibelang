@@ -49,10 +49,11 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
             ck,
             escaping,
         };
-        let mut owned: Vec<&str> = Vec::new();
+        let mut owned: Vec<(&str, bool)> = Vec::new();
         for p in &f.params {
             if p.ty.as_ref().is_some_and(is_affine) {
-                owned.extend(p.names.iter().map(|s| s.as_str()));
+                let is_str = matches!(&p.ty, Some(Ty::Con(n, _)) if n == "Str");
+                owned.extend(p.names.iter().map(|s| (s.as_str(), is_str)));
             }
         }
         st.walk(&f.body, Mode::Own, &owned);
@@ -99,28 +100,37 @@ struct State<'a> {
 }
 
 impl State<'_> {
-    /// The names a binder adds to the owned set: those inference typed as
-    /// affine. A name that shadows an owned one always leaves the outer set,
-    /// affine or not, because from here on it means something else.
-    fn scope<'n>(&self, outer: &[&'n str], bound: &'n [String], scope: Span) -> Vec<&'n str> {
-        let mut v: Vec<&str> = outer
+    /// The names a binder adds to the owned set, each with whether its type is
+    /// `Str`: those inference typed as affine. A name that shadows an owned one
+    /// always leaves the outer set, affine or not, because from here on it
+    /// means something else.
+    fn scope<'n>(
+        &self,
+        outer: &[(&'n str, bool)],
+        bound: &'n [String],
+        scope: Span,
+    ) -> Vec<(&'n str, bool)> {
+        let mut v: Vec<(&str, bool)> = outer
             .iter()
             .copied()
-            .filter(|x| !bound.iter().any(|b| b == x))
+            .filter(|(x, _)| !bound.iter().any(|b| b == x))
             .collect();
         for n in bound {
             let k = (scope.file, scope.line, scope.col, n.clone());
-            if self.ck.affine.get(&k).copied().unwrap_or(false) {
-                v.push(n);
+            if let Some(base) = self.ck.affine.get(&k) {
+                v.push((n, base == "Str"));
             }
         }
         v
     }
 
-    fn use_var(&mut self, n: &str, span: Span, mode: Mode, owned: &[&str]) {
-        if mode == Mode::Borrow || !owned.contains(&n) {
+    fn use_var(&mut self, n: &str, span: Span, mode: Mode, owned: &[(&str, bool)]) {
+        if mode == Mode::Borrow {
             return;
         }
+        let Some((_, is_str)) = owned.iter().find(|(x, _)| *x == n) else {
+            return;
+        };
         if let Some(first) = self.moved.get(n) {
             self.errors.push(
                 Diag::error(
@@ -134,17 +144,20 @@ impl State<'_> {
                     first.line,
                     first.col + 1
                 ))
-                .with_fix(&format!(
-                    "borrow it here with `&{}`, or copy it with `dup {}`",
-                    n, n
-                )),
+                // `dup` is `&Str -> Str`, so offering it on anything else
+                // would be a fix that does not type-check.
+                .with_fix(&if *is_str {
+                    format!("borrow it here with `&{}`, or copy it with `dup {}`", n, n)
+                } else {
+                    format!("borrow it here with `&{}`", n)
+                }),
             );
         } else {
             self.moved.insert(n.to_string(), span);
         }
     }
 
-    fn walk(&mut self, e: &Expr, mode: Mode, owned: &[&str]) {
+    fn walk(&mut self, e: &Expr, mode: Mode, owned: &[(&str, bool)]) {
         use ExprKind::*;
         match &e.kind {
             Var(n) => self.use_var(n, e.span, mode, owned),
@@ -174,7 +187,7 @@ impl State<'_> {
                     // is a mutation, not a copy.
                     if let Var(n) = &b.kind {
                         if mode == Mode::Own
-                            && owned.contains(&n.as_str())
+                            && owned.iter().any(|(x, _)| x == n)
                             && !self.moved.contains_key(n)
                         {
                             self.inplace.insert((e.span.file, e.span.line, e.span.col));

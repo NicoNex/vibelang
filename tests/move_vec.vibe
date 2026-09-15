@@ -1,0 +1,7 @@
+mod MoveVec
+
+;; the same double move on a value that is not a string: `dup` is `&Str -> Str`,
+;; so the only fix that type-checks here is the borrow
+pair (a:Vec Str) (b:Vec Str) : Vec (Vec Str) = push (push empty a) b
+
+twice (v:Vec Str) : Vec (Vec Str) = pair v v

@@ -44,6 +44,14 @@ pub struct Ob {
     pub vars: Vec<(String, Sort)>,
     pub hyps: Vec<String>,
     pub goal: String,
+    /// The goal mentions an `F32`/`F64` value, which reaches the solver as a
+    /// mathematical `Real`: no rounding, no precision, no NaN. Proving it says
+    /// something weaker than the program's arithmetic, so it is never reported
+    /// as an exact proof.
+    ///
+    /// ponytail: the ceiling is "say so", not "be right". Upgrade path: the
+    /// SMT-LIB `FloatingPoint` theory, which z3 already implements.
+    pub approx: bool,
 }
 
 /// SMT-LIB 2 text for one obligation: assert the hypotheses and the negated
@@ -74,9 +82,32 @@ pub enum Mode {
     Silent,
 }
 
+/// What a run of `--prove` cannot claim: obligations the fragment could not
+/// phrase and obligations about floats. Empty when there are
+/// none, so a caller can append it unconditionally.
+pub fn caveats(obs: &[Ob], skipped: usize) -> String {
+    let mut s = String::new();
+    if skipped > 0 {
+        s.push_str(&format!(
+            "note: {skipped} obligation(s) could not be expressed in the solver's fragment and were not proved\n"
+        ));
+    }
+    let approx = obs.iter().filter(|o| o.approx).count();
+    if approx > 0 {
+        s.push_str(&format!(
+            "note: {approx} obligation(s) are about F32/F64 and are approximated as mathematical reals, not machine floats\n"
+        ));
+    }
+    s
+}
+
 pub fn check(m: &Module, ck: &Checked, mode: Mode, cache: &mut Cache) -> Vec<Diag> {
-    let obs = obligations(m, ck);
-    if obs.is_empty() || mode == Mode::Silent {
+    let (obs, skipped) = obligations(m, ck);
+    if mode == Mode::Silent || (obs.is_empty() && skipped == 0) {
+        return Vec::new();
+    }
+    eprint!("{}", caveats(&obs, skipped));
+    if obs.is_empty() {
         return Vec::new();
     }
     if mode == Mode::Report {
@@ -326,10 +357,20 @@ struct Gen<'a> {
     /// every name bound so far in this function, so shadowing is detectable
     seen: HashSet<String>,
     shadows: usize,
+    /// Obligations dropped because `term` could not phrase them.
+    skipped: usize,
 }
 
-pub fn obligations(m: &Module, ck: &Checked) -> Vec<Ob> {
+/// The obligations, and how many were dropped because the solver's fragment
+/// could not express them. A dropped obligation is a question never asked, so
+/// it is counted rather than forgotten.
+///
+/// ponytail: only a `term` that comes back `None` at an obligation site is
+/// counted; an overflow rule that never fires because `ty_of` did not know the
+/// type is not. Upgrade path: thread resolved types into `ty_of`.
+pub fn obligations(m: &Module, ck: &Checked) -> (Vec<Ob>, usize) {
     let mut obs = Vec::new();
+    let mut skipped = 0usize;
     for f in m.funs() {
         if f.ghost {
             continue; // ghost functions exist only for the proofs (§7.4)
@@ -346,6 +387,7 @@ pub fn obligations(m: &Module, ck: &Checked) -> Vec<Ob> {
             renames: HashMap::new(),
             seen: HashSet::new(),
             shadows: 0,
+            skipped: 0,
         };
         for p in &f.params {
             for n in &p.names {
@@ -369,9 +411,10 @@ pub fn obligations(m: &Module, ck: &Checked) -> Vec<Ob> {
             g.inv_hyps(&n);
         }
         g.expr(&f.body);
+        skipped += g.skipped;
         obs.extend(g.obs);
     }
-    obs
+    (obs, skipped)
 }
 
 fn base_name(t: &Ty) -> Option<String> {
@@ -665,6 +708,10 @@ impl<'a> Gen<'a> {
         } else {
             None
         };
+        let approx = self
+            .syms
+            .iter()
+            .any(|(s, k)| *k == Sort::Real && goal.contains(s.as_str()));
         let vars = self.syms.iter().map(|(n, k)| (n.clone(), *k)).collect();
         self.obs.push(Ob {
             span,
@@ -675,6 +722,7 @@ impl<'a> Gen<'a> {
             vars,
             hyps: self.hyps.clone(),
             goal,
+            approx,
         });
     }
 
@@ -865,7 +913,10 @@ impl<'a> Gen<'a> {
     fn arith(&mut self, e: &Expr, op: &str, a: &Expr, b: &Expr) {
         match op {
             "/" | "%" => {
-                let Some((tb, kb)) = self.term(b) else { return };
+                let Some((tb, kb)) = self.term(b) else {
+                    self.skipped += 1;
+                    return;
+                };
                 let zero = if kb == Sort::Real { "0.0" } else { "0" };
                 self.push(
                     e.span,
@@ -875,49 +926,57 @@ impl<'a> Gen<'a> {
                     format!("(not (= {tb} {zero}))"),
                 );
             }
-            "+" | "*" => {
-                let ty = self.ty_of(a).or_else(|| self.ty_of(b));
-                let Some(ty) = ty else { return };
-                let Some((lo, Some(hi))) = range(&ty) else {
-                    return;
-                };
-                let (Some((ta, _)), Some((tb, _))) = (self.term(a), self.term(b)) else {
-                    return;
-                };
-                let t = format!("({op} {ta} {tb})");
-                self.push(
-                    e.span,
-                    "overflow",
-                    &format!(
-                        "cannot prove `{} {} {}` stays in {}",
-                        show(a),
-                        op,
-                        show(b),
-                        ty
-                    ),
-                    format!("{} {} {} <= {}", show(a), op, show(b), hi),
-                    format!("(and (<= {t} {hi}) (>= {t} {lo}))"),
-                );
-            }
+            "+" | "*" => self.overflow(e, op, a, b),
             "-" => {
-                let ty = self.ty_of(a).or_else(|| self.ty_of(b));
-                let Some(ty) = ty else { return };
-                if !is_unsigned(&ty) {
-                    return;
+                // Unsigned subtraction wraps below zero, signed subtraction
+                // overflows at either end; both are real, so both get asked.
+                match self.ty_of(a).or_else(|| self.ty_of(b)) {
+                    Some(ty) if is_unsigned(&ty) => {
+                        let (Some((ta, _)), Some((tb, _))) = (self.term(a), self.term(b)) else {
+                            self.skipped += 1;
+                            return;
+                        };
+                        self.push(
+                            e.span,
+                            "underflow",
+                            &format!("cannot prove `{} >= {}` on {}", show(a), show(b), ty),
+                            format!("{} >= {}", show(a), show(b)),
+                            format!("(>= {ta} {tb})"),
+                        );
+                    }
+                    _ => self.overflow(e, "-", a, b),
                 }
-                let (Some((ta, _)), Some((tb, _))) = (self.term(a), self.term(b)) else {
-                    return;
-                };
-                self.push(
-                    e.span,
-                    "underflow",
-                    &format!("cannot prove `{} >= {}` on {}", show(a), show(b), ty),
-                    format!("{} >= {}", show(a), show(b)),
-                    format!("(>= {ta} {tb})"),
-                );
             }
             _ => {}
         }
+    }
+
+    /// `a op b` stays inside the range of its type.
+    fn overflow(&mut self, e: &Expr, op: &str, a: &Expr, b: &Expr) {
+        let Some(ty) = self.ty_of(a).or_else(|| self.ty_of(b)) else {
+            return;
+        };
+        let Some((lo, Some(hi))) = range(&ty) else {
+            return;
+        };
+        let (Some((ta, _)), Some((tb, _))) = (self.term(a), self.term(b)) else {
+            self.skipped += 1;
+            return;
+        };
+        let t = format!("({op} {ta} {tb})");
+        self.push(
+            e.span,
+            "overflow",
+            &format!(
+                "cannot prove `{} {} {}` stays in {}",
+                show(a),
+                op,
+                show(b),
+                ty
+            ),
+            format!("{} {} {} <= {}", show(a), op, show(b), hi),
+            format!("(and (<= {t} {hi}) (>= {t} {lo}))"),
+        );
     }
 
     fn call(&mut self, e: &Expr, name: &str, args: &[&Expr]) {
@@ -925,7 +984,8 @@ impl<'a> Gen<'a> {
             return; // §7.5: the checked forms discharge the obligation at run time
         }
         if name == "get" && args.len() == 2 {
-            if let (Some(v), Some((ti, _))) = (as_name(strip(args[0])), self.term(args[1])) {
+            let got = (as_name(strip(args[0])), self.term(args[1]));
+            if let (Some(v), Some((ti, _))) = got {
                 let v = self.var(&v);
                 let (l, _) = self.sym(format!("len_{v}"), Sort::Int);
                 self.hyps.push(format!("(>= {l} 0)"));
@@ -937,6 +997,8 @@ impl<'a> Gen<'a> {
                     format!("(and (< {ti} {l}) (>= {ti} 0))"),
                 );
                 self.hyps.pop();
+            } else {
+                self.skipped += 1;
             }
             return;
         }
@@ -964,6 +1026,7 @@ impl<'a> Gen<'a> {
             let got = self.term(r);
             self.tys = saved;
             let Some((mut t, Sort::Bool)) = got else {
+                self.skipped += 1;
                 continue;
             };
             for (from, to) in &len_sub {
@@ -1045,6 +1108,7 @@ impl<'a> Gen<'a> {
             let got = self.term(r);
             self.tys = saved;
             let Some((mut t, Sort::Bool)) = got else {
+                self.skipped += 1;
                 continue;
             };
             for (from, (to, _)) in &sub {
@@ -1182,7 +1246,7 @@ mod tests {
         let toks = lexer::lex(src, 0).expect("lexes");
         let m = parser::parse(toks).expect("parses");
         let ck = infer::check(&m).expect("checks");
-        obligations(&m, &ck)
+        obligations(&m, &ck).0
     }
 
     #[test]

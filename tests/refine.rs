@@ -211,3 +211,53 @@ fn an_unshadowed_refinement_still_discharges() {
     let (ok, out) = vibe(&["check", "--prove", "tests/refine_ok.vibe"]);
     assert!(ok, "{out}");
 }
+
+/// Writes `src` to its own file under the temp dir and returns the path.
+fn scratch(name: &str, src: &str) -> String {
+    let dir = std::env::temp_dir().join("vibe-refine-scratch");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let f = dir.join(format!("{name}.vibe"));
+    std::fs::write(&f, src).expect("write");
+    f.to_str().expect("utf-8").to_string()
+}
+
+/// Signed subtraction overflows as readily as unsigned subtraction underflows,
+/// so it asks the same question.
+#[test]
+fn signed_subtraction_generates_an_overflow_obligation() {
+    let f = scratch("Sub", "mod Sub\nf (a:I64) (b:I64) : I64 = a - b\n");
+    let (ok, out) = vibe(&["proof", &f]);
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("Sub.f.body/0\toverflow"),
+        "`a - b` on I64 must be an obligation:\n{out}"
+    );
+}
+
+/// An obligation the fragment cannot phrase is counted, not dropped: a run that
+/// says nothing is indistinguishable from a proof.
+#[test]
+fn an_inexpressible_obligation_is_counted() {
+    // `get v 0` is not a term the solver has, so the divisor obligation about
+    // it cannot be asked at all.
+    let f = scratch(
+        "Opaque",
+        "mod Opaque\nd (a:U64) (v:&Vec U64) : U64 = a / (get v 0)\n",
+    );
+    let (ok, out) = vibe(&["proof", &f]);
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("1 obligation(s) could not be expressed"),
+        "a question never asked must be reported:\n{out}"
+    );
+}
+
+/// A float obligation is never reported as an exact proof: the solver reasons
+/// over reals, the program does not.
+#[test]
+fn a_float_obligation_is_marked_approximated() {
+    let f = scratch("Flt", "mod Flt\nd (a:F64) (b:F64) : F64 = a / b\n");
+    let (ok, out) = vibe(&["proof", &f]);
+    assert!(ok, "{out}");
+    assert!(out.contains("approximated as mathematical reals"), "{out}");
+}

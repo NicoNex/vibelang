@@ -164,8 +164,9 @@ pub fn apply(src: &str, n: &Node, new: &str) -> String {
 // ------------------------------------------------------------------ deps
 
 /// Callees of every function, and the callers implied by them (§13.3). Names
-/// are resolved against the module's own declarations; anything else is either
-/// the prelude or an `ext c` symbol and is reported under its own name.
+/// are resolved against the module's own declarations; a qualified name is
+/// reported as `M.n`, because the loader has already resolved it; anything
+/// else is either the prelude or an `ext c` symbol and is dropped.
 pub fn deps(m: &Module) -> String {
     let mut out = String::new();
     let known: Vec<&str> = m.funs().map(|f| f.name.as_str()).collect();
@@ -173,7 +174,7 @@ pub fn deps(m: &Module) -> String {
     for f in m.funs() {
         let mut calls: Vec<String> = Vec::new();
         collect_calls(&f.body, &mut calls);
-        calls.retain(|c| known.contains(&c.as_str()));
+        calls.retain(|c| known.contains(&c.as_str()) || c.contains('.'));
         calls.sort();
         calls.dedup();
         for c in &calls {
@@ -210,13 +211,28 @@ fn join(names: &[String], m: &str) -> String {
     } else {
         names
             .iter()
-            .map(|n| format!("{m}.{n}"))
+            .map(|n| {
+                if n.contains('.') {
+                    n.clone()
+                } else {
+                    format!("{m}.{n}")
+                }
+            })
             .collect::<Vec<_>>()
             .join(" ")
     }
 }
 
 fn collect_calls(e: &Expr, out: &mut Vec<String>) {
+    // `Money.vat` parses as a field of a constructor (§9). It is a call into
+    // another module, not a record field, so report it qualified and stop:
+    // recursing would report the module name `Money` as a callee of its own.
+    if let ExprKind::Field(b, n) = &e.kind {
+        if let ExprKind::Ctor(m) = &b.kind {
+            out.push(format!("{m}.{n}"));
+            return;
+        }
+    }
     if let ExprKind::Var(n) | ExprKind::Ctor(n) = &e.kind {
         out.push(n.clone());
     }
