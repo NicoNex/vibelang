@@ -138,6 +138,10 @@ type Fault = Overflow | DivZero | OutOfBounds | BadParse
 pub const PRELUDE_SHARES: &[&str] = &["get", "max_by", "min_by", "sum", "fold", "seq", "to_cstr"];
 
 pub const PRELUDE_SIGS: &[(&str, &str)] = &[
+    // Copy. Deep, and generic: the copy owns everything it points at, so it is
+    // the "return a copy" of spec §4.4 — one of the three answers to the absence
+    // of lifetimes — for every type rather than for `Str` alone.
+    ("dup", "&a -> a"),
     // Vec
     ("empty", "Vec a"),
     ("single", "a -> Vec a"),
@@ -161,7 +165,6 @@ pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     // Str
     ("split", "Char -> &Str -> Vec Str"),
     ("lines", "&Str -> Vec Str"),
-    ("dup", "&Str -> Str"),
     ("concat", "&Str -> &Str -> Str"),
     ("trim", "&Str -> Str"),
     ("starts_with", "&Str -> &Str -> Bool"),

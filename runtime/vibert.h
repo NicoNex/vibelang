@@ -139,7 +139,7 @@ VbVal vb_drop(VbVal n, VbVal v);
 /* --- Str --- */
 VbVal vb_split(VbVal c, VbVal s);
 VbVal vb_lines(VbVal s);
-VbVal vb_dup(VbVal s);
+VbVal vb_dup(VbVal v);
 VbVal vb_concat(VbVal a, VbVal b);
 VbVal vb_trim(VbVal s);
 VbVal vb_starts_with(VbVal s, VbVal p);

@@ -169,17 +169,16 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             shared: borrows.iter().map(|b| (*b).to_string()).collect(),
             suppressed: 0,
         };
-        let mut owned: Vec<(&str, bool)> = Vec::new();
+        let mut owned: Vec<&str> = Vec::new();
         for p in &f.params {
             if p.ty.as_ref().is_some_and(is_affine) {
-                let is_str = matches!(&p.ty, Some(Ty::Con(n, _)) if n == "Str");
-                owned.extend(p.names.iter().map(|s| (s.as_str(), is_str)));
+                owned.extend(p.names.iter().map(|s| s.as_str()));
             }
         }
         st.walk(&f.body, Mode::Own, &owned);
         // A parameter is owned by the frame that received it. One the body
         // never hands on dies with that frame.
-        for (n, _) in &owned {
+        for n in &owned {
             if !st.moved.contains_key(*n) && !st.leaves.contains(*n) {
                 st.drop_site(n, f.body.span, DropWhen::ScopeEnd);
             }
@@ -395,25 +394,19 @@ struct State<'a> {
 }
 
 impl State<'_> {
-    /// The names a binder adds to the owned set, each with whether its type is
-    /// `Str`: those inference typed as affine. A name that shadows an owned one
-    /// always leaves the outer set, affine or not, because from here on it
-    /// means something else.
-    fn scope<'n>(
-        &self,
-        outer: &[(&'n str, bool)],
-        bound: &'n [String],
-        scope: Span,
-    ) -> Vec<(&'n str, bool)> {
-        let mut v: Vec<(&str, bool)> = outer
+    /// The names a binder adds to the owned set: those inference typed as
+    /// affine. A name that shadows an owned one always leaves the outer set,
+    /// affine or not, because from here on it means something else.
+    fn scope<'n>(&self, outer: &[&'n str], bound: &'n [String], scope: Span) -> Vec<&'n str> {
+        let mut v: Vec<&str> = outer
             .iter()
             .copied()
-            .filter(|(x, _)| !bound.iter().any(|b| b == x))
+            .filter(|x| !bound.iter().any(|b| b == x))
             .collect();
         for n in bound {
             let k = (scope.file, scope.line, scope.col, n.clone());
-            if let Some(base) = self.ck.affine.get(&k) {
-                v.push((n, base == "Str"));
+            if self.ck.affine.contains_key(&k) {
+                v.push(n);
             }
         }
         v
@@ -462,10 +455,10 @@ impl State<'_> {
         });
     }
 
-    fn use_var(&mut self, n: &str, span: Span, mode: Mode, owned: &[(&str, bool)]) {
-        let Some((_, is_str)) = owned.iter().find(|(x, _)| *x == n) else {
+    fn use_var(&mut self, n: &str, span: Span, mode: Mode, owned: &[&str]) {
+        if !owned.contains(&n) {
             return;
-        };
+        }
         // A borrow does not consume, but it does read, and the value has to
         // still be there to read. Two ways it is not: the base of a
         // `{r with ...}` that codegen mutated in place — the read returns the
@@ -503,11 +496,10 @@ impl State<'_> {
                     ))
                     // `&x` is the fix for a second *move*; here the borrow is
                     // the second use, so the move is what has to give way.
-                    .with_fix(&if *is_str {
-                        format!("read `{}` before the move, or copy it with `dup {}`", n, n)
-                    } else {
-                        format!("read `{}` before the move", n)
-                    }),
+                    .with_fix(&format!(
+                        "read `{}` before the move, or copy it with `dup {}`",
+                        n, n
+                    )),
                 );
             }
             return;
@@ -525,20 +517,19 @@ impl State<'_> {
                     first.line,
                     first.col + 1
                 ))
-                // `dup` is `&Str -> Str`, so offering it on anything else
-                // would be a fix that does not type-check.
-                .with_fix(&if *is_str {
-                    format!("borrow it here with `&{}`, or copy it with `dup {}`", n, n)
-                } else {
-                    format!("borrow it here with `&{}`", n)
-                }),
+                // `dup` is `&a -> a` and copies in depth, so it type-checks
+                // and produces an independently owned value for any type.
+                .with_fix(&format!(
+                    "borrow it here with `&{}`, or copy it with `dup {}`",
+                    n, n
+                )),
             );
         } else {
             self.moved.insert(n.to_string(), span);
         }
     }
 
-    fn walk(&mut self, e: &Expr, mode: Mode, owned: &[(&str, bool)]) {
+    fn walk(&mut self, e: &Expr, mode: Mode, owned: &[&str]) {
         use ExprKind::*;
         match &e.kind {
             Var(n) => self.use_var(n, e.span, mode, owned),
@@ -552,7 +543,7 @@ impl State<'_> {
                 // about to be unreachable, so it dies on this edge — after the
                 // new argument has read it, before the assignment.
                 let back_edge = matches!(&h.kind, Var(n)
-                    if *n == self.fun && args.len() == self.arity && !owned.iter().any(|(x, _)| *x == n));
+                    if *n == self.fun && args.len() == self.arity && !owned.contains(&n.as_str()));
                 // The callee's signature decides each argument: a position it
                 // declared `&` is read for the duration of the call, so what is
                 // passed there is not moved, whether or not the call site wrote
@@ -648,7 +639,7 @@ impl State<'_> {
                     self.walk(a, m, owned);
                 }
                 if back_edge {
-                    for (n, _) in owned {
+                    for n in owned {
                         if !self.moved.contains_key(*n) && !self.leaves.contains(*n) {
                             self.drop_site(n, e.span, DropWhen::BackEdge);
                         }
@@ -679,7 +670,7 @@ impl State<'_> {
                     // is a mutation, not a copy.
                     if let Var(n) = &b.kind {
                         if mode == Mode::Own
-                            && owned.iter().any(|(x, _)| x == n)
+                            && owned.contains(&n.as_str())
                             && !self.moved.contains_key(n)
                         {
                             self.inplace.insert((e.span.file, e.span.line, e.span.col));
@@ -703,7 +694,7 @@ impl State<'_> {
                 self.walk(body, mode, &inner);
                 // Affine, and nothing took it: the value is still this scope's
                 // when the scope ends, so this is where it dies.
-                if inner.iter().any(|(x, _)| *x == n.as_str())
+                if inner.contains(&n.as_str())
                     && !self.moved.contains_key(n)
                     && !self.leaves.contains(n)
                 {
@@ -752,7 +743,7 @@ impl State<'_> {
                     for n in &fresh {
                         self.shared.remove(n);
                     }
-                    for (n, _) in &visible {
+                    for n in &visible {
                         if !self.moved.contains_key(*n) && !self.leaves.contains(*n) {
                             kept.push(((*n).to_string(), body.span));
                         }

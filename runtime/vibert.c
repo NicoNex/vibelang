@@ -470,7 +470,49 @@ VbVal vb_lines(VbVal s) {
   if (start < x->n) vec_push(w, vb_str(x->p + start, x->n - start));
   return wrap_vec(w);
 }
-VbVal vb_dup(VbVal s) { VbStr *x = vb_as_str(s); return vb_str(x->p, x->n); }
+/* Copy a value in depth, so the copy owns everything it points at and both can
+   be used, and later freed, without the other. Spec 4.4 names "return a copy"
+   as one of the three answers to the absence of lifetimes; a shallow copy is
+   not one of them, because the two values would share what they point at and
+   the affine checker would be reasoning about one value where there are two.
+
+   `VB_CSTR` and `VB_PTR` stay shallow: the memory is C's, its extent is not
+   known here, and copying the pointer is the only operation with a meaning. A
+   copy containing one therefore still aliases, which is the drop suppression
+   the frontend already makes for anything that reaches C (`src/escape.rs`);
+   deep drop has to keep making it.
+
+   The recursion terminates because owned data is acyclic: 16.6 puts graphs and
+   arbitrary sharing in an arena, not in a value. */
+VbVal vb_dup(VbVal v) {
+  switch (v.tag) {
+    case VB_STR: { VbStr *x = v.v.p; return vb_str(x->p, x->n); }
+    case VB_VEC: {
+      VbVec *x = v.v.p;
+      VbVec *w = vec_alloc(x->n);
+      for (size_t i = 0; i < x->n; i++) vec_push(w, vb_dup(x->a[i]));
+      return wrap_vec(w);
+    }
+    case VB_OBJ: {
+      VbObj *x = v.v.p;
+      VbObj *o = vb_alloc(sizeof(VbObj));
+      o->info = x->info; o->tag = x->tag; o->n = x->n;
+      o->f = x->n ? vb_alloc(sizeof(VbVal) * x->n) : NULL;
+      for (uint32_t i = 0; i < x->n; i++) o->f[i] = vb_dup(x->f[i]);
+      VbVal r; r.tag = VB_OBJ; r.v.p = o; return r;
+    }
+    case VB_CLOS: {
+      VbClos *x = v.v.p;
+      VbClos *c = vb_alloc(sizeof(VbClos));
+      c->fn = x->fn; c->name = x->name; c->arity = x->arity; c->nargs = x->nargs;
+      c->args = x->arity ? vb_alloc(sizeof(VbVal) * x->arity) : NULL;
+      for (uint32_t i = 0; i < x->nargs; i++) c->args[i] = vb_dup(x->args[i]);
+      VbVal r; r.tag = VB_CLOS; r.v.p = c; return r;
+    }
+    /* A scalar is already a copy; a C pointer is not ours to duplicate. */
+    default: return v;
+  }
+}
 VbVal vb_concat(VbVal a, VbVal b) {
   VbStr *x = vb_as_str(a), *y = vb_as_str(b);
   VbStr *o = vb_alloc(sizeof(VbStr));

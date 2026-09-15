@@ -343,3 +343,13 @@ fn a_drop_follows_the_expression_that_reads_it() {
     assert!(ok, "drop_order.vibe failed to build or run:\n{out}");
     assert_eq!(out.trim(), "5");
 }
+
+/// `dup` is `&a -> a` and copies in depth, so a `Vec` or a record can be the
+/// second owned value a frame needs. Spec §4.4 offers "return a copy" as one of
+/// three answers to the absence of lifetimes; it used to exist for `Str` alone.
+#[test]
+fn dup_copies_an_aggregate_and_leaves_the_original_owned() {
+    let (ok, out) = vibe(&["run", "tests/dup_deep.vibe"]);
+    assert!(ok, "dup_deep.vibe failed to build or run:\n{out}");
+    assert_eq!(out.trim(), "7 ada");
+}

@@ -16,7 +16,7 @@ code is, so the first step is never a search.
 
 ## Where the compiler is today
 
-2026-09-16. `cargo test -- --test-threads=1`: 143 tests across 12 binaries,
+2026-09-16. `cargo test -- --test-threads=1`: 145 tests across 12 binaries,
 green. `cargo clippy --all-targets -- -D warnings`: clean.
 
 A `.vibe` file goes to a native executable through C. What stands between the
@@ -40,6 +40,19 @@ Shipped since this list was first written, each with the item it closed:
 - **Bit operations** — `band`, `bor`, `bxor`, `bnot`, `shl`, `shr`, `ord` — as
   prelude functions rather than operators, because `&` and `|` are taken and a
   call has no precedence to get wrong.
+- **`dup` copies in depth, and copies anything** (`static-drop-roadmap.md`,
+  Open decision 4, answered). `&a -> a`: the copy owns what it points at, so it
+  survives the original and can be freed on its own. Spec §4.4 offers "return a
+  copy" as one of three answers to the absence of lifetimes, and it existed for
+  `Str` alone until now. `VB_CSTR` and `VB_PTR` stay shallow — C owns that
+  memory and its extent is not known here — so a copy holding one still aliases,
+  which is the suppression deep drop has to keep making.
+- **A drop no longer lands ahead of the expression that reads it.** `ex` returns
+  an expression *string*, so a `vb_dispose` pushed after it was emitted *before*
+  it: `vbret = vb_len(v_s_5)` after `vb_dispose(v_s_5)`. Three sites in
+  `src/codegen.rs` violated `flush`'s own stated contract. `settle` names the
+  result first, and only where the result is a compound expression, so the
+  snapshots in `tests/drop.rs` did not move.
 - **`vibe fmt`**, which writes the canonical form back to the file; `--check`
   reports and fails instead.
 - **A measure may be a lexicographic tuple** (`%(n, k)`), so a mutually
@@ -211,10 +224,6 @@ search path).
 
 - **No map, no set, no dictionary.** Nothing in `PRELUDE_SIGS` associates a key
   with a value. It needs a runtime type, not a library written in Vibelang.
-- **Copying an aggregate has no answer.** `dup` is `&Str -> Str`. With affine
-  use, two references to a `Vec` or a record mean restructuring the code.
-  Deep copy, shared immutable value, or a diagnostic that stops offering `dup`
-  for anything else — undecided (`static-drop-roadmap.md`, Open decisions 4).
 - **Fields and `ext c` symbols are still global.** Two modules cannot both
   declare a record field `qty`, because the checker resolves a field by name
   alone. Reported as `mod.duplicate` rather than silently wrong, but it is the

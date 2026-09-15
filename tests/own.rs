@@ -141,20 +141,22 @@ fn a_nat_is_a_scalar_not_an_affine_value() {
     assert!(ok, "a number is copied, not moved:\n{out}");
 }
 
-/// `dup` is `&Str -> Str`, so offering it on anything else produced a fix that
-/// did not type-check — the one thing a `fix` must never do.
+/// `dup` is `&a -> a` and copies in depth, so the fix may offer it on anything:
+/// it type-checks, and the copy owns what it points at. While it was `&Str ->
+/// Str` the same line was a fix that did not compile — the one thing a `fix`
+/// must never be.
 #[test]
-fn the_fix_offers_dup_only_on_a_string() {
+fn the_fix_offers_dup_on_an_aggregate() {
     let (ok, out) = vibe(&["check", "tests/move_vec.vibe", "--diag=struct"]);
     assert!(!ok, "using an owned vector twice must fail:\n{out}");
     assert!(out.contains("own.use_after_move"), "{out}");
     assert!(
         out.contains("borrow it here with `&v`"),
-        "the borrow is the fix that applies:\n{out}"
+        "the borrow is still the cheaper fix:\n{out}"
     );
     assert!(
-        !out.contains("dup v"),
-        "`dup` does not type-check on a `Vec Str`:\n{out}"
+        out.contains("dup v"),
+        "`dup` now type-checks on a `Vec Str`:\n{out}"
     );
 }
 

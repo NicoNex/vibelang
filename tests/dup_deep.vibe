@@ -1,0 +1,21 @@
+mod DupDeep
+
+;; `dup` copies in depth: the copy owns everything it points at, so the original
+;; stays usable and neither is a view of the other. Spec §4.4 names "return a
+;; copy" as one of the three answers to the absence of lifetimes, and before
+;; this it existed for `Str` alone.
+type Tx = { sku:Str, qty:U32 }
+
+;; `v` is consumed by `push` after the copy is taken. A shallow copy would have
+;; handed `d` the same spine, and reading it here would be a use-after-free.
+grow (v:Vec Str) : Size =
+  let d = dup &v in
+  let w = push v "d" in
+  len &w + len &d
+
+sku (t:&Tx) : Str =
+  let c = dup t in
+  c.sku
+
+main : E! Unit =
+  out (fmt "{} {}\n" (grow ["a", "bb", "ccc"]) (sku &{sku="ada", qty=7}))
