@@ -43,3 +43,14 @@ fn an_arm_that_keeps_the_value_drops_it_and_the_arm_that_gives_it_away_does_not(
         .collect();
     assert_eq!(lines.len(), 1, "exactly one arm still owns `s`:\n{d}");
 }
+
+#[test]
+fn a_value_that_leaves_through_the_return_is_never_dropped() {
+    let d = drops("tests/drop_escape.vibe");
+    assert!(!d.contains("drop s"), "`s` is the result:\n{d}");
+    assert!(!d.contains("drop t"), "`t` is inside the result:\n{d}");
+    assert!(
+        !d.contains("drop r"),
+        "`r.s` is a pointer into `r`, so `r` outlives the frame too:\n{d}"
+    );
+}

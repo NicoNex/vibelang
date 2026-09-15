@@ -329,7 +329,7 @@ The approximation is the danger. Today it errs toward "read" and that costs noth
 
 **Interfaces:** `own::drop_points` gains no new signature; it gains the escape set as an input, computed the same way `run` already computes `escaping`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -353,12 +353,12 @@ nested (a:Str) : (Str, U32) =
   (t, 1)
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cargo test --test drop`
 Expected: FAIL — both are reported as dropped at the end of their scope.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add a result-reachability set over the same shape as `escapes`: the spans of `Var` nodes in result position, through `Let` / `Bind` bodies, match arms, and any tuple, list or record built there. A `DropSite` is suppressed when the binder's name is read at one of those spans. Where the expression in result position is a call whose argument was this value, the value has been moved already and Task 2's suppression covers it.
 
@@ -366,12 +366,21 @@ Add a result-reachability set over the same shape as `escapes`: the spans of `Va
 
 Where reachability cannot be decided — a value stored into a structure passed to a callee that may return it — emit the §4.6 error: `own.escape_unknown`, witness naming the value and the call, fix `move`. Do not emit a drop and do not silently suppress one. A missing drop leaks and is recoverable; a wrong drop is a use-after-free.
 
-- [ ] **Step 5: Run the tests**
+Deferred, deliberately, to the Task 8 gate. `move` is spec'd (§4.6) and does not
+exist in the language, so the error has no fix to name, and every lambda handed
+to `map`/`filter`/`fold` would raise it — the reference program included —
+while drops are still inert. What landed instead is the suppression: a name that
+can leave through the result is never a drop site, including the base of a field
+read in result position, which is `r.f` handing out a pointer into `r`. That
+errs toward the leak. The error, and the `move` that answers it, are part of the
+precondition list above and stay the gate on Task 8.
+
+- [x] **Step 5: Run the tests**
 
 Run: `cargo test`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/own.rs tests/drop.rs tests/drop_escape.vibe

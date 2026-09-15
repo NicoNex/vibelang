@@ -1,0 +1,17 @@
+mod DropEscape
+
+;; `s` is the result and `t` is inside it: both belong to the caller once the
+;; frame returns, so neither is this frame's to free.
+direct (a:Str) : Str =
+  let s = concat &a "!" in
+  s
+
+nested (a:Str) : (Str, U32) =
+  let t = concat &a "?" in
+  (t, 1)
+
+type Rec = { s:Str }
+
+;; `r.s` is a pointer into `r`. Freeing `r` here would free what the caller is
+;; about to read, so the frame keeps its hands off it.
+peek (r:Rec) : Str = r.s

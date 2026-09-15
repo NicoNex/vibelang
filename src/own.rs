@@ -107,6 +107,8 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
         }
         let mut escaping = HashSet::new();
         escapes(&f.body, &mut escaping);
+        let mut leaves = HashSet::new();
+        reaches_result(&f.body, &mut leaves);
         let mut st = State {
             moved: HashMap::new(),
             drops: Vec::new(),
@@ -117,6 +119,7 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             ck,
             sigs: &sigs,
             escaping,
+            leaves,
         };
         let mut owned: Vec<(&str, bool)> = Vec::new();
         for p in &f.params {
@@ -129,7 +132,7 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
         // A parameter is owned by the frame that received it. One the body
         // never hands on dies with that frame.
         for (n, _) in &owned {
-            if !st.moved.contains_key(*n) {
+            if !st.moved.contains_key(*n) && !st.leaves.contains(*n) {
                 st.drops.push(DropSite {
                     name: (*n).to_string(),
                     at: f.body.span,
@@ -218,6 +221,74 @@ fn returned<'a>(e: &'a Expr, out: &mut Vec<(&'a str, Span)>) {
     }
 }
 
+/// Names whose value can leave through the result: the tail expression itself,
+/// a component of a structure built there, a base whose field is read there —
+/// `r.f` is a pointer into `r` — or anything a closure returned from there can
+/// read. A value the caller receives is the caller's to free.
+///
+/// This is the one place where erring wide is the safe direction: suppressing a
+/// drop that was not needed leaks, and missing one frees memory the caller is
+/// about to read.
+///
+/// ponytail: names, not spans, so an inner binder that shadows one of these is
+/// suppressed with it — a leak, never a use-after-free. Upgrade path: key on
+/// the binder's span once drops are emitted.
+fn reaches_result(e: &Expr, out: &mut HashSet<String>) {
+    use ExprKind::*;
+    match &e.kind {
+        Var(n) => {
+            out.insert(n.clone());
+        }
+        // `r.f` hands out a pointer into `r`, so `r` leaves with it.
+        Field(b, _) | Borrow(b) => reaches_result(b, out),
+        Let(_, _, b) | Bind(_, _, b) | Arena(_, b) => reaches_result(b, out),
+        Match(_, arms) => arms.iter().for_each(|(_, a)| reaches_result(a, out)),
+        Tuple(xs) | List(xs) => xs.iter().for_each(|x| reaches_result(x, out)),
+        Record(base, fields) => {
+            if let Some(b) = base {
+                reaches_result(b, out);
+            }
+            fields.iter().for_each(|(_, v)| reaches_result(v, out));
+        }
+        // Everything a returned closure reads, it may carry out with it (§4.6).
+        Lambda(_, b) => names_in(b, out),
+        // A call's result is the callee's value; what was passed to it was
+        // moved there, and the move already suppressed the drop.
+        _ => {}
+    }
+}
+
+/// Every name the expression mentions, at any depth.
+fn names_in(e: &Expr, out: &mut HashSet<String>) {
+    use ExprKind::*;
+    match &e.kind {
+        Var(n) => {
+            out.insert(n.clone());
+        }
+        App(h, xs) => {
+            names_in(h, out);
+            xs.iter().for_each(|x| names_in(x, out));
+        }
+        Binop(_, a, b) | Let(_, a, b) | Bind(_, a, b) => {
+            names_in(a, out);
+            names_in(b, out);
+        }
+        Neg(x) | Not(x) | Borrow(x) | Field(x, _) | Lambda(_, x) | Arena(_, x) => names_in(x, out),
+        Tuple(xs) | List(xs) => xs.iter().for_each(|x| names_in(x, out)),
+        Record(base, fields) => {
+            if let Some(b) = base {
+                names_in(b, out);
+            }
+            fields.iter().for_each(|(_, v)| names_in(v, out));
+        }
+        Match(s, arms) => {
+            names_in(s, out);
+            arms.iter().for_each(|(_, a)| names_in(a, out));
+        }
+        Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Ctor(_) => {}
+    }
+}
+
 /// Scalars are copied, not moved. Everything with a payload is affine.
 fn is_affine(t: &Ty) -> bool {
     match t {
@@ -258,6 +329,8 @@ struct State<'a> {
     /// Lambdas whose value reaches the function's result, so their captures
     /// outlive the call.
     escaping: HashSet<(usize, usize, usize)>,
+    /// Names whose value can leave through the result: never dropped here.
+    leaves: HashSet<String>,
 }
 
 impl State<'_> {
@@ -435,7 +508,10 @@ impl State<'_> {
                 self.walk(body, mode, &inner);
                 // Affine, and nothing took it: the value is still this scope's
                 // when the scope ends, so this is where it dies.
-                if inner.iter().any(|(x, _)| *x == n.as_str()) && !self.moved.contains_key(n) {
+                if inner.iter().any(|(x, _)| *x == n.as_str())
+                    && !self.moved.contains_key(n)
+                    && !self.leaves.contains(n)
+                {
                     self.drops.push(DropSite {
                         name: n.clone(),
                         at: body.span,
@@ -470,7 +546,7 @@ impl State<'_> {
                     let visible = self.scope(owned, &bound, body.span);
                     self.walk(body, mode, &visible);
                     for (n, _) in &visible {
-                        if !self.moved.contains_key(*n) {
+                        if !self.moved.contains_key(*n) && !self.leaves.contains(*n) {
                             kept.push(((*n).to_string(), body.span));
                         }
                     }
