@@ -37,12 +37,13 @@ the payload's *length* but not its record invariant. Instantiating the
 constructor's type from the scrutinee's would fix it; `ty_of` currently returns a
 base name and throws the arguments away.
 
-### 3. Mutual recursion gets a single linear measure
+### 3. A tuple measure is written, never inferred
 
-`src/total.rs` compares one linear expression per function, not a lexicographic
-tuple, so a mutually recursive group where the measure shifts between components
-is rejected. Spec §6.4. The upgrade path is written in the module's own header
-comment.
+`src/total.rs` compares measures lexicographically, so a mutually recursive
+group whose shrinking component changes is accepted when each member writes
+`%(n, k)` (§6.4, `tests/total_lex.vibe`). What is left: inference still only
+handles direct self-recursion over one parameter, and the members of a group
+must write tuples of the same width — a short one is not padded.
 
 ### 4. `let ... in` where a top-level binding would do (spec §3.1)
 

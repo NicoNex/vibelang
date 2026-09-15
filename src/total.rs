@@ -9,11 +9,15 @@
 //! to choose wrong. Purity is what the static reasoning rests on, and purity is
 //! exactly what this still enforces.
 //!
-//! ponytail: the order is a single linear expression over the parameters, not a
-//! lexicographic tuple (§6.4). A mutually recursive group is accepted when every
-//! member has a measure that drops at every call inside the group — the first
-//! component of that tuple. Upgrade path: keep a Vec<Lin> per function and
-//! compare lexicographically.
+//! A measure is a lexicographic tuple of linear expressions over the parameters
+//! (§6.4): `%(n, k)` compares `n` first and only looks at `k` when `n` is level,
+//! which is what a mutually recursive group needs when the component that
+//! shrinks changes from one member to the next. A measure that is not written as
+//! a tuple is a tuple of one.
+//!
+//! ponytail: a tuple measure is written, never inferred, and the members of a
+//! group must all write tuples of the same width. Upgrade path: pad a short
+//! tuple on the right, and try parameter positions across the group at once.
 
 use crate::ast::*;
 use crate::diag::{Diag, Span};
@@ -63,7 +67,7 @@ pub fn check(m: &Module) -> Vec<Diag> {
 
     let mut ds = Vec::new();
     // Pass 1: a measure for every recursive function.
-    let mut measures: Vec<Option<Lin>> = vec![None; n];
+    let mut measures: Vec<Option<Vec<Lin>>> = vec![None; n];
     for i in 0..n {
         if !reach[i][i] {
             continue; // not recursive: nothing to prove
@@ -75,9 +79,12 @@ pub fn check(m: &Module) -> Vec<Diag> {
         let path = format!("{}.{}", f.home, f.name);
         match &f.measure {
             Some(e) => {
-                let l = lin(e);
-                if l.terms.keys().all(|k| params[i].contains(k)) {
-                    measures[i] = Some(l);
+                let parts: Vec<Lin> = components(e).into_iter().map(lin).collect();
+                if parts
+                    .iter()
+                    .all(|l| l.terms.keys().all(|k| params[i].contains(k)))
+                {
+                    measures[i] = Some(parts);
                 } else {
                     ds.push(
                         Diag::error(
@@ -91,7 +98,7 @@ pub fn check(m: &Module) -> Vec<Diag> {
                         .with_path(&path)
                         .with_witness(&show(e))
                         .with_fix(
-                            "write the measure with `+`/`-` over scalar parameters, e.g. `%(n-k)`",
+                            "write the measure with `+`/`-` over scalar parameters, e.g. `%(n-k)`, or as a tuple, e.g. `%(n, k)`",
                         ),
                     );
                 }
@@ -105,10 +112,10 @@ pub fn check(m: &Module) -> Vec<Diag> {
                     let cand = Lin::var(p);
                     solo && calls[i]
                         .iter()
-                        .all(|c| decreases(&cand, &cand, &params[i], &c.args))
+                        .all(|c| delta(&cand, &cand, &params[i], &c.args).is_some_and(|d| d > 0))
                 });
                 match inferred {
-                    Some(p) => measures[i] = Some(Lin::var(p)),
+                    Some(p) => measures[i] = Some(vec![Lin::var(p)]),
                     None => ds.push(
                         Diag::error(
                             f.span,
@@ -126,7 +133,11 @@ pub fn check(m: &Module) -> Vec<Diag> {
                             },
                         )
                         .with_path(&path)
-                        .with_fix("add a measure after the body, e.g. `%(n-k)`"),
+                        .with_fix(if solo {
+                            "add a measure after the body, e.g. `%(n-k)`"
+                        } else {
+                            "give every member of the group a measure, as a lexicographic tuple if the component that shrinks changes, e.g. `%(n, k)`"
+                        }),
                     ),
                 }
             }
@@ -143,7 +154,7 @@ pub fn check(m: &Module) -> Vec<Diag> {
             let Some(mj) = &measures[c.callee] else {
                 continue;
             };
-            if decreases(mi, mj, &params[c.callee], &c.args) {
+            if lex_decreases(mi, mj, &params[c.callee], &c.args) {
                 continue;
             }
             ds.push(
@@ -156,7 +167,7 @@ pub fn check(m: &Module) -> Vec<Diag> {
                     ),
                 )
                 .with_path(&format!("{}.{}", funs[i].home, funs[i].name))
-                .with_witness(&format!("measure {}", mi.show()))
+                .with_witness(&format!("measure {}", show_lex(mi)))
                 .with_fix("make an argument shrink, or give a measure that does, e.g. `%(n-k)`"),
             );
         }
@@ -298,22 +309,49 @@ fn lin(e: &Expr) -> Lin {
     l
 }
 
-/// True when the callee's measure, with the call arguments in place of its
-/// parameters, is below the caller's measure by a positive constant — the other
-/// atoms must cancel exactly, so the drop holds for every value they take.
-fn decreases(caller: &Lin, callee: &Lin, callee_params: &[String], args: &[Expr]) -> bool {
+/// The components of a measure. A tuple is lexicographic, outermost first;
+/// anything else is a tuple of one.
+fn components(e: &Expr) -> Vec<&Expr> {
+    match &e.kind {
+        ExprKind::Tuple(xs) => xs.iter().collect(),
+        _ => vec![e],
+    }
+}
+
+fn show_lex(m: &[Lin]) -> String {
+    m.iter().map(Lin::show).collect::<Vec<_>>().join(", ")
+}
+
+/// How far the callee's component sits below the caller's, once the call
+/// arguments stand in for the callee's parameters. `None` when the other atoms
+/// do not cancel exactly, because then no gap holds for every value they take.
+fn delta(caller: &Lin, callee: &Lin, callee_params: &[String], args: &[Expr]) -> Option<i64> {
     if args.len() != callee_params.len() {
-        return false; // partial application: nothing to substitute into
+        return None; // partial application: nothing to substitute into
     }
     let mut d = caller.clone();
     for (atom, k) in &callee.terms {
-        match callee_params.iter().position(|p| p == atom) {
-            Some(i) => d.add_scaled(&lin(&args[i]), -k),
-            None => return false,
-        }
+        let i = callee_params.iter().position(|p| p == atom)?;
+        d.add_scaled(&lin(&args[i]), -k);
     }
     d.c -= callee.c;
-    d.terms.is_empty() && d.c > 0
+    d.terms.is_empty().then_some(d.c)
+}
+
+/// Lexicographic order: one component drops by a positive constant and no
+/// component before it grows. Tuples of different widths are not comparable.
+fn lex_decreases(caller: &[Lin], callee: &[Lin], callee_params: &[String], args: &[Expr]) -> bool {
+    if caller.len() != callee.len() {
+        return false;
+    }
+    for (a, b) in caller.iter().zip(callee) {
+        match delta(a, b, callee_params, args) {
+            Some(d) if d > 0 => return true,
+            Some(0) => continue,
+            _ => return false, // grows, or does not cancel
+        }
+    }
+    false // every component level: the order is not well founded
 }
 
 /// Enough of an expression printer for diagnostics, and for keying atoms: two

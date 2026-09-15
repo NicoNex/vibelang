@@ -1,0 +1,21 @@
+mod TotalLex
+
+;; A mutually recursive pair whose shrinking component changes: `pong` resets
+;; `k` upwards, so no single linear measure drops at both calls. The measure is
+;; a lexicographic tuple: `n` first, `k` only when `n` is level (spec §6.4).
+ping (n:U64) (k:U64) : U64 =
+  ?(k==0)
+   |True  -> n
+   |False -> pong n (k - 1)
+  end
+  %(n, k)
+
+pong (n:U64) (k:U64) : U64 =
+  ?(n==0)
+   |True  -> k
+   |False -> ping (n - 1) (k + 5)
+  end
+  %(n, k)
+
+main : E! Unit =
+  out (show (ping 2 3))

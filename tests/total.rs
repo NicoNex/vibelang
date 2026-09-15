@@ -90,3 +90,11 @@ fn a_pure_function_may_not() {
         "the effectful one must not be reported:\n{out}"
     );
 }
+
+/// Spec §6.4. `pong` resets `k` upwards, so no single linear expression drops at
+/// both calls of the group; the lexicographic tuple `%(n, k)` does.
+#[test]
+fn a_mutual_group_may_use_a_lexicographic_measure() {
+    let (ok, out) = check("tests/total_lex.vibe");
+    assert!(ok, "a lexicographic measure must be accepted:\n{out}");
+}
