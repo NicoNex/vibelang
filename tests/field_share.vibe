@@ -1,0 +1,15 @@
+mod FieldShare
+
+;; Two records in one module declare `val`, at a different index in each. The
+;; checker knows `a` is an `A` and says so per use site; resolving `.val` by its
+;; bare name instead reached for `B` and emitted `vb_field(x, 0)`, so this
+;; printed the tag rather than the value, and printed it without a diagnostic.
+type A = { tag:U32, val:U32 }
+type B = { val:U32, note:U32 }
+
+geta (a:&A) : U32 = a.val
+
+getb (b:&B) : U32 = b.val
+
+main : E! Unit =
+  out (fmt "{} {}\n" (geta &{tag=1, val=99}) (getb &{val=2, note=3}))

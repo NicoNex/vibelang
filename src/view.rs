@@ -627,7 +627,9 @@ fn pat_atom(p: &Pat) -> String {
 
 // --------------------------------------------------------------------- types
 
-fn ty(t: &Ty) -> String {
+/// The canonical spelling of a type. `load` compares two `ext c` signatures
+/// by it: two types that print the same are the same type.
+pub(crate) fn ty(t: &Ty) -> String {
     match t {
         Ty::Fun(a, b) => format!("{} -> {}", ty_app(a), ty(b)),
         _ => ty_app(t),

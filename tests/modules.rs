@@ -223,28 +223,73 @@ fn a_projection_keeps_the_qualifier() {
     assert!(out.contains("Money.vat (Money.cents euro)"), "{out}");
 }
 
-/// Fields resolve to their record by name alone, so two modules spelling one
-/// the same way must be caught here rather than surfacing as a type error in a
-/// third place.
+/// Two modules may both declare a field `qty`. Inference resolves each use site
+/// from the base's type and writes the answer down (`Checked::field_of`), so
+/// codegen no longer picks a record by the bare field name.
+///
+/// `qty` sits at a different index in each record here on purpose: resolving it
+/// the old way emitted `vb_field(x, 0)` and this printed `x` instead of 7.
 #[test]
-fn a_record_field_declared_twice_is_a_clash_too() {
+fn two_modules_may_declare_the_same_field() {
     let dir = project(
         "fields",
         &[
             (
                 "a.vibe",
-                "mod A\n\ntype Ta = { qty:U32 }\n\nmk : Ta = {qty=1}\n",
+                "mod A\n\ntype Ta = { note:Str, qty:U32 }\n\nmk (n:U32) : Ta = {note=\"x\", qty=n}\n",
             ),
             (
                 "b.vibe",
-                "mod B\n\ntype Tb = { qty:F64 }\n\nmain : E! Unit =\n  out (show (A.mk.qty))\n",
+                "mod B\n\ntype Tb = { qty:F64, extra:U32 }\n\nmain : E! Unit =\n  out (show (A.mk 7).qty)\n",
+            ),
+        ],
+    );
+    let (ok, out) = vibe_in(&dir, &["run", "b.vibe"]);
+    assert!(ok, "two modules may name a field the same way:\n{out}");
+    assert_eq!(out.trim(), "7", "the field resolved to the wrong record:\n{out}");
+}
+
+/// An `ext c` symbol is C's, so two modules naming it are naming one function
+/// and that is not a clash. Disagreeing about its type is: the linker takes one
+/// and the checker proved something about the other.
+#[test]
+fn two_modules_may_declare_the_same_c_symbol_with_one_type() {
+    let dir = project(
+        "csym",
+        &[
+            (
+                "a.vibe",
+                "mod A\n\next c \"stdio.h\"\n  puts : &CStr -> E! I32\nend\n\nsay (s:&Str) : E! I32 = puts &(to_cstr s)\n",
+            ),
+            (
+                "b.vibe",
+                "mod B\n\next c \"stdio.h\"\n  puts : &CStr -> E! I32\nend\n\nmain : E! Unit =\n  n <- A.say \"hi\" ;\n  out (show n)\n",
+            ),
+        ],
+    );
+    let (ok, out) = vibe_in(&dir, &["check", "b.vibe"]);
+    assert!(ok, "one C symbol, one type, two modules:\n{out}");
+}
+
+#[test]
+fn two_modules_may_not_give_one_c_symbol_two_types() {
+    let dir = project(
+        "csym2",
+        &[
+            (
+                "a.vibe",
+                "mod A\n\next c \"stdio.h\"\n  puts : &CStr -> E! I32\nend\n\nsay (s:&Str) : E! I32 = puts &(to_cstr s)\n",
+            ),
+            (
+                "b.vibe",
+                "mod B\n\next c \"stdio.h\"\n  puts : &CStr -> E! U64\nend\n\nmain : E! Unit =\n  n <- A.say \"hi\" ;\n  out (show n)\n",
             ),
         ],
     );
     let (ok, out) = vibe_in(&dir, &["check", "b.vibe", "--diag=struct"]);
     assert!(!ok, "{out}");
     assert!(out.contains("mod.duplicate"), "{out}");
-    assert!(out.contains("`qty` is declared in both"), "{out}");
+    assert!(out.contains("two different types"), "{out}");
 }
 
 /// A module does not have to sit next to the file that names it: `VIBE_PATH` is

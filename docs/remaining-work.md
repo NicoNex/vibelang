@@ -16,7 +16,7 @@ code is, so the first step is never a search.
 
 ## Where the compiler is today
 
-2026-09-16. `cargo test -- --test-threads=1`: 145 tests across 12 binaries,
+2026-09-16. `cargo test -- --test-threads=1`: 148 tests across 12 binaries,
 green. `cargo clippy --all-targets -- -D warnings`: clean.
 
 A `.vibe` file goes to a native executable through C. What stands between the
@@ -53,6 +53,17 @@ Shipped since this list was first written, each with the item it closed:
   `src/codegen.rs` violated `flush`'s own stated contract. `settle` names the
   result first, and only where the result is a compound expression, so the
   snapshots in `tests/drop.rs` did not move.
+- **A record field is resolved per use site, not by its name.** Inference
+  already knew which record every `.field` and every literal meant; it writes
+  that down in `Checked::field_of`, keyed by span, and codegen reads it instead
+  of guessing from `Data::field_owner`. Two records may now declare `val` — in
+  one module or in two — and a site inference could not pin down is
+  `field.ambiguous` rather than a coin toss. This was silently wrong before, not
+  merely restricted: `tests/field_share.vibe` printed the tag instead of the
+  value, with no diagnostic.
+- **An `ext c` symbol is C's, so two modules may declare it.** What they may not
+  do is give it two types, which is the only thing `global_clashes` still
+  checks. Record fields left that list.
 - **`vibe fmt`**, which writes the canonical form back to the file; `--check`
   reports and fails instead.
 - **A measure may be a lexicographic tuple** (`%(n, k)`), so a mutually
@@ -210,6 +221,17 @@ Carried from §16, with what has changed since:
 - An `ext c` refinement cannot name a parameter, because an `ext` signature is a
   type and has no parameter names. `README.md` and spec §10.1 both say so now;
   the spec draft's `(n:Size, n>0) -> E! I32` was never valid syntax.
+- **A nullary declaration whose value is a record cannot be read through.**
+  `mk : Ta = {note="x", qty=7}` followed by `mk.qty` aborts at run time with
+  "expected a record or variant", in one module or across two. Found while
+  writing `tests/modules.rs`; the fixture takes a parameter to route around it.
+  Not diagnosed, so it is a run-time failure rather than a compile error.
+- **Inference is not bidirectional.** A lambda passed to a parameter of written
+  type does not take its argument type from that signature, so `\r -> r.qty`
+  leaves `r` a variable. It used to resolve by field name and be right by luck;
+  it is now `field.ambiguous` whenever two records share the field. The program
+  is correct and is refused, and the fix in the diagnostic — write the type — is
+  the honest one until checking is bidirectional.
 
 
 ---
@@ -224,10 +246,6 @@ search path).
 
 - **No map, no set, no dictionary.** Nothing in `PRELUDE_SIGS` associates a key
   with a value. It needs a runtime type, not a library written in Vibelang.
-- **Fields and `ext c` symbols are still global.** Two modules cannot both
-  declare a record field `qty`, because the checker resolves a field by name
-  alone. Reported as `mod.duplicate` rather than silently wrong, but it is the
-  one namespace the module system did not close.
 
 Worth knowing before starting, none of them blocking:
 

@@ -353,3 +353,14 @@ fn dup_copies_an_aggregate_and_leaves_the_original_owned() {
     assert!(ok, "dup_deep.vibe failed to build or run:\n{out}");
     assert_eq!(out.trim(), "7 ada");
 }
+
+/// Two records in one module may declare the same field name. Inference knows
+/// which record each use site means and writes it down; codegen used to resolve
+/// the field by its bare name, which picked whichever record was collected last
+/// and emitted the wrong `vb_field` index — wrong output, no diagnostic.
+#[test]
+fn a_field_two_records_declare_resolves_to_the_right_one() {
+    let (ok, out) = vibe(&["run", "tests/field_share.vibe"]);
+    assert!(ok, "field_share.vibe failed to build or run:\n{out}");
+    assert_eq!(out.trim(), "99 2");
+}

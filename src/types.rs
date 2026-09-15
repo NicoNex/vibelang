@@ -7,7 +7,7 @@
 
 use crate::ast::*;
 use crate::diag::{Diag, Span};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum T {
@@ -108,8 +108,17 @@ pub struct Data {
     /// type name -> constructor names, in declaration order.
     pub variants: HashMap<String, Vec<String>>,
     pub opaque: Vec<String>,
-    /// field name -> owning record type. Field names are unique module-wide.
+    /// field name -> owning record type, for the one case a field has to be
+    /// resolved by its name alone: a record literal or a `.field` read whose
+    /// base type inference never pinned down. It holds the *first* record to
+    /// declare the name, and `field_ambiguous` says when that answer is a
+    /// guess rather than the answer.
     pub field_owner: HashMap<String, String>,
+    /// Field names more than one record declares. Resolving one of these by
+    /// name is not allowed: `Checked::field_of` carries what inference decided
+    /// at each use site, and a site inference could not decide is an error
+    /// rather than a coin toss.
+    pub field_ambiguous: HashSet<String>,
 }
 
 pub const PRELUDE_TYPES: &str = "\
@@ -248,6 +257,9 @@ pub struct Checker {
     /// Ownership needs this: a binder has no written type, so the only place
     /// its affinity can come from is inference (spec §4.2).
     pub binds: Vec<(Span, String, T)>,
+    /// The record every `.field` read and every record literal resolved to,
+    /// keyed by the span of that expression. See `Checked::field_of`.
+    pub field_of: HashMap<(usize, usize, usize), String>,
     pending_matches: Vec<(Span, T, Vec<Pat>, String)>,
 }
 
@@ -263,6 +275,7 @@ impl Checker {
             sigs: HashMap::new(),
             errors: Vec::new(),
             binds: Vec::new(),
+            field_of: HashMap::new(),
             pending_matches: Vec::new(),
         }
     }

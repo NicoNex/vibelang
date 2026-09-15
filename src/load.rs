@@ -135,38 +135,40 @@ fn syms_of(m: &Module) -> Syms {
 
 /// Names that two modules may not both declare, because nothing downstream
 /// carries a module with them.
+///
+/// Only `ext c` symbols are left here, and even they are not a clash by being
+/// declared twice: the symbol belongs to C, and two modules naming the same one
+/// are talking about the same function. What they may not do is disagree about
+/// its type — C will link whichever it likes and the checker will have proved
+/// something about the other.
+///
+/// Record fields used to be on this list. They are resolved per use site now
+/// (`Checked::field_of`), so two modules may both declare `qty`.
 fn global_clashes(units: &[Unit]) -> Vec<Diag> {
-    let mut seen: HashMap<String, String> = HashMap::new();
+    let mut seen: HashMap<String, (String, String)> = HashMap::new();
     let mut out = Vec::new();
     for u in units {
         let m = &u.module;
         for d in &m.decls {
-            let names: Vec<String> = match d {
-                Decl::Type(t) => match &t.body {
-                    TypeBody::Record(r) => r.fields.iter().map(|(n, _)| n.clone()).collect(),
-                    _ => Vec::new(),
-                },
-                Decl::Ext(e) => e.sigs.iter().map(|s| s.name.clone()).collect(),
-                _ => Vec::new(),
-            };
-            let kind = if matches!(d, Decl::Ext(_)) {
-                "`ext c` symbol"
-            } else {
-                "record field"
-            };
-            for n in names {
-                match seen.get(&n) {
-                    Some(first) if first != &m.name => out.push(
+            let Decl::Ext(e) = d else { continue };
+            for sig in &e.sigs {
+                let shape = format!("{} : {}", sig.symbol, crate::view::ty(&sig.ty));
+                match seen.get(&sig.name) {
+                    Some((first, was)) if first != &m.name && was != &shape => out.push(
                         Diag::error(
-                            decl_span(d),
+                            sig.span,
                             "mod.duplicate",
-                            &format!("the {kind} `{n}` is declared in both `{first}` and `{}`", m.name),
+                            &format!(
+                                "the `ext c` symbol `{}` is declared with two different types, in `{first}` and `{}`",
+                                sig.name, m.name
+                            ),
                         )
-                        .with_path(&format!("{}.{n}", m.name))
-                        .with_fix("rename one of them: a field and a C symbol have no module to hide behind"),
+                        .with_path(&format!("{}.{}", m.name, sig.name))
+                        .with_witness(&format!("`{first}` declares {was}; `{}` declares {shape}", m.name))
+                        .with_fix("make the two agree: a C symbol has one type, and no module to hide behind"),
                     ),
                     _ => {
-                        seen.insert(n, m.name.clone());
+                        seen.insert(sig.name.clone(), (m.name.clone(), shape));
                     }
                 }
             }
@@ -582,14 +584,6 @@ fn snake_case(s: &str) -> String {
     out
 }
 
-fn decl_span(d: &Decl) -> Span {
-    match d {
-        Decl::Type(t) => t.span,
-        Decl::Fun(f) => f.span,
-        Decl::Ext(e) => e.span,
-        Decl::Exp(_, s) => *s,
-    }
-}
 
 /// Every `Mod.name` in the module, with the span to blame if `Mod` is missing.
 /// A qualifier is written exactly like a field access on a constructor, so the

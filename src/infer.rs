@@ -22,6 +22,16 @@ pub struct Checked {
     /// — so `own` can tell which repair actually type-checks; an absent key
     /// means the binder is not affine.
     pub affine: HashMap<(usize, usize, usize, String), String>,
+    /// The record every `.field` read and every record literal resolved to,
+    /// keyed by the span of that expression.
+    ///
+    /// Codegen has no types — values are dynamically tagged and resolved types
+    /// are not threaded through it — so it used to resolve a field by its bare
+    /// name through `Data::field_owner`. That picks the wrong record the moment
+    /// two declare the same field name, and the wrongness is silent, because an
+    /// emitted `vb_field(x, 1)` is just a number. Inference already knows the
+    /// answer at every site; this is where it writes it down.
+    pub field_of: HashMap<(usize, usize, usize), String>,
 }
 
 pub fn parse_type(src: &str) -> Ty {
@@ -218,6 +228,7 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
             ext,
             sigs: c.sigs,
             affine,
+            field_of: c.field_of,
         })
     } else {
         c.errors
@@ -241,11 +252,40 @@ fn result_name(t: &T) -> String {
     }
 }
 
+/// A field two records declare, at a site where inference never pinned the
+/// base type down. Resolving it by name would be a guess, and a guess here
+/// emits a `vb_field` index for the wrong record.
+fn ambiguous_field(c: &Checker, f: &str, span: Span) -> Diag {
+    let mut owners: Vec<&str> = c
+        .data
+        .records
+        .values()
+        .filter(|r| r.fields.iter().any(|(n, _)| n == f))
+        .map(|r| r.name.as_str())
+        .collect();
+    owners.sort();
+    Diag::error(
+        span,
+        "field.ambiguous",
+        &format!("`{}` is a field of more than one record", f),
+    )
+    .with_witness(&format!("declared by {}", owners.join(", ")))
+    .with_fix("write the type: a parameter or a signature says which record this is")
+}
+
 fn collect_type(c: &mut Checker, t: &TypeDecl) {
     match &t.body {
         TypeBody::Record(r) => {
             for (f, _) in &r.fields {
-                c.data.field_owner.insert(f.clone(), t.name.clone());
+                match c.data.field_owner.get(f) {
+                    Some(first) if first != &t.name => {
+                        c.data.field_ambiguous.insert(f.clone());
+                    }
+                    Some(_) => {}
+                    None => {
+                        c.data.field_owner.insert(f.clone(), t.name.clone());
+                    }
+                }
             }
             c.data.records.insert(
                 t.name.clone(),
@@ -659,6 +699,9 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
             let bt = infer(c, base, path)?;
             let owner = match c.resolve(&bt) {
                 T::Con(n, _) if c.data.records.contains_key(&n) => n,
+                T::Var(_) if c.data.field_ambiguous.contains(f) => {
+                    return Err(ambiguous_field(c, f, e.span).at_path(path))
+                }
                 T::Var(_) => match c.data.field_owner.get(f) {
                     Some(o) => {
                         let o = o.clone();
@@ -690,6 +733,8 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                     .at_path(path))
                 }
             };
+            c.field_of
+                .insert((e.span.file, e.span.line, e.span.col), owner.clone());
             let rec = c.data.records[&owner].clone();
             match rec.fields.iter().find(|(n, _)| n == f) {
                 Some((_, ty)) => {
@@ -717,6 +762,16 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                     let bt = infer(c, b, path)?;
                     match c.resolve(&bt) {
                         T::Con(n, _) if c.data.records.contains_key(&n) => n,
+                        T::Var(_)
+                            if given.iter().any(|f| c.data.field_ambiguous.contains(f)) =>
+                        {
+                            let f = given
+                                .iter()
+                                .find(|f| c.data.field_ambiguous.contains(*f))
+                                .expect("just found one")
+                                .clone();
+                            return Err(ambiguous_field(c, &f, e.span).at_path(path));
+                        }
                         T::Var(_) => match given.first().and_then(|f| c.data.field_owner.get(f)) {
                             Some(o) => o.clone(),
                             None => {
@@ -783,6 +838,8 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                     }
                 }
             };
+            c.field_of
+                .insert((e.span.file, e.span.line, e.span.col), owner.clone());
             let rec = c.data.records[&owner].clone();
             for (fname, fexpr) in fields {
                 match rec.fields.iter().find(|(n, _)| n == fname) {
