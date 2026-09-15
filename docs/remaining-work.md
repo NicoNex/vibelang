@@ -28,14 +28,14 @@ A mark per iteration needs to know which values cross the back edge. This is the
 same analysis [`static-drop-roadmap.md`](static-drop-roadmap.md) needs; do it
 there rather than twice.
 
-### 2. Generic constructor payloads lose their type
+### 2. A type argument is kept one level deep
 
-`src/refine.rs::pat_facts` reads a payload's declared type from `CtorInfo::args`.
-For a monomorphic ADT that gives a concrete type, so a record invariant flows
-through `B t`. For `Res e t` the argument is a type variable, so `Ok ts` learns
-the payload's *length* but not its record invariant. Instantiating the
-constructor's type from the scrutinee's would fix it; `ty_of` currently returns a
-base name and throws the arguments away.
+`src/refine.rs::pat_facts` instantiates a constructor's payload type from the
+scrutinee's type arguments, so `Ok t` on a `Res Err Tx` carries `Tx`'s record
+invariant (`tests/refine_ctor.vibe`). What is left: `ty_args` keeps the *head*
+of each argument, so the `Tx` in `Res Err (Vec Tx)` is still lost, and a binder
+introduced by `<-` still has no type at all. Both end at the same fix — keep the
+`Ty`, not its base name.
 
 ### 3. A tuple measure is written, never inferred
 
@@ -138,7 +138,7 @@ Carried from §16, with what has changed since:
   `Opt` was the better design. Making the refinement declarable alongside the
   signature in `PRELUDE_SIGS` is the fix.
 - The integration tests share a build directory and race when run in parallel;
-  `cargo test -- --test-threads=1` is the reliable invocation. CI should pin it.
+  `cargo test -- --test-threads=1` is the reliable invocation, and CI pins it.
 - `vibe deps` reports callees across module boundaries but callers (`<-`) only
   within the root module, because that direction would mean walking every unit.
 - An `ext c` refinement cannot name a parameter, because an `ext` signature is a

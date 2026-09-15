@@ -16,3 +16,10 @@ type Box = B Tx
 rate (b:&Box) : U32 =
   ?b |B t -> 100 / t.qty
   end
+
+;; the payload's type is the variable `t` of `Res e t`, so `Tx`'s invariant
+;; reaches the arm only once the scrutinee's arguments are substituted in
+part (r:&Res Err Tx) : U32 =
+  ?r |Er e -> 0
+     |Ok t -> 100 / t.qty
+  end

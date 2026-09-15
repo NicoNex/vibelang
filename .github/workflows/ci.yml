@@ -12,4 +12,5 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo build --locked --verbose
-      - run: cargo test --locked --verbose
+      # The integration tests share one build directory, so they race in parallel.
+      - run: cargo test --locked --verbose -- --test-threads=1

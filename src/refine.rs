@@ -341,6 +341,10 @@ struct Gen<'a> {
     ck: &'a Checked,
     /// declared types of names in scope, when a signature gives one
     tys: HashMap<String, String>,
+    /// the base names of those types' arguments: `Res Str Tx` gives
+    /// `["Str", "Tx"]`, which is what instantiates a constructor's payload type
+    /// when the payload is declared as a type variable.
+    tyargs: HashMap<String, Vec<String>>,
     syms: BTreeMap<String, Sort>,
     hyps: Vec<String>,
     obs: Vec<Ob>,
@@ -384,6 +388,7 @@ pub fn obligations(m: &Module, ck: &Checked) -> (Vec<Ob>, usize) {
             m,
             ck,
             tys: HashMap::new(),
+            tyargs: HashMap::new(),
             syms: BTreeMap::new(),
             hyps: Vec::new(),
             obs: Vec::new(),
@@ -400,6 +405,9 @@ pub fn obligations(m: &Module, ck: &Checked) -> (Vec<Ob>, usize) {
             for n in &p.names {
                 if let Some(t) = p.ty.as_ref().and_then(base_name) {
                     g.tys.insert(n.clone(), t);
+                }
+                if let Some(t) = p.ty.as_ref() {
+                    g.tyargs.insert(n.clone(), ty_args(t));
                 }
                 g.params.push(n.clone());
                 g.seen.insert(n.clone());
@@ -429,6 +437,51 @@ fn base_name(t: &Ty) -> Option<String> {
         Ty::Con(n, _) => Some(n.clone()),
         Ty::Ref(i) | Ty::Eff(i) => base_name(i),
         _ => None,
+    }
+}
+
+/// The base names of a type's arguments, positionally: `Res Str Tx` gives
+/// `["Str", "Tx"]`. An argument with no single head keeps an empty name, so the
+/// positions still line up with the type's parameters.
+///
+/// ponytail: one level deep — the `Tx` in `Res Str (Vec Tx)` is not kept, so a
+/// payload bound out of a nested generic carries a length but no invariant.
+/// Upgrade path: keep the `Ty` itself instead of its head.
+fn ty_args(t: &Ty) -> Vec<String> {
+    match t {
+        Ty::Con(_, args) => args
+            .iter()
+            .map(|a| base_name(a).unwrap_or_default())
+            .collect(),
+        Ty::Ref(i) | Ty::Eff(i) => ty_args(i),
+        _ => Vec::new(),
+    }
+}
+
+/// A constructor's payload type with the scrutinee's type arguments in place of
+/// the ADT's type parameters: the `t` of `Ok t` is `Tx` when the scrutinee is a
+/// `Res Str Tx`, so the payload carries `Tx`'s record invariant (§8.3).
+fn inst(t: &Ty, params: &[String], args: &[String]) -> Option<String> {
+    match t {
+        Ty::Var(n) => params
+            .iter()
+            .position(|p| p == n)
+            .and_then(|i| args.get(i).cloned())
+            .filter(|s| !s.is_empty()),
+        _ => base_name(t),
+    }
+}
+
+/// The same substitution, for the payload type's own arguments: `Vec t` inside
+/// `Res e t` gives `["Tx"]`.
+fn inst_args(t: &Ty, params: &[String], args: &[String]) -> Vec<String> {
+    match t {
+        Ty::Con(_, xs) => xs
+            .iter()
+            .map(|x| inst(x, params, args).unwrap_or_default())
+            .collect(),
+        Ty::Ref(i) | Ty::Eff(i) => inst_args(i, params, args),
+        _ => Vec::new(),
     }
 }
 
@@ -691,9 +744,34 @@ impl<'a> Gen<'a> {
                         return Some(t.into());
                     }
                 }
-                None
+                self.ret_ty(&name, args.len()).and_then(|t| base_name(&t))
             }
             _ => None,
+        }
+    }
+
+    /// The declared result type of a module function, for a call that supplies
+    /// every parameter. A partial application has a function type, which is not
+    /// a result and says nothing about the value.
+    fn ret_ty(&self, name: &str, argc: usize) -> Option<Ty> {
+        let f = self.m.funs().find(|f| f.name == name)?;
+        let params: usize = f.params.iter().map(|p| p.names.len()).sum();
+        (params == argc).then(|| f.ret.clone()).flatten()
+    }
+
+    /// The type arguments of what `e` evaluates to, as base names.
+    fn ty_args_of(&self, e: &Expr) -> Vec<String> {
+        match &e.kind {
+            ExprKind::Var(n) => self.tyargs.get(&self.var(n)).cloned().unwrap_or_default(),
+            ExprKind::Borrow(i) | ExprKind::Neg(i) => self.ty_args_of(i),
+            ExprKind::App(..) => {
+                let (f, args) = flatten(e);
+                as_name(f)
+                    .and_then(|n| self.ret_ty(&n, args.len()))
+                    .map(|t| ty_args(&t))
+                    .unwrap_or_default()
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -784,6 +862,7 @@ impl<'a> Gen<'a> {
                 // `let x = x + 1` still reads the outer `x`
                 let val = self.term(v);
                 let ty = self.ty_of(v);
+                let targs = self.ty_args_of(v);
                 let saved = self.renames.clone();
                 let sources = self.post_src.clone();
                 let sym = self.fresh_name(n);
@@ -793,7 +872,10 @@ impl<'a> Gen<'a> {
                     self.hyps.push(format!("(= {sym} {t})"));
                 }
                 if let Some(t) = ty {
-                    self.tys.insert(sym, t);
+                    self.tys.insert(sym.clone(), t);
+                }
+                if !targs.is_empty() {
+                    self.tyargs.insert(sym, targs);
                 }
                 self.expr(rest);
                 self.hyps.truncate(k);
@@ -807,6 +889,7 @@ impl<'a> Gen<'a> {
                 for (p, body) in arms {
                     let k = self.hyps.len();
                     let tys = self.tys.clone();
+                    let tyargs = self.tyargs.clone();
                     for n in &seen {
                         self.hyps.push(n.clone());
                     }
@@ -817,6 +900,7 @@ impl<'a> Gen<'a> {
                     self.expr(body);
                     self.hyps.truncate(k);
                     self.tys = tys;
+                    self.tyargs = tyargs;
                 }
             }
             _ => {}
@@ -831,7 +915,8 @@ impl<'a> Gen<'a> {
         if let Pat::Ctor(..) = p {
             let v = self.var(&as_name(strip(scrut))?);
             let ty = self.ty_of(scrut);
-            let facts = self.pat_facts(&v, ty, p);
+            let targs = self.ty_args_of(scrut);
+            let facts = self.pat_facts(&v, ty, &targs, p);
             self.post_hyp(&v, p);
             return facts;
         }
@@ -859,10 +944,16 @@ impl<'a> Gen<'a> {
     /// refinements, which is what §8.3 asks for. Upgrade path: emit
     /// `declare-datatypes` if a proof ever needs to reason about a constructor
     /// no arm names.
-    fn pat_facts(&mut self, v: &str, ty: Option<String>, p: &Pat) -> Option<String> {
+    fn pat_facts(
+        &mut self,
+        v: &str,
+        ty: Option<String>,
+        targs: &[String],
+        p: &Pat,
+    ) -> Option<String> {
         match p {
             Pat::Var(n) => {
-                self.bind(n, v, ty);
+                self.bind(n, v, ty, targs);
                 None
             }
             Pat::Int(i) => {
@@ -883,8 +974,12 @@ impl<'a> Gen<'a> {
                 let mut parts = vec![format!("(= {tag} {})", info.tag)];
                 for (i, sub) in args.iter().enumerate() {
                     let path = format!("{v}_{i}");
-                    let aty = info.args.get(i).and_then(base_name);
-                    if let Some(g) = self.pat_facts(&path, aty, sub) {
+                    let arg = info.args.get(i);
+                    let aty = arg.and_then(|t| inst(t, &info.params, targs));
+                    let sub_args = arg
+                        .map(|t| inst_args(t, &info.params, targs))
+                        .unwrap_or_default();
+                    if let Some(g) = self.pat_facts(&path, aty, &sub_args, sub) {
                         parts.push(g);
                     }
                 }
@@ -898,10 +993,13 @@ impl<'a> Gen<'a> {
     /// one, alias the length for a container (`len` is an opaque symbol keyed on
     /// the name, so the alias is the only thing that carries `len ts > 0` across
     /// the binding), and give `n` the context any parameter of that type gets.
-    fn bind(&mut self, n: &str, v: &str, ty: Option<String>) {
+    fn bind(&mut self, n: &str, v: &str, ty: Option<String>, targs: &[String]) {
         let sym = self.fresh_name(n);
         if sym == v {
             return;
+        }
+        if !targs.is_empty() {
+            self.tyargs.insert(sym.clone(), targs.to_vec());
         }
         if let Some(t) = &ty {
             self.tys.insert(sym.clone(), t.clone());

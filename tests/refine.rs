@@ -103,6 +103,21 @@ fn a_refinement_survives_a_constructor_pattern() {
     );
 }
 
+/// The payload of `Ok` is declared as the type variable `t` of `Res e t`. Its
+/// record invariant only reaches the arm if the scrutinee's own arguments are
+/// substituted for the ADT's parameters first.
+#[test]
+fn a_generic_payload_keeps_its_record_invariant() {
+    if !have_z3() {
+        return;
+    }
+    let (ok, out) = vibe(&["check", "--prove", "tests/refine_ctor.vibe"]);
+    assert!(
+        ok && !out.contains("div0"),
+        "`Tx`'s `qty>0` must reach the `Ok t` arm:\n{out}"
+    );
+}
+
 #[test]
 fn without_the_empty_arm_the_same_call_is_open() {
     if !have_z3() {
