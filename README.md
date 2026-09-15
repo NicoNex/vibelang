@@ -130,13 +130,32 @@ exp c mean, total
 double Ledger_mean(VbVal x0);
 ```
 
+## Why it looks like this
+
+Every decision below was taken against one measure: the total **tokens spent reaching a correct program** — generation, diagnostics and retries together, not source length. A retry is the expensive event, and most of the language is arranged to avoid one.
+
+- **No offside rule.** Indentation carries no meaning: no `INDENT`/`DEDENT`, no counting of spaces. `end` closes a multi-arm construct and `;` terminates a bind, so a generator that miscounts spaces still emits the program it meant to instead of a subtly different one.
+- **No contextual rules.** The meaning of a token does not depend on its position in the file, on parser state, or on what was declared above it. There is nothing to remember across a file, and nothing that reads one way in one place and another way elsewhere.
+- **One spelling per program.** The parser rejects redundant parentheses and a `let ... in` that a top-level binding would express; it does not normalise them. `vibe fmt` writes the one canonical form back. There is no style debate because there is no style, and a projection that is byte-stable is something an agent can diff and patch.
+- **Symbols and keywords chosen by their prior.** Every symbol is a single token in common tokenizers and keeps the meaning it already has in ML, Rust, F# or C; every keyword is a common English word. `--` and `#` are reserved and left unused because they are comments elsewhere, and comments are `;;` because nothing mainstream spells them that way.
+- **Names stay descriptive.** A deliberate deviation from compression: `total_amount` costs about what `t` costs in tokens and produces fewer errors, because the name carries the semantics that guides the next line.
+- **Nothing to write about memory.** No garbage collector, no refcount, no lifetime annotation. `&` parameters are borrows for the duration of the call, everything else is owned, the return value is always owned — that one rule determines where every free goes, and the compiler places them. An annotation is a notation a generator has to get right on the first try, in a language it is being measured on.
+- **The precondition is in the type.** `mean (ts:&Vec Tx, len ts>0)` is the signature, and z3 discharges it at every call site. The question a reviewer would ask is answered before a human reads the code.
+- **Divergence is an effect.** A generated pure function that cannot prove it terminates is rejected rather than shipped. `E!` functions are exempt because a server is designed not to return. There is no `while` and no `loop`: one construct fewer, one choice point fewer.
+- **Exhaustive matching and affine ownership.** A missing arm and a value used twice are two whole classes of generated bug, and both are compile errors naming the missing constructor or the first move.
+- **Diagnostics are patches.** A semantic `path`, a `witness`, and a `fix` mechanical enough to apply without re-deriving the program. That closes the correction loop inside the diagnostic instead of a retry, which is why a `fix` that does not apply counts as a defect here: `dup` was made a deep copy so that `own.use_after_move` would still have a usable `fix` on a record or a vector.
+- **A compiler a program can drive.** `view --sig-only` is cheap context, `deps` gives callers and callees, `proof` lists the open obligations under the same semantic path the diagnostics use, and `patch` replaces a node addressed by path and guarded by a hash, refusing the edit if the result stops compiling. Human readability is a derived goal, obtained from the projections rather than paid for in syntax.
+- **C in both directions.** `ext c` and `exp c` are how a generator reuses forty years of libraries instead of reimplementing them, and the emitted header says out loud where the guarantees stop.
+
+How much of this is delivered rather than intended is the next section. The comparison the spec calls phase 0 — the same tasks generated in another language, measured in tokens to a correct program — is not in this repository, so the metric everything above is judged against has not yet been used to judge it.
+
 ## Status
 
-**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, bit operations, a deep and generic `dup`, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, four projection views, the whole CLI above. 145 tests, green.
+**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, bit operations, a deep and generic `dup`, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, record fields resolved per use site, four projection views, the whole CLI above. 148 tests, green.
 
-**Partial** — refinements on prelude builtins are hardcoded; a proof about a float is a proof about a mathematical real; drops are shallow, so nested structures leak their interior; every closure is on the heap; values are dynamically tagged, so any performance claim today is a claim about a boxed interpreter.
+**Partial** — inference is not bidirectional, so a lambda parameter takes no type from the signature it is passed to, and a `.field` there has to be unambiguous; refinements on prelude builtins are hardcoded; a proof about a float is a proof about a mathematical real; drops are shallow, so nested structures leak their interior; every closure is on the heap; values are dynamically tagged, so any performance claim today is a claim about a boxed interpreter.
 
-**Not yet** — no map and no set, so nothing associates a key with a value; record fields and `ext c` symbols are the one namespace still global; a native backend.
+**Not yet** — no map and no set, so nothing associates a key with a value; a native backend.
 
 The full list, with a file and a line for every item, is [`docs/remaining-work.md`](docs/remaining-work.md). Moving a line from one list to the next is how this section gets edited.
 
