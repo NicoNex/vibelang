@@ -158,3 +158,13 @@ fn reading_a_base_after_an_in_place_update_is_refused() {
     assert!(!ok, "reading `t` after `{{t with ...}}` must fail:\n{out}");
     assert!(out.contains("own.use_after_update"), "{out}");
 }
+
+/// `&` is erased by `types::lower_ty`, so a body whose tail is a borrowed
+/// parameter handed the caller an owned value pointing at someone else's
+/// memory — a double free the moment drops are real (spec §4.4).
+#[test]
+fn a_borrow_cannot_be_returned_as_owned() {
+    let (ok, out) = vibe(&["check", "tests/launder.vibe", "--diag=struct"]);
+    assert!(!ok, "returning a borrowed parameter must fail:\n{out}");
+    assert!(out.contains("own.borrow_escapes"), "{out}");
+}

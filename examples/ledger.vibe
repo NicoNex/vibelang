@@ -26,7 +26,7 @@ amt   (t:&Tx)      : F64 = t.price * f64 t.qty
 total (ts:&Vec Tx) : F64 = ts |> map amt |> sum
 
 mean (ts:&Vec Tx, len ts>0) : F64 = total ts / f64 (len ts)
-top  (ts:&Vec Tx, len ts>0) : &Tx = ts |> max_by amt
+top  (ts:&Vec Tx, len ts>0) : Tx  = ts |> max_by amt
 
 load (p:&Str) : E! Res Err (Vec Tx) =
   txt <- read p ;

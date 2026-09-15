@@ -127,10 +127,11 @@ Carried from §16, with what has changed since:
   rounding, precision or NaN. The diagnostic now says so — obligations carrying a
   real are reported as approximated — but saying so is not the same as being
   right. SMT-LIB `FloatingPoint` is the fix, and nobody has priced it.
-- Borrow-after-move is not checked at all, and the reference program relies on
-  it: `len ts` moves `ts`, so the `&ts` after it is a read of a moved value.
-  Only `{r with ...}` bases are checked (`own.use_after_update`). See
-  [`aliasing-audit.md`](aliasing-audit.md) gap 5.
+- Borrow-after-move is not checked in general, and the reference program relies
+  on that: `len ts` moves `ts`, so every `&ts` after it reads a moved value.
+  Only `{r with ...}` bases are checked (`own.use_after_update`). Closing it
+  means an owned argument to a `&` parameter must borrow, not move — the two
+  changes have to land together. [`aliasing-audit.md`](aliasing-audit.md) gap 5.
 - `vibe deps` reports callees across module boundaries but callers (`<-`) only
   within the root module, because that direction would mean walking every unit.
 - An `ext c` refinement cannot name a parameter, because an `ext` signature is a

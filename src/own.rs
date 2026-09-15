@@ -39,6 +39,49 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
     let mut out = Vec::new();
     let mut inplace = HashSet::new();
     for f in m.funs().filter(|f| !f.ghost) {
+        // A borrow lives for the call that lent it (spec §4.4), so returning
+        // one hands the caller a pointer into a value it may already have
+        // dropped. `&` is erased by `types::lower_ty`, so nothing downstream
+        // notices: the result arrives owned and gets freed a second time.
+        if let Some(Ty::Ref(_)) = &f.ret {
+            out.push(
+                Diag::error(
+                    f.span,
+                    "own.borrow_escapes",
+                    &format!("`{}` returns a borrow", f.name),
+                )
+                .with_path(&format!("{}.{}", f.home, f.name))
+                .with_witness("a borrow lives only for the call that lent it")
+                .with_fix("return an owned value, or the index of the element instead"),
+            );
+        }
+        // The other half of the same rule: `&` is erased, so a body whose tail
+        // is a borrowed parameter launders it into an owned result without the
+        // declared type ever saying `&`.
+        let borrows: Vec<&str> = f
+            .params
+            .iter()
+            .filter(|p| matches!(p.ty, Some(Ty::Ref(_))))
+            .flat_map(|p| p.names.iter().map(|s| s.as_str()))
+            .collect();
+        if !borrows.is_empty() && f.ret.as_ref().is_some_and(|t| !matches!(t, Ty::Ref(_))) {
+            let mut tails = Vec::new();
+            returned(&f.body, &mut tails);
+            for (n, span) in tails {
+                if borrows.contains(&n) {
+                    out.push(
+                        Diag::error(
+                            span,
+                            "own.borrow_escapes",
+                            &format!("`{}` is a borrow and is returned as owned", n),
+                        )
+                        .with_path(&format!("{}.{}", f.home, f.name))
+                        .with_witness("a borrow lives only for the call that lent it")
+                        .with_fix(&format!("copy it with `dup {}`, or return an index", n)),
+                    );
+                }
+            }
+        }
         let mut escaping = HashSet::new();
         escapes(&f.body, &mut escaping);
         let mut st = State {
@@ -62,6 +105,17 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
         inplace.extend(st.inplace.drain());
     }
     (out, inplace)
+}
+
+/// Every name a body can yield as its result, with the span it sits at.
+fn returned<'a>(e: &'a Expr, out: &mut Vec<(&'a str, Span)>) {
+    use ExprKind::*;
+    match &e.kind {
+        Var(n) => out.push((n.as_str(), e.span)),
+        Let(_, _, b) | Bind(_, _, b) | Arena(_, b) => returned(b, out),
+        Match(_, arms) => arms.iter().for_each(|(_, a)| returned(a, out)),
+        _ => {}
+    }
 }
 
 /// Scalars are copied, not moved. Everything with a payload is affine.

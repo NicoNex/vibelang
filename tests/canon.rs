@@ -118,6 +118,7 @@ fn the_whole_corpus_checks() {
                 "move.vibe",
                 "move_vec.vibe",
                 "with_alias.vibe",
+                "launder.vibe",
                 "capture.vibe",
                 "move_let.vibe",
                 "move_pat.vibe",
