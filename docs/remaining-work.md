@@ -16,38 +16,7 @@ code is, so the first step is never a search.
 
 ## Medium
 
-### 1. Postconditions (spec §7.1, §16.8)
-
-The spec puts refinements on parameters only, so a function cannot state anything
-about its result. This is the single reason the reference program still has two
-open obligations:
-
-```console
-$ vibe proof --prove examples/ledger.vibe
-Ledger.main.body/0	refine.unproven	cannot prove the precondition of `mean`: len ts > 0
-Ledger.main.body/1	refine.unproven	cannot prove the precondition of `top`: len ts > 0
-```
-
-The fact that rules out the empty case lives in `load`, whose `Ok []` arm returns
-`Er Void`. §8.3's mechanism already carries that across arms of *one* match — see
-`src/refine.rs::pat_facts` — but not across a call.
-
-Two routes, neither chosen:
-
-- **Declared.** Add syntax to §7.1 for a refinement on the result, and check it
-  at every `return` position. Explicit, costs the generator tokens on every
-  signature that needs one.
-- **Inferred.** Derive a constructor-conditioned postcondition from the body —
-  for `load`, *result is `Ok x` implies `len x != 0`* — and assume it at call
-  sites. Costs no tokens and is where the project's whole argument points, but it
-  is real work and the inference has to be sound or every proof built on it is
-  worthless.
-
-Prefer the second. Note that an inferred postcondition the solver cannot phrase
-must not be dropped quietly: `refine::obligations` now counts what it could not
-express, and an inference built on top of it has to keep that property.
-
-### 2. A tail-recursive loop still accumulates
+### 1. A tail-recursive loop still accumulates
 
 Per-frame release (`src/escape.rs`) marks once at function entry and releases once
 on return, but a self-tail-call compiles to a `for (;;)` with the release
@@ -59,7 +28,7 @@ A mark per iteration needs to know which values cross the back edge. This is the
 same analysis [`static-drop-roadmap.md`](static-drop-roadmap.md) needs; do it
 there rather than twice.
 
-### 3. Generic constructor payloads lose their type
+### 2. Generic constructor payloads lose their type
 
 `src/refine.rs::pat_facts` reads a payload's declared type from `CtorInfo::args`.
 For a monomorphic ADT that gives a concrete type, so a record invariant flows
@@ -68,14 +37,14 @@ the payload's *length* but not its record invariant. Instantiating the
 constructor's type from the scrutinee's would fix it; `ty_of` currently returns a
 base name and throws the arguments away.
 
-### 4. Mutual recursion gets a single linear measure
+### 3. Mutual recursion gets a single linear measure
 
 `src/total.rs` compares one linear expression per function, not a lexicographic
 tuple, so a mutually recursive group where the measure shifts between components
 is rejected. Spec §6.4. The upgrade path is written in the module's own header
 comment.
 
-### 5. `let ... in` where a top-level binding would do (spec §3.1)
+### 4. `let ... in` where a top-level binding would do (spec §3.1)
 
 The one §3.1 rule never implemented. `view::canon` compares token streams, and
 the projection prints a `let` exactly as written, so this needs a judgement the
@@ -86,14 +55,14 @@ audited as a whole.
 
 ## Large, with plans already written
 
-### 6. Implicit drop → [`static-drop-roadmap.md`](static-drop-roadmap.md)
+### 5. Implicit drop → [`static-drop-roadmap.md`](static-drop-roadmap.md)
 
 Delete the bump allocator; deallocate at the point the owner dies. The ownership
 checker already computes that point and discards it. Read the plan's preconditions
 before starting: two properties the current design is safe to get wrong become
 use-after-free and double-free once drops are real.
 
-### 7. Cranelift backend → [`backend-roadmap.md`](backend-roadmap.md)
+### 6. Cranelift backend → [`backend-roadmap.md`](backend-roadmap.md)
 
 A native backend so a pure Vibelang program needs no C toolchain, behind a
 `CodegenBackend` trait, with today's emission moved into `CBackend`. C is not
@@ -104,7 +73,7 @@ Note the plan's own finding — Cranelift alone does not remove the C dependency
 and `runtime/vibert.c` is C source compiled alongside the generated program. That
 is an open question in the plan, not a decision.
 
-### 8. Stack allocation for a closure that does not escape (spec §4.6)
+### 7. Stack allocation for a closure that does not escape (spec §4.6)
 
 The ownership half of §4.6 is enforced — an escaping closure owns its captures
 (`src/own.rs::escapes`). The allocation half is not: every closure is
@@ -134,7 +103,10 @@ Carried from §16, with what has changed since:
   edit anywhere re-asks every question whose text changed.
 - **§16.6 Cyclic structures.** Unchanged.
 - **§16.7 Concurrency.** Out of scope for v0.1. Unchanged.
-- **§16.8 Postconditions.** Item 1 above.
+- **§16.8 Postconditions.** Inferred, not declared: `refine::postconditions`
+  derives per-constructor payload facts from a body and assumes them at call
+  sites. The reference program has no open obligation. The vocabulary is one
+  predicate, `len payload >= k`; widening it is the next question.
 
 ---
 
@@ -155,6 +127,10 @@ Carried from §16, with what has changed since:
   rounding, precision or NaN. The diagnostic now says so — obligations carrying a
   real are reported as approximated — but saying so is not the same as being
   right. SMT-LIB `FloatingPoint` is the fix, and nobody has priced it.
+- Borrow-after-move is not checked at all, and the reference program relies on
+  it: `len ts` moves `ts`, so the `&ts` after it is a read of a moved value.
+  Only `{r with ...}` bases are checked (`own.use_after_update`). See
+  [`aliasing-audit.md`](aliasing-audit.md) gap 5.
 - `vibe deps` reports callees across module boundaries but callers (`<-`) only
   within the root module, because that direction would mean walking every unit.
 - An `ext c` refinement cannot name a parameter, because an `ext` signature is a

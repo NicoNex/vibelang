@@ -1,0 +1,7 @@
+mod WithAlias
+
+type Tx = { sku:Str, qty:U32 }
+
+upd (t:Tx) : Vec U32 =
+  let u = {t with qty=9} in
+  push (single u.qty) t.qty

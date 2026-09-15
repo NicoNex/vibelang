@@ -148,3 +148,13 @@ fn the_fix_offers_dup_only_on_a_string() {
         "`dup` does not type-check on a `Vec Str`:\n{out}"
     );
 }
+
+/// `{r with ...}` mutates the base in place, so a later read of the base sees
+/// the update. This compiled and printed `[9, 9]` where `[9, 1]` is the answer
+/// — wrong, and silent, which is the pair this compiler exists to prevent.
+#[test]
+fn reading_a_base_after_an_in_place_update_is_refused() {
+    let (ok, out) = vibe(&["check", "tests/with_alias.vibe", "--diag=struct"]);
+    assert!(!ok, "reading `t` after `{{t with ...}}` must fail:\n{out}");
+    assert!(out.contains("own.use_after_update"), "{out}");
+}

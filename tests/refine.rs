@@ -261,3 +261,40 @@ fn a_float_obligation_is_marked_approximated() {
     assert!(ok, "{out}");
     assert!(out.contains("approximated as mathematical reals"), "{out}");
 }
+
+/// The acceptance test for inferred postconditions: the reference program's
+/// last two obligations close because `load`'s `Ok []` arm is carried across
+/// the call into `main`.
+#[test]
+fn the_reference_program_has_no_open_obligation() {
+    if !have_z3() {
+        return;
+    }
+    let (ok, out) = vibe(&["check", "--prove", "examples/ledger.vibe"]);
+    assert!(ok, "`len ts > 0` must follow from `load`:\n{out}");
+    assert!(!out.contains("refine.unproven"), "{out}");
+}
+
+/// and the inference must abstain where the fact is not established on every
+/// return path yielding that constructor. Same program, minus the one arm that
+/// rules the empty case out: the obligation has to stay open.
+#[test]
+fn a_postcondition_is_not_inferred_without_the_arm_that_proves_it() {
+    if !have_z3() {
+        return;
+    }
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/ledger.vibe"),
+    )
+    .expect("the reference program");
+    let cut: String = src
+        .lines()
+        .filter(|l| !l.contains("Ok [] -> Er Void"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_ne!(cut, src, "the arm this test removes must exist");
+    let f = scratch("Ledger", &cut);
+    let (ok, out) = vibe(&["check", "--prove", &f]);
+    assert!(!ok, "nothing rules out `Ok []` here:\n{out}");
+    assert!(out.contains("refine.unproven"), "{out}");
+}

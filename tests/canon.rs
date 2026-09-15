@@ -117,6 +117,7 @@ fn the_whole_corpus_checks() {
                 "bad.vibe",
                 "move.vibe",
                 "move_vec.vibe",
+                "with_alias.vibe",
                 "capture.vibe",
                 "move_let.vibe",
                 "move_pat.vibe",

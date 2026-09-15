@@ -43,6 +43,7 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
         escapes(&f.body, &mut escaping);
         let mut st = State {
             moved: HashMap::new(),
+            mutated: HashMap::new(),
             errors: Vec::new(),
             inplace: HashSet::new(),
             path: format!("{}.{}", f.home, f.name),
@@ -90,6 +91,8 @@ enum Mode {
 
 struct State<'a> {
     moved: HashMap<String, Span>,
+    /// Bases of a `{r with ...}` that codegen mutates in place.
+    mutated: HashMap<String, Span>,
     errors: Vec<Diag>,
     inplace: HashSet<(usize, usize, usize)>,
     path: String,
@@ -125,12 +128,36 @@ impl State<'_> {
     }
 
     fn use_var(&mut self, n: &str, span: Span, mode: Mode, owned: &[(&str, bool)]) {
-        if mode == Mode::Borrow {
-            return;
-        }
         let Some((_, is_str)) = owned.iter().find(|(x, _)| *x == n) else {
             return;
         };
+        // A borrow does not consume, so it is normally not checked. The one
+        // exception is a base that `{r with ...}` updated in place: the value
+        // is not merely gone, it has been overwritten, so a later read returns
+        // the update rather than the original — silently, and wrongly.
+        // ponytail: only in-place bases are tracked here. Borrow-after-move in
+        // general is the wider hole (docs/aliasing-audit.md gap 5), and closing
+        // it needs owned-to-`&` argument passing to borrow instead of move —
+        // `len ts` moves `ts` today, which the reference program relies on.
+        if mode == Mode::Borrow {
+            if let Some(first) = self.mutated.get(n) {
+                self.errors.push(
+                    Diag::error(
+                        span,
+                        "own.use_after_update",
+                        &format!("`{}` was updated in place", n),
+                    )
+                    .with_path(&self.path)
+                    .with_witness(&format!(
+                        "updated at line {}, column {}",
+                        first.line,
+                        first.col + 1
+                    ))
+                    .with_fix(&format!("read `{}` before the update", n)),
+                );
+            }
+            return;
+        }
         if let Some(first) = self.moved.get(n) {
             self.errors.push(
                 Diag::error(
@@ -182,6 +209,7 @@ impl State<'_> {
                 }
             }
             Record(base, fields) => {
+                let mut updated = None;
                 if let Some(b) = base {
                     // `{r with f = v}` on a value we own and have not moved yet
                     // is a mutation, not a copy.
@@ -191,12 +219,19 @@ impl State<'_> {
                             && !self.moved.contains_key(n)
                         {
                             self.inplace.insert((e.span.file, e.span.line, e.span.col));
+                            updated = Some(n.clone());
                         }
                     }
                     self.walk(b, mode, owned);
                 }
                 for (_, v) in fields {
                     self.walk(v, mode, owned);
+                }
+                // Recorded only once the fields are walked: `{r with f = r.f+1}`
+                // reads the base to compute the update, and that read is before
+                // the write, not after it.
+                if let Some(n) = updated {
+                    self.mutated.insert(n, e.span);
                 }
             }
             Let(n, v, body) | Bind(n, v, body) => {

@@ -359,6 +359,10 @@ struct Gen<'a> {
     shadows: usize,
     /// Obligations dropped because `term` could not phrase them.
     skipped: usize,
+    /// inferred postconditions of this module's functions, by name
+    posts: &'a HashMap<String, HashMap<String, usize>>,
+    /// symbol of a binder -> the function whose result it holds
+    post_src: HashMap<String, String>,
 }
 
 /// The obligations, and how many were dropped because the solver's fragment
@@ -371,6 +375,7 @@ struct Gen<'a> {
 pub fn obligations(m: &Module, ck: &Checked) -> (Vec<Ob>, usize) {
     let mut obs = Vec::new();
     let mut skipped = 0usize;
+    let posts = postconditions(m);
     for f in m.funs() {
         if f.ghost {
             continue; // ghost functions exist only for the proofs (§7.4)
@@ -388,6 +393,8 @@ pub fn obligations(m: &Module, ck: &Checked) -> (Vec<Ob>, usize) {
             seen: HashSet::new(),
             shadows: 0,
             skipped: 0,
+            posts: &posts,
+            post_src: HashMap::new(),
         };
         for p in &f.params {
             for n in &p.names {
@@ -763,8 +770,11 @@ impl<'a> Gen<'a> {
             ExprKind::Bind(n, v, rest) => {
                 self.expr(v);
                 let saved = self.renames.clone();
-                self.fresh_name(n);
+                let sources = self.post_src.clone();
+                let sym = self.fresh_name(n);
+                self.note_post(&sym, v);
                 self.expr(rest);
+                self.post_src = sources;
                 self.renames = saved;
             }
             ExprKind::Let(n, v, rest) => {
@@ -775,7 +785,9 @@ impl<'a> Gen<'a> {
                 let val = self.term(v);
                 let ty = self.ty_of(v);
                 let saved = self.renames.clone();
+                let sources = self.post_src.clone();
                 let sym = self.fresh_name(n);
+                self.note_post(&sym, v);
                 if let Some((t, s)) = val {
                     let (sym, _) = self.sym(sym.clone(), s);
                     self.hyps.push(format!("(= {sym} {t})"));
@@ -785,6 +797,7 @@ impl<'a> Gen<'a> {
                 }
                 self.expr(rest);
                 self.hyps.truncate(k);
+                self.post_src = sources;
                 self.renames = saved;
             }
             ExprKind::Match(scrut, arms) => {
@@ -818,7 +831,9 @@ impl<'a> Gen<'a> {
         if let Pat::Ctor(..) = p {
             let v = self.var(&as_name(strip(scrut))?);
             let ty = self.ty_of(scrut);
-            return self.pat_facts(&v, ty, p);
+            let facts = self.pat_facts(&v, ty, p);
+            self.post_hyp(&v, p);
+            return facts;
         }
         let (t, k) = s.clone()?;
         match p {
@@ -904,6 +919,38 @@ impl<'a> Gen<'a> {
         }
         self.range_hyp(&sym);
         self.inv_hyps(&sym);
+    }
+
+    /// `sym` holds the result of a call to a module function with an inferred
+    /// postcondition. A name the body already bound is a local, not that
+    /// function, so it is left alone.
+    fn note_post(&mut self, sym: &str, v: &Expr) {
+        let ExprKind::App(f, _) = &strip(v).kind else {
+            return;
+        };
+        let Some(name) = as_name(f) else { return };
+        if !self.seen.contains(&name) && self.posts.contains_key(&name) {
+            self.post_src.insert(sym.to_string(), name);
+        }
+    }
+
+    /// The callee's inferred postcondition, assumed inside the arm that names
+    /// the constructor it is about. It goes on `hyps` rather than into the
+    /// arm's guard, because a guard is negated into the arms below and this
+    /// fact holds only where the constructor matched.
+    fn post_hyp(&mut self, v: &str, p: &Pat) {
+        let Pat::Ctor(c, args) = p else { return };
+        if args.len() != 1 {
+            return;
+        }
+        let Some(f) = self.post_src.get(v).cloned() else {
+            return;
+        };
+        let Some(&k) = self.posts.get(&f).and_then(|m| m.get(c)) else {
+            return;
+        };
+        let l = self.len_sym(&format!("{v}_0"));
+        self.hyps.push(format!("(>= {l} {k})"));
     }
 
     fn len_sym(&mut self, v: &str) -> String {
@@ -1126,6 +1173,152 @@ impl<'a> Gen<'a> {
     }
 }
 
+// ------------------------------------------------------- postconditions
+
+/// Constructor-conditioned postconditions, inferred from a function's body:
+/// for every constructor the body can return, a lower bound on the length of
+/// that constructor's single payload. `load`'s `Ok []` arm is what makes its
+/// `Ok ts` arm imply `len ts >= 1`, and that is the fact `main` needs.
+///
+/// # Soundness
+///
+/// The claim made is: *if `f` returns `C x`, then `len x >= k`*. It is derived
+/// only from the syntax of `f`'s own body, and only in these steps:
+///
+/// - Every tail position of the body is enumerated (`tails`). `let`/`<-` and
+///   `arena` have one tail, a `?` has one per arm, and anything else *is* a
+///   returned value. A tail that is not a constructor applied to arguments
+///   abandons the whole function: the value could be any constructor, so no
+///   constructor's fact is safe. That is what makes "every return path" true
+///   rather than "every path I bothered to look at".
+/// - A path returning `C x` contributes the bound recorded for `x`, and the
+///   bound kept for `C` is the *minimum* over the paths, so it holds on all of
+///   them. `0` is "nothing known" and is filtered out at the end.
+/// - The only bound ever recorded comes from `arm_lens`: an arm `C x` below an
+///   arm `C [p1..pn]` whose sub-patterns are all irrefutable. Match arms are
+///   tried in order, so reaching the lower arm means the upper one failed; with
+///   irrefutable sub-patterns it failed exactly when the length differed. The
+///   bound is the least length not excluded that way.
+/// - Names are never inherited across a binder: `tails` drops the name a
+///   `let`/`<-` binds, and `arm_lens` drops everything its pattern binds before
+///   recording. A shadowed name therefore contributes nothing, never the
+///   outer name's bound.
+///
+/// Recursion cannot participate: the derivation reads no other function's
+/// postcondition — a payload produced by a call, its own or another's, has no
+/// bound and yields `0`. So there is no fixpoint to get wrong, and a
+/// self-recursive function is not assumed to satisfy its own postcondition.
+///
+/// Effects do not participate either. An `E!` body is analysed like any other,
+/// which is sound because the claim is about the value each *syntactic* return
+/// path yields, and an effect changes the world, not which expression the path
+/// returns. Divergence and abort only remove paths. (`load`, the motivating
+/// case, is `E!`; excluding effectful functions would exclude the one function
+/// this exists for.)
+///
+/// Abstaining is silent here only in the sense that it adds no hypothesis: the
+/// obligation it would have closed stays open and is still reported by
+/// `--prove`, and nothing is dropped from `obligations`'s skipped count. The
+/// inference can only ever close an obligation, never hide one.
+///
+/// What would break it: a match with guards, a `return`-like escape, or a tail
+/// form that is not in `tails`'s list — any of those would make "every tail
+/// position" false. All three are absent from `ExprKind` today; adding one
+/// means revisiting this function first.
+///
+/// ponytail: the vocabulary is one fact, `len payload >= k`, for
+/// single-payload constructors. Record invariants already reach the call site
+/// through `pat_facts`/`bind`, so they need nothing here. Upgrade path: a
+/// richer fact language (payload relations, scalar bounds) built the same way —
+/// per path, then intersected.
+pub fn postconditions(m: &Module) -> HashMap<String, HashMap<String, usize>> {
+    m.funs()
+        .filter_map(|f| {
+            let mut out = HashMap::new();
+            if !tails(&f.body, &HashMap::new(), &mut out) {
+                return None;
+            }
+            out.retain(|_, k| *k > 0);
+            (!out.is_empty()).then(|| (f.name.clone(), out))
+        })
+        .collect()
+}
+
+/// Every tail position of `e`. `env` maps a name in scope to a lower bound on
+/// its length; `out` accumulates the per-constructor minimum. `false` means a
+/// tail position was not a constructor application, so nothing can be claimed
+/// about this function at all.
+fn tails(e: &Expr, env: &HashMap<String, usize>, out: &mut HashMap<String, usize>) -> bool {
+    match &e.kind {
+        ExprKind::Bind(n, _, rest) | ExprKind::Let(n, _, rest) | ExprKind::Arena(n, rest) => {
+            let mut env = env.clone();
+            env.remove(n);
+            tails(rest, &env, out)
+        }
+        ExprKind::Match(_, arms) => arms.iter().enumerate().all(|(i, (p, body))| {
+            let mut env = env.clone();
+            arm_lens(p, &arms[..i], &mut env);
+            tails(body, &env, out)
+        }),
+        _ => {
+            let (h, args) = flatten(e);
+            let ExprKind::Ctor(c) = &h.kind else {
+                return false;
+            };
+            let k = match args.as_slice() {
+                [a] => as_name(a).and_then(|n| env.get(&n).copied()).unwrap_or(0),
+                _ => 0,
+            };
+            let slot = out.entry(c.clone()).or_insert(k);
+            *slot = (*slot).min(k);
+            true
+        }
+    }
+}
+
+/// What pattern `p` tells us about the length of the payload it binds, given
+/// that every arm in `above` already failed to match. Only one shape is read:
+/// `C x` under an earlier `C [..]`.
+fn arm_lens(p: &Pat, above: &[(Pat, Expr)], env: &mut HashMap<String, usize>) {
+    for n in pat_names(p) {
+        env.remove(&n); // a rebound name keeps nothing from the outer one
+    }
+    let Pat::Ctor(c, args) = p else { return };
+    let [Pat::Var(n)] = args.as_slice() else {
+        return;
+    };
+    let mut excluded: HashSet<usize> = HashSet::new();
+    for (q, _) in above {
+        if let Pat::Ctor(d, qargs) = q {
+            // ponytail: irrefutable means `_` or a name. A nested pattern that
+            // happens to be irrefutable too (a tuple of names) is simply not
+            // read, which costs a fact and never invents one.
+            if let (true, [Pat::List(ps)]) = (d == c, qargs.as_slice()) {
+                if ps.iter().all(|s| matches!(s, Pat::Wild | Pat::Var(_))) {
+                    excluded.insert(ps.len());
+                }
+            }
+        }
+    }
+    let mut k = 0usize;
+    while excluded.contains(&k) {
+        k += 1;
+    }
+    if k > 0 {
+        env.insert(n.clone(), k);
+    }
+}
+
+fn pat_names(p: &Pat) -> Vec<String> {
+    match p {
+        Pat::Var(n) => vec![n.clone()],
+        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => {
+            ps.iter().flat_map(pat_names).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 // ------------------------------------------------------------------ helpers
 
 fn int_lit(n: i128) -> String {
@@ -1247,6 +1440,86 @@ mod tests {
         let m = parser::parse(toks).expect("parses");
         let ck = infer::check(&m).expect("checks");
         obligations(&m, &ck).0
+    }
+
+    /// `load`, in miniature: the `Ok []` arm is the only reason the `Ok ys`
+    /// arm knows anything.
+    const LOAD: &str = "mod T\n\n                        type Err = Void\n\n                        load (r:Res Err (Vec U64)) : Res Err (Vec U64) =\n                            ?r |Er e  -> Er e\n                                  |Ok [] -> Er Void\n                                  |Ok ys -> Ok ys\n  end\n";
+
+    /// the one `refine.unproven` obligation of `src` — `head`'s own bounds
+    /// check is an obligation too, and is not what these tests are about
+    fn unproven(src: &str) -> Ob {
+        let mut o: Vec<Ob> = obs_of(src)
+            .into_iter()
+            .filter(|o| o.code == "refine.unproven")
+            .collect();
+        assert_eq!(o.len(), 1, "{o:#?}");
+        o.pop().expect("checked non-empty")
+    }
+
+    fn posts_of(src: &str) -> HashMap<String, HashMap<String, usize>> {
+        let toks = lexer::lex(src, 0).expect("lexes");
+        postconditions(&parser::parse(toks).expect("parses"))
+    }
+
+    #[test]
+    fn a_postcondition_is_inferred_from_the_constructor_arms() {
+        let p = posts_of(LOAD);
+        assert_eq!(p.get("load").and_then(|m| m.get("Ok")), Some(&1), "{p:?}");
+        assert_eq!(p.get("load").and_then(|m| m.get("Er")), None, "{p:?}");
+    }
+
+    /// The test that matters: without the arm that rules the empty case out,
+    /// `Ok ys` says nothing and no postcondition may be claimed.
+    #[test]
+    fn without_the_empty_arm_nothing_is_inferred() {
+        let src = LOAD.replace("|Ok [] -> Er Void\n     ", "");
+        assert!(posts_of(&src).is_empty(), "{:?}", posts_of(&src));
+    }
+
+    /// Nor may one be claimed when a *different* path yields the same
+    /// constructor with nothing known about its payload.
+    #[test]
+    fn a_second_path_without_the_fact_withdraws_the_postcondition() {
+        let src = LOAD.replace("|Er e  -> Er e", "|Er e  -> Ok (mk e)");
+        assert!(posts_of(&src).is_empty(), "{:?}", posts_of(&src));
+    }
+
+    /// A tail position that is not a constructor abandons the whole function:
+    /// the value could be any constructor at all.
+    #[test]
+    fn a_non_constructor_tail_abandons_the_function() {
+        let src = LOAD.replace("|Er e  -> Er e", "|Er e  -> other e");
+        assert!(posts_of(&src).is_empty(), "{:?}", posts_of(&src));
+    }
+
+    #[test]
+    fn the_inferred_postcondition_reaches_the_call_site() {
+        let src = format!(
+            "{LOAD}\n             head (v:&Vec U64, len v>0) : U64 = get v 0\n\n             use (r:Res Err (Vec U64)) : U64 =\n                 let t = load r in\n                 ?t |Er e  -> 0\n                       |Ok xs -> head &xs\n  end\n"
+        );
+        let o = unproven(&src);
+        assert!(
+            o.hyps.iter().any(|h| h == "(>= len_t_0 1)"),
+            "the callee's fact is missing from the call site:\n{:?}",
+            o.hyps
+        );
+        assert!(smt(&o).contains("(assert (>= len_t_0 1))"));
+    }
+
+    /// and it is gone again when the callee stops establishing it
+    #[test]
+    fn no_call_site_hypothesis_without_the_postcondition() {
+        let src = format!(
+            "{}\n             head (v:&Vec U64, len v>0) : U64 = get v 0\n\n             use (r:Res Err (Vec U64)) : U64 =\n                 let t = load r in\n                 ?t |Er e  -> 0\n                       |Ok xs -> head &xs\n  end\n",
+            LOAD.replace("|Ok [] -> Er Void\n     ", "")
+        );
+        let o = unproven(&src);
+        assert!(
+            !o.hyps.iter().any(|h| h == "(>= len_t_0 1)"),
+            "{:?}",
+            o.hyps
+        );
     }
 
     #[test]
