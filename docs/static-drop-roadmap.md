@@ -119,7 +119,7 @@ The easy case is a `let`-bound affine value that is never moved: it dies at the 
 - Produces: `pub struct DropSite { pub name: String, pub at: Span, pub path: String }` and `pub fn drop_points(m: &Module, ck: &Checked) -> Vec<DropSite>` in `src/own.rs`; `pub fn drops(m: &Module, ck: &Checked, sites: &[DropSite]) -> String` in `src/view.rs`. `at` is the span the drop is emitted *after* — for this task, the span of the `let` body.
 - Consumes: `Checked::affine`, already populated by inference.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 // tests/drop.rs
@@ -153,12 +153,12 @@ keep (n:U32) : U32 =
   n + u32 (len &s)
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cargo test --test drop`
 Expected: FAIL — `--drops` is not a recognised option.
 
-- [ ] **Step 3: Record the binders that reach the end of their scope**
+- [x] **Step 3: Record the binders that reach the end of their scope**
 
 In `State`, add `drops: Vec<DropSite>`. In `walk`, the `Let(n, v, body)` arm already computes `inner` via `scope`; after walking the body, any name in `inner` that is not in `self.moved` is still owned at that point:
 
@@ -181,16 +181,16 @@ Let(n, v, body) | Bind(n, v, body) => {
 
 The `remove` matters: the name leaves scope here, and a later binder of the same name is a different value.
 
-- [ ] **Step 4: Expose it**
+- [x] **Step 4: Expose it**
 
 `run` returns the drops alongside the diagnostics and the in-place set; `drop_points` is the third accessor over the same `run`. Add `Mode::Drops` handling in `src/main.rs` next to `"--flow" => o.view = view::Mode::Flow`, and a `view::drops` that prints one line per site, `<path>.body: drop <name>`, sorted by span so the output is deterministic.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `cargo test`
 Expected: PASS, and every pre-existing test still passes — nothing in codegen has changed.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/own.rs src/view.rs src/main.rs tests/drop.rs tests/drop_let.vibe

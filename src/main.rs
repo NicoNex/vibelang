@@ -42,7 +42,7 @@ usage: vibe <check|build|run|view|deps|proof|patch> <file.vibe> [options]
   --diag=prose|struct|json   diagnostic rendering (default: prose)
   --prove                    discharge refinement obligations with z3 (§7.3)
   --prove-timeout=<secs>     solver budget per obligation (default 5)
-  --sig-only|--explicit|--flow   projection to print (view; default: canonical)
+  --sig-only|--explicit|--flow|--drops   projection to print (view; default: canonical)
   -o <path>                  output executable (build)
   --lib                      build a static library plus its C header (build)
   --emit-c                   also keep the generated C next to the output
@@ -132,6 +132,7 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
             "--sig-only" => o.view = view::Mode::SigOnly,
             "--explicit" => o.view = view::Mode::Explicit,
             "--flow" => o.view = view::Mode::Flow,
+            "--drops" => o.view = view::Mode::Drops,
             "-h" | "--help" => return Err(USAGE.to_string()),
             "-o" => {
                 i += 1;

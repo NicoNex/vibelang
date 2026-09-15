@@ -25,9 +25,14 @@ pub enum Mode {
     SigOnly,
     Explicit,
     Flow,
+    /// The drop table: one line per owned value, at the point it dies.
+    Drops,
 }
 
 pub fn render(m: &Module, ck: &Checked, mode: Mode) -> String {
+    if mode == Mode::Drops {
+        return drops(m, ck);
+    }
     let mut out = String::new();
     out.push_str(&format!("mod {}\n", m.name));
     for g in groups(&m.decls, mode) {
@@ -35,6 +40,16 @@ pub fn render(m: &Module, ck: &Checked, mode: Mode) -> String {
         decl_group(&mut out, ck, mode, &g);
     }
     out
+}
+
+/// The drop table as text, one site a line, in source order. This is a reading
+/// tool for work in progress: the backend does not act on it yet
+/// (docs/static-drop-roadmap.md).
+fn drops(m: &Module, ck: &Checked) -> String {
+    crate::own::drop_points(m, ck)
+        .iter()
+        .map(|d| format!("{}.body: drop {}\n", d.path, d.name))
+        .collect()
 }
 
 // ------------------------------------------------------------------ grouping

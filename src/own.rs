@@ -35,10 +35,32 @@ pub fn inplace_updates(m: &Module, ck: &Checked) -> HashSet<(usize, usize, usize
     run(m, ck).1
 }
 
-fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) {
+/// One place an owned value stops being its scope's to free: the binder's name,
+/// the span the drop goes after, and the function it is in
+/// (docs/static-drop-roadmap.md).
+#[derive(Clone, Debug)]
+pub struct DropSite {
+    pub name: String,
+    pub at: Span,
+    pub path: String,
+}
+
+/// Where every owned value dies. The same traversal that reports affine misuse
+/// computes it, so the two cannot disagree. Nothing consumes this yet: the
+/// frontend records the points and the backend still brackets whole frames.
+pub fn drop_points(m: &Module, ck: &Checked) -> Vec<DropSite> {
+    let mut v = run(m, ck).2;
+    v.sort_by_key(|d| (d.at.file, d.at.line, d.at.col, d.name.clone()));
+    v
+}
+
+type Analysis = (Vec<Diag>, HashSet<(usize, usize, usize)>, Vec<DropSite>);
+
+fn run(m: &Module, ck: &Checked) -> Analysis {
     let sigs = borrowed_params(m);
     let mut out = Vec::new();
     let mut inplace = HashSet::new();
+    let mut drops = Vec::new();
     for f in m.funs().filter(|f| !f.ghost) {
         // A borrow lives for the call that lent it (spec §4.4), so returning
         // one hands the caller a pointer into a value it may already have
@@ -87,6 +109,7 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
         escapes(&f.body, &mut escaping);
         let mut st = State {
             moved: HashMap::new(),
+            drops: Vec::new(),
             mutated: HashMap::new(),
             errors: Vec::new(),
             inplace: HashSet::new(),
@@ -105,8 +128,9 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
         st.walk(&f.body, Mode::Own, &owned);
         out.append(&mut st.errors);
         inplace.extend(st.inplace.drain());
+        drops.append(&mut st.drops);
     }
-    (out, inplace)
+    (out, inplace, drops)
 }
 
 /// Argument positions the callee declared `&`, by callee name. Passing an
@@ -210,6 +234,8 @@ enum Mode {
 
 struct State<'a> {
     moved: HashMap<String, Span>,
+    /// Binders still owned when their scope ends: the drop table.
+    drops: Vec<DropSite>,
     /// Bases of a `{r with ...}` that codegen mutates in place.
     mutated: HashMap<String, Span>,
     errors: Vec<Diag>,
@@ -396,6 +422,18 @@ impl State<'_> {
                 let bound = [n.clone()];
                 let inner = self.scope(owned, &bound, body.span);
                 self.walk(body, mode, &inner);
+                // Affine, and nothing took it: the value is still this scope's
+                // when the scope ends, so this is where it dies.
+                if inner.iter().any(|(x, _)| *x == n.as_str()) && !self.moved.contains_key(n) {
+                    self.drops.push(DropSite {
+                        name: n.clone(),
+                        at: body.span,
+                        path: self.path.clone(),
+                    });
+                }
+                // The name leaves scope here: a later binder of the same name
+                // is a different value, and its move is not this one's.
+                self.moved.remove(n);
             }
             Lambda(_, body) => {
                 let key = (e.span.file, e.span.line, e.span.col);
