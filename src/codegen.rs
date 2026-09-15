@@ -409,8 +409,26 @@ impl<'a> Gen<'a> {
         d
     }
 
+    /// Give a result its own name before anything it may read is freed. `ex`
+    /// returns an expression *string*, so a `vb_dispose` pushed after it still
+    /// lands ahead of it in the emitted C, and the expression then reads freed
+    /// memory: `vbret = vb_len(v_s_5)` after `vb_dispose(v_s_5)`.
+    ///
+    /// A result that is already a name needs nothing — a `VbVal` is a local
+    /// struct, and freeing what some *other* name points at does not disturb
+    /// it. So this fires only on a compound expression, and the emitted C gains
+    /// a temporary exactly where one was missing.
+    fn settle(&mut self, v: String, out: &mut String) -> String {
+        if v.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return v;
+        }
+        let t = self.fresh();
+        out.push_str(&format!("VbVal {} = {};\n", t, v));
+        t
+    }
+
     /// Free everything the enclosing scopes are about to lose, innermost first.
-    /// The caller has already evaluated whatever it still needs to read.
+    /// `settle` is what makes the caller's claim to have read it already true.
     fn flush(&self, out: &mut String) {
         for c in self.pending.iter().rev() {
             out.push_str(&format!("vb_dispose({});\n", c));
@@ -577,11 +595,13 @@ impl<'a> Gen<'a> {
                     }
                 }
                 let v = self.ex(e, out);
+                let v = if self.pending.is_empty() { v } else { self.settle(v, out) };
                 self.flush(out);
                 out.push_str(&format!("vbret = {};\nbreak;\n", v));
             }
             _ => {
                 let v = self.ex(e, out);
+                let v = if self.pending.is_empty() { v } else { self.settle(v, out) };
                 self.flush(out);
                 out.push_str(&format!("vbret = {};\nbreak;\n", v));
             }
@@ -803,7 +823,9 @@ impl<'a> Gen<'a> {
                 let r = self.ex(body, out);
                 // In value position the scope ends here, with no jump to sit in
                 // front of: the free simply follows the body.
-                for d in self.drops_at(body.span, crate::own::DropWhen::ScopeEnd, Some(n)) {
+                let ds = self.drops_at(body.span, crate::own::DropWhen::ScopeEnd, Some(n));
+                let r = if ds.is_empty() { r } else { self.settle(r, out) };
+                for d in ds {
                     out.push_str(&format!("vb_dispose({});\n", d));
                 }
                 self.pop_scope();

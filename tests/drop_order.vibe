@@ -1,0 +1,12 @@
+mod DropOrder
+
+;; `s` dies at the end of the body that binds it, and the body reads it. The
+;; free has to follow that read: `ex` returns an expression, not a statement, so
+;; a `vb_dispose` pushed after it once landed ahead of it and this printed
+;; whatever the freed header happened to hold.
+keep (n:Size) : Size =
+  let s = concat "ab" "cd" in
+  n + len &s
+
+main : E! Unit =
+  out (fmt "{}\n" (keep 1))

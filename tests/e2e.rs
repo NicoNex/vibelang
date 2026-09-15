@@ -332,3 +332,14 @@ fn a_bit_operation_refuses_a_float() {
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(err.contains("band needs an integer"), "{err}");
 }
+
+/// A value dies at the end of the body that binds it, and the body reads it, so
+/// the free has to follow the read. `ex` returns an expression rather than a
+/// statement, so a `vb_dispose` pushed after it landed ahead of it in the
+/// emitted C and this read a freed string header.
+#[test]
+fn a_drop_follows_the_expression_that_reads_it() {
+    let (ok, out) = vibe(&["run", "tests/drop_order.vibe"]);
+    assert!(ok, "drop_order.vibe failed to build or run:\n{out}");
+    assert_eq!(out.trim(), "5");
+}
