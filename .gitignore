@@ -19,3 +19,7 @@
 /examples/grep
 /tests/prelude_ops
 /tests/stdio
+/tests/bits
+/tests/total_lex
+/tests/drop_order
+/tests/dup_deep
