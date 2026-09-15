@@ -221,6 +221,16 @@ Carried from §16, with what has changed since:
 - An `ext c` refinement cannot name a parameter, because an `ext` signature is a
   type and has no parameter names. `README.md` and spec §10.1 both say so now;
   the spec draft's `(n:Size, n>0) -> E! I32` was never valid syntax.
+- **`a % b` is not modulo, and nothing says so.** `%` introduces a termination
+  measure, so `f (a:U64) (b:U64) : U64 = a % b` parses as the body `a` with the
+  measure `%b`, checks clean, and `f 7 3` returns 7. There is no modulo operator
+  in the prelude; the shape that asks for one is accepted and silently means
+  something else. A body followed by a measure on the same line is the ambiguity.
+- **A negative literal cannot be a bare argument.** `f (-2.5)` is refused as
+  `canon.form`, because the projection renders it `f -2.5`, which re-parses as
+  the subtraction `f - 2.5`. `(0.0 - 2.5)` is the spelling that works. This is
+  the one case where `canon.form` fires on source a person would write rather
+  than guarding the compiler against itself.
 - **A nullary declaration whose value is a record cannot be read through.**
   `mk : Ta = {note="x", qty=7}` followed by `mk.qty` aborts at run time with
   "expected a record or variant", in one module or across two. Found while
