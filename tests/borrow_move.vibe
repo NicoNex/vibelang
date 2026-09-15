@@ -1,0 +1,3 @@
+mod BorrowMove
+
+after (v:Vec Str) : Vec (Vec Str) = push (single v) (rev &v)

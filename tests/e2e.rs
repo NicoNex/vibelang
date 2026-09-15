@@ -2,7 +2,8 @@
 //! must produce the documented output. If codegen or the runtime breaks, this
 //! fails. ponytail: no harness, no fixtures — the compiler is the fixture.
 
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 const VIBE: &str = env!("CARGO_BIN_EXE_vibe");
 
@@ -17,9 +18,35 @@ fn vibe(args: &[&str]) -> (bool, String) {
     (o.status.success(), s)
 }
 
+/// Same, with something on standard input. `read_stdin` cannot be tested any
+/// other way: the point of it is the pipe.
+fn vibe_piped(args: &[&str], input: &str) -> (bool, String) {
+    let mut ch = Command::new(VIBE)
+        .args(args)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("vibe runs");
+    ch.stdin
+        .as_mut()
+        .expect("a pipe")
+        .write_all(input.as_bytes())
+        .expect("the child takes its input");
+    let o = ch.wait_with_output().expect("the child finishes");
+    let mut s = String::from_utf8_lossy(&o.stdout).to_string();
+    s.push_str(&String::from_utf8_lossy(&o.stderr));
+    (o.status.success(), s)
+}
+
 #[test]
 fn examples_check() {
-    for e in ["examples/hello.vibe", "examples/ledger.vibe"] {
+    for e in [
+        "examples/hello.vibe",
+        "examples/ledger.vibe",
+        "examples/grep.vibe",
+    ] {
         let (ok, out) = vibe(&["check", e]);
         assert!(ok, "{e} failed to check:\n{out}");
     }
@@ -204,4 +231,55 @@ fn a_type_that_cannot_cross_the_c_boundary_fails_at_check() {
         out.contains("FfiBad.takes"),
         "blame the signature, not a call site:\n{out}"
     );
+}
+
+/// Every prelude function added for stdin-driven programs, run once, including
+/// both `None` branches of `slice` and `index_of`.
+#[test]
+fn the_added_prelude_functions_run() {
+    let (ok, out) = vibe_piped(
+        &["run", "tests/prelude_ops.vibe"],
+        "ALPHA=1\nBeta=22\ngamma=333\nhi\n",
+    );
+    assert!(ok, "prelude_ops failed to build or run:\n{out}");
+    assert_eq!(
+        out.trim_end(),
+        "alpha\nbeta\ngamma\n?\n\
+         ALPHA\nBeta=\ngamma\nshort\n\
+         ALPHA is 1\nBeta is 22\ngamma is 333\nhi",
+        "unexpected output"
+    );
+}
+
+/// The whole point of `read_stdin`: a filter in a pipe, which no program could
+/// be before it existed.
+#[test]
+fn a_filter_reads_its_input_from_a_pipe() {
+    let (ok, out) = vibe_piped(
+        &["run", "examples/grep.vibe", "--", "ta"],
+        "ALPHA=1\nBeta=22\ngamma=333\nhi\n",
+    );
+    assert!(ok, "grep failed to build or run:\n{out}");
+    assert_eq!(out.trim_end(), "Beta=22", "only the matching line survives");
+}
+
+#[test]
+fn a_filter_without_a_pattern_says_so() {
+    let (ok, out) = vibe_piped(&["run", "examples/grep.vibe"], "anything\n");
+    assert!(ok, "the usage path is not a failure:\n{out}");
+    assert!(
+        out.contains("usage:"),
+        "expected the usage line, got:\n{out}"
+    );
+}
+
+/// Generated headers are named after their module and land in the build dir,
+/// which used to be on `-I`, so a module named after a libc header shadowed it
+/// and the C compiler failed with a wall of missing declarations. `-iquote`
+/// leaves `#include <...>` alone.
+#[test]
+fn a_module_named_after_a_libc_header_still_builds() {
+    let (ok, out) = vibe(&["run", "tests/stdio.vibe"]);
+    assert!(ok, "a module may be named `Stdio`:\n{out}");
+    assert!(out.contains("ok"), "{out}");
 }

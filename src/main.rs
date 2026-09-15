@@ -394,7 +394,7 @@ fn archive(o: &Opts, dir: &Path, c_path: &Path, stem: &str, m: &ast::Module) -> 
             .arg(&src)
             .arg("-o")
             .arg(&obj)
-            .arg(format!("-I{}", dir.display()))
+            .arg(format!("-iquote{}", dir.display()))
             .status()
             .map_err(|e| format!("cannot run {cc}: {e}"))?;
         if !st.success() {
@@ -437,7 +437,7 @@ fn cc(dir: &Path, c_path: &Path, exe: &Path, m: &ast::Module) -> Result<(), Stri
         .arg(exe)
         .arg(c_path)
         .arg(dir.join("vibert.c"));
-    cmd.arg(format!("-I{}", dir.display()));
+    cmd.arg(format!("-iquote{}", dir.display()));
 
     let mut links: Vec<String> = Vec::new();
     let mut pkgs: Vec<String> = Vec::new();

@@ -1,0 +1,5 @@
+mod BorrowOk
+
+size_of (v:&Vec Str) : U64 = len v
+
+report (v:Vec Str) : U64 = size_of v + len &v

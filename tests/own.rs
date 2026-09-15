@@ -168,3 +168,31 @@ fn a_borrow_cannot_be_returned_as_owned() {
     assert!(!ok, "returning a borrowed parameter must fail:\n{out}");
     assert!(out.contains("own.borrow_escapes"), "{out}");
 }
+
+/// The other half of gap 5: closing it is only correct because an owned value
+/// passed where the callee declared `&` borrows instead of moving. Without
+/// that, `examples/ledger.vibe`'s `(len ts) (total &ts) ...` reports three
+/// errors on a correct program.
+#[test]
+fn an_owned_value_passed_to_a_borrowed_parameter_is_not_moved() {
+    let (ok, out) = vibe(&["check", "tests/borrow_ok.vibe"]);
+    assert!(
+        ok,
+        "a callee that declared `&` reads its argument, so the value is still there:\n{out}"
+    );
+}
+
+/// A move hands the value's lifetime to the callee, so a read afterwards is a
+/// use after free the moment drops are real (docs/aliasing-audit.md gap 5).
+/// `&x` is the fix offered for a second move, which is exactly what the
+/// checker used to stop looking at.
+#[test]
+fn borrowing_after_a_move_is_refused() {
+    let (ok, out) = vibe(&["check", "tests/borrow_move.vibe", "--diag=struct"]);
+    assert!(!ok, "reading `&v` after `v` was moved must fail:\n{out}");
+    assert!(out.contains("own.borrow_after_move"), "{out}");
+    assert!(
+        out.contains("first moved at line 3"),
+        "the witness must name the move:\n{out}"
+    );
+}

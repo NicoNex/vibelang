@@ -1,0 +1,17 @@
+mod Grep
+
+;; A pipe filter — the shape of program the prelude could not express before
+;; `read_stdin` existed:
+;;
+;;   vibe run examples/grep.vibe -- error < log.txt
+;;
+;; prints every line of standard input that contains the pattern, ignoring case.
+hit (pat:&Str) (ln:&Str) : Bool = contains (lower ln) (lower pat)
+
+main : E! Unit =
+  args <- argv ;
+  txt <- read_stdin ;
+  ?drop 1 args
+   |[p] -> each out (filter (hit &p) (lines &txt))
+   |_   -> warn "usage: grep PATTERN < input"
+  end

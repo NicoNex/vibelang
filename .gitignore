@@ -16,3 +16,6 @@
 /tests/ident_c
 /tests/ext_value
 /tests/diverge
+/examples/grep
+/tests/prelude_ops
+/tests/stdio

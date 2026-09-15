@@ -1,0 +1,25 @@
+mod PreludeOps
+
+;; Exercises every prelude function added for stdin-driven programs.
+first5 (s:&Str) : Str =
+  ?slice 0 5 s
+   |Some t -> t
+   |None   -> "short"
+  end
+
+key (s:&Str) : Str =
+  ?index_of s "="
+   |Some i -> ?slice 0 i s
+               |Some t -> lower &t
+               |None   -> "?"
+              end
+   |None   -> "?"
+  end
+
+main : E! Unit =
+  txt <- read_stdin ;
+  let ls = lines &txt in
+  each out (map key &ls) ;
+  each out (map first5 (take 2 &ls)) ;
+  each out (map first5 (drop 2 &ls)) ;
+  out (replace &txt "=" " is ")

@@ -131,6 +131,8 @@ VbVal vb_rev(VbVal v);
 VbVal vb_concat_vec(VbVal a, VbVal b);
 VbVal vb_range(VbVal a, VbVal b);
 VbVal vb_single(VbVal x);
+VbVal vb_take(VbVal n, VbVal v);
+VbVal vb_drop(VbVal n, VbVal v);
 
 /* --- Str --- */
 VbVal vb_split(VbVal c, VbVal s);
@@ -143,6 +145,10 @@ VbVal vb_contains(VbVal s, VbVal p);
 VbVal vb_to_cstr(VbVal s);
 VbVal vb_from_cstr(VbVal p);
 VbVal vb_chr(VbVal c);
+VbVal vb_slice(VbVal i, VbVal j, VbVal s);
+VbVal vb_index_of(VbVal s, VbVal p);
+VbVal vb_replace(VbVal s, VbVal from, VbVal to);
+VbVal vb_lower(VbVal s);
 VbVal vb_show(VbVal v);
 VbVal vb_fmt(VbVal f, uint32_t n, ...);
 
@@ -172,6 +178,7 @@ VbVal vb_floor(VbVal a);
 
 /* --- IO --- */
 VbVal vb_read(VbVal path);
+VbVal vb_read_stdin(void);
 VbVal vb_write(VbVal path, VbVal data);
 VbVal vb_out(VbVal s);
 VbVal vb_warn(VbVal s);

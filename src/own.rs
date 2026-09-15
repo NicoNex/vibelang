@@ -22,7 +22,7 @@
 use crate::ast::*;
 use crate::diag::{Diag, Span};
 use crate::infer::Checked;
-use crate::types::is_num;
+use crate::types::{is_num, is_special, PRELUDE_SIGS};
 use std::collections::{HashMap, HashSet};
 
 pub fn check(m: &Module, ck: &Checked) -> Vec<Diag> {
@@ -36,6 +36,7 @@ pub fn inplace_updates(m: &Module, ck: &Checked) -> HashSet<(usize, usize, usize
 }
 
 fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) {
+    let sigs = borrowed_params(m);
     let mut out = Vec::new();
     let mut inplace = HashSet::new();
     for f in m.funs().filter(|f| !f.ghost) {
@@ -91,6 +92,7 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
             inplace: HashSet::new(),
             path: format!("{}.{}", f.home, f.name),
             ck,
+            sigs: &sigs,
             escaping,
         };
         let mut owned: Vec<(&str, bool)> = Vec::new();
@@ -105,6 +107,69 @@ fn run(m: &Module, ck: &Checked) -> (Vec<Diag>, HashSet<(usize, usize, usize)>) 
         inplace.extend(st.inplace.drain());
     }
     (out, inplace)
+}
+
+/// Argument positions the callee declared `&`, by callee name. Passing an
+/// owned value into a borrowed position is a read, not a move (spec §4.2):
+/// `len ts` leaves `ts` usable, which is what makes `(len ts) (total &ts)` in
+/// `examples/ledger.vibe` a correct program.
+fn borrowed_params(m: &Module) -> HashMap<String, Vec<bool>> {
+    let mut map: HashMap<String, Vec<bool>> = PRELUDE_SIGS
+        .iter()
+        .map(|(n, sig)| ((*n).to_string(), sig_borrows(sig)))
+        .collect();
+    for e in m.exts() {
+        for s in &e.sigs {
+            map.insert(s.name.clone(), ty_borrows(&s.ty));
+        }
+    }
+    // Declarations win over the prelude: a module may shadow a prelude name.
+    for f in m.funs() {
+        map.insert(
+            f.name.clone(),
+            f.params
+                .iter()
+                .flat_map(|p| {
+                    let borrowed = matches!(p.ty, Some(Ty::Ref(_)));
+                    p.names.iter().map(move |_| borrowed)
+                })
+                .collect(),
+        );
+    }
+    map
+}
+
+/// The parameters of an arrow type, each as "is it a borrow".
+fn ty_borrows(t: &Ty) -> Vec<bool> {
+    let mut v = Vec::new();
+    let mut cur = t;
+    while let Ty::Fun(a, b) = cur {
+        v.push(matches!(**a, Ty::Ref(_)));
+        cur = b;
+    }
+    v
+}
+
+/// The same, over a written prelude signature: split on top-level `->` and
+/// drop the result.
+fn sig_borrows(sig: &str) -> Vec<bool> {
+    let b = sig.as_bytes();
+    let (mut depth, mut start, mut i) = (0usize, 0usize, 0usize);
+    let mut out = Vec::new();
+    while i < b.len() {
+        match b[i] {
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            b'-' if depth == 0 && b.get(i + 1) == Some(&b'>') => {
+                out.push(sig[start..i].trim_start().starts_with('&'));
+                i += 1;
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
 }
 
 /// Every name a body can yield as its result, with the span it sits at.
@@ -151,6 +216,8 @@ struct State<'a> {
     inplace: HashSet<(usize, usize, usize)>,
     path: String,
     ck: &'a Checked,
+    /// Which argument positions each callee borrows.
+    sigs: &'a HashMap<String, Vec<bool>>,
     /// Lambdas whose value reaches the function's result, so their captures
     /// outlive the call.
     escaping: HashSet<(usize, usize, usize)>,
@@ -185,14 +252,12 @@ impl State<'_> {
         let Some((_, is_str)) = owned.iter().find(|(x, _)| *x == n) else {
             return;
         };
-        // A borrow does not consume, so it is normally not checked. The one
-        // exception is a base that `{r with ...}` updated in place: the value
-        // is not merely gone, it has been overwritten, so a later read returns
-        // the update rather than the original — silently, and wrongly.
-        // ponytail: only in-place bases are tracked here. Borrow-after-move in
-        // general is the wider hole (docs/aliasing-audit.md gap 5), and closing
-        // it needs owned-to-`&` argument passing to borrow instead of move —
-        // `len ts` moves `ts` today, which the reference program relies on.
+        // A borrow does not consume, but it does read, and the value has to
+        // still be there to read. Two ways it is not: the base of a
+        // `{r with ...}` that codegen mutated in place — the read returns the
+        // update rather than the original, silently and wrongly — and a value
+        // already moved, whose lifetime now belongs to whoever took it
+        // (docs/aliasing-audit.md gap 5).
         if mode == Mode::Borrow {
             if let Some(first) = self.mutated.get(n) {
                 self.errors.push(
@@ -208,6 +273,27 @@ impl State<'_> {
                         first.col + 1
                     ))
                     .with_fix(&format!("read `{}` before the update", n)),
+                );
+            } else if let Some(first) = self.moved.get(n) {
+                self.errors.push(
+                    Diag::error(
+                        span,
+                        "own.borrow_after_move",
+                        &format!("`{}` was already moved", n),
+                    )
+                    .with_path(&self.path)
+                    .with_witness(&format!(
+                        "first moved at line {}, column {}",
+                        first.line,
+                        first.col + 1
+                    ))
+                    // `&x` is the fix for a second *move*; here the borrow is
+                    // the second use, so the move is what has to give way.
+                    .with_fix(&if *is_str {
+                        format!("read `{}` before the move, or copy it with `dup {}`", n, n)
+                    } else {
+                        format!("read `{}` before the move", n)
+                    }),
                 );
             }
             return;
@@ -247,8 +333,25 @@ impl State<'_> {
             Field(x, _) => self.walk(x, Mode::Borrow, owned),
             App(h, args) => {
                 self.walk(h, Mode::Borrow, owned);
-                for a in args {
-                    self.walk(a, mode, owned);
+                // The callee's signature decides each argument: a position it
+                // declared `&` is read for the duration of the call, so what is
+                // passed there is not moved, whether or not the call site wrote
+                // the `&`. Anything the signature does not cover — a local
+                // function value, an over-applied result — stays a move.
+                let sigs = self.sigs;
+                let (reads_all, borrows) = match &h.kind {
+                    // `len`, `fmt` and `show` are typed by a rule rather than a
+                    // signature (`types::is_special`), and all three only read.
+                    Var(n) => (is_special(n), sigs.get(n.as_str())),
+                    _ => (false, None),
+                };
+                for (i, a) in args.iter().enumerate() {
+                    let m = if reads_all || borrows.is_some_and(|b| *b.get(i).unwrap_or(&false)) {
+                        Mode::Borrow
+                    } else {
+                        mode
+                    };
+                    self.walk(a, m, owned);
                 }
             }
             Binop(_, a, b) => {
@@ -263,6 +366,12 @@ impl State<'_> {
                 }
             }
             Record(base, fields) => {
+                // Fields first: `{r with f = r.f+1}` computes the update from
+                // the value the base still holds, so that read comes before the
+                // base is moved and before it is overwritten, not after either.
+                for (_, v) in fields {
+                    self.walk(v, mode, owned);
+                }
                 let mut updated = None;
                 if let Some(b) = base {
                     // `{r with f = v}` on a value we own and have not moved yet
@@ -278,12 +387,6 @@ impl State<'_> {
                     }
                     self.walk(b, mode, owned);
                 }
-                for (_, v) in fields {
-                    self.walk(v, mode, owned);
-                }
-                // Recorded only once the fields are walked: `{r with f = r.f+1}`
-                // reads the base to compute the update, and that read is before
-                // the write, not after it.
                 if let Some(n) = updated {
                     self.mutated.insert(n, e.span);
                 }

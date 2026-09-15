@@ -140,6 +140,8 @@ pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     ("concat_vec", "&Vec a -> &Vec a -> Vec a"),
     ("seq", "Vec (Res e t) -> Res e (Vec t)"),
     ("range", "Size -> Size -> Vec Size"),
+    ("take", "Size -> &Vec a -> Vec a"),
+    ("drop", "Size -> &Vec a -> Vec a"),
     // Str
     ("split", "Char -> &Str -> Vec Str"),
     ("lines", "&Str -> Vec Str"),
@@ -151,6 +153,12 @@ pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     ("to_cstr", "&Str -> CStr"),
     ("from_cstr", "CStr -> Str"),
     ("chr", "Char -> Str"),
+    // `slice` is total by returning `Opt`: the bootstrap cannot yet phrase
+    // `i <= j <= len s` as a refinement on a prelude name (spec §14).
+    ("slice", "Size -> Size -> &Str -> Opt Str"),
+    ("index_of", "&Str -> &Str -> Opt Size"),
+    ("replace", "&Str -> &Str -> &Str -> Str"),
+    ("lower", "&Str -> Str"),
     // conversions (no overloading: one name, one meaning)
     ("f32", "a -> F32"),
     ("f64", "a -> F64"),
@@ -180,6 +188,7 @@ pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     ("out", "&Str -> E! Unit"),
     ("warn", "&Str -> E! Unit"),
     ("argv", "E! Vec Str"),
+    ("read_stdin", "E! Str"),
     ("exit", "I32 -> E! Unit"),
     // Checked: moves the obligation to run time (spec §7.5)
     ("add_checked", "a -> a -> Res Fault a"),

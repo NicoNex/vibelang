@@ -127,11 +127,17 @@ Carried from §16, with what has changed since:
   rounding, precision or NaN. The diagnostic now says so — obligations carrying a
   real are reported as approximated — but saying so is not the same as being
   right. SMT-LIB `FloatingPoint` is the fix, and nobody has priced it.
-- Borrow-after-move is not checked in general, and the reference program relies
-  on that: `len ts` moves `ts`, so every `&ts` after it reads a moved value.
-  Only `{r with ...}` bases are checked (`own.use_after_update`). Closing it
-  means an owned argument to a `&` parameter must borrow, not move — the two
-  changes have to land together. [`aliasing-audit.md`](aliasing-audit.md) gap 5.
+- Five of the eight gaps in [`aliasing-audit.md`](aliasing-audit.md) are still
+  open. Gaps 2 and 3 are the prelude handing out interior pointers as owned
+  values, and no check on user code can reach them: the fix is in the
+  signatures and the runtime, not in `own.rs`.
+- Builtin refinements are hardcoded in `src/refine.rs` — `get`'s bounds
+  obligation is the only one. So a new prelude function cannot carry a static
+  refinement; `slice` and `index_of` return `Opt` because of this, not because
+  `Opt` was the better design. Making the refinement declarable alongside the
+  signature in `PRELUDE_SIGS` is the fix.
+- The integration tests share a build directory and race when run in parallel;
+  `cargo test -- --test-threads=1` is the reliable invocation. CI should pin it.
 - `vibe deps` reports callees across module boundaries but callers (`<-`) only
   within the root module, because that direction would mean walking every unit.
 - An `ext c` refinement cannot name a parameter, because an `ext` signature is a

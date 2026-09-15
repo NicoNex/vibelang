@@ -682,10 +682,12 @@ Only what is needed to write the compiler itself and test programs.
 Prelude   Nat U8..U64 I8..I64 F32 F64 Bool Unit Str CStr Ptr Size
           Res e t = Ok t | Er e
           Opt t   = Some t | None
-Vec       new push get len map filter fold sum max_by
-Str       split lines dup len concat fmt to_cstr from_cstr
+Vec       new push get set len map filter fold each sum max_by min_by
+          sort_by rev concat_vec seq range take drop
+Str       split lines dup len concat fmt trim starts_with contains slice
+          index_of replace lower chr to_cstr from_cstr
 Math      abs min max
-IO        read write out warn        ;; all E!
+IO        read read_stdin write out warn argv exit    ;; all E!
 Checked   add_checked sub_checked mul_checked get_checked div_checked
 ```
 
@@ -694,6 +696,8 @@ Every stdlib function carries its own refinements:
 get  (v:&Vec a) (i:Size, i < len v) : &a
 div  (a:F64) (b:F64, b != 0.0) : F64
 ```
+A partial function that the bootstrap cannot yet phrase a refinement for returns
+`Opt` instead — `slice` and `index_of` do.
 
 ---
 

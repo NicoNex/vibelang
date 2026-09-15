@@ -428,6 +428,22 @@ VbVal vb_concat_vec(VbVal a, VbVal b) {
   for (size_t i = 0; i < y->n; i++) vec_push(w, y->a[i]);
   return wrap_vec(w);
 }
+VbVal vb_take(VbVal n, VbVal v) {
+  VbVec *s = vb_as_vec(v);
+  uint64_t k = vb_as_uint(n);
+  if (k > s->n) k = s->n;
+  VbVec *w = vec_alloc((size_t)k);
+  for (size_t i = 0; i < (size_t)k; i++) vec_push(w, s->a[i]);
+  return wrap_vec(w);
+}
+VbVal vb_drop(VbVal n, VbVal v) {
+  VbVec *s = vb_as_vec(v);
+  uint64_t k = vb_as_uint(n);
+  if (k > s->n) k = s->n;
+  VbVec *w = vec_alloc(s->n - (size_t)k);
+  for (size_t i = (size_t)k; i < s->n; i++) vec_push(w, s->a[i]);
+  return wrap_vec(w);
+}
 VbVal vb_range(VbVal a, VbVal b) {
   uint64_t lo = vb_as_uint(a), hi = vb_as_uint(b);
   VbVec *w = vec_alloc(hi > lo ? hi - lo : 0);
@@ -495,6 +511,53 @@ VbVal vb_contains(VbVal s, VbVal p) {
 VbVal vb_to_cstr(VbVal s) { return vb_cstr_val(vb_as_str(s)->p); }
 VbVal vb_from_cstr(VbVal p) { return vb_strz((const char *)vb_as_ptr(p)); }
 VbVal vb_chr(VbVal c) { char b = (char)(c.tag == VB_CHAR ? c.v.c : (uint32_t)vb_as_int(c)); return vb_str(&b, 1); }
+/* A substring is a copy, never a pointer into the argument: the prelude may
+   not hand out an interior pointer as an owned value (docs/aliasing-audit.md). */
+VbVal vb_slice(VbVal i, VbVal j, VbVal s) {
+  VbStr *x = vb_as_str(s);
+  uint64_t a = vb_as_uint(i), b = vb_as_uint(j);
+  if (a > b || b > x->n) return vb_none();
+  return vb_some(vb_str(x->p + a, (size_t)(b - a)));
+}
+/* ponytail: naive O(n*m) scan, same as vb_contains. Two-way or Boyer-Moore if a
+   profile ever blames it. */
+VbVal vb_index_of(VbVal s, VbVal p) {
+  VbStr *x = vb_as_str(s), *y = vb_as_str(p);
+  if (y->n > x->n) return vb_none();
+  for (size_t i = 0; i + y->n <= x->n; i++)
+    if (memcmp(x->p + i, y->p, y->n) == 0) return vb_some(vb_uint(i));
+  return vb_none();
+}
+/* Non-overlapping, left to right. An empty needle replaces nothing. */
+VbVal vb_replace(VbVal s, VbVal from, VbVal to) {
+  VbStr *x = vb_as_str(s), *f = vb_as_str(from), *t = vb_as_str(to);
+  if (f->n == 0 || f->n > x->n) return vb_str(x->p, x->n);
+  size_t hits = 0;
+  for (size_t i = 0; i + f->n <= x->n;) {
+    if (memcmp(x->p + i, f->p, f->n) == 0) { hits++; i += f->n; } else i++;
+  }
+  if (hits == 0) return vb_str(x->p, x->n);
+  size_t n = x->n - hits * f->n + hits * t->n;
+  char *buf = vb_alloc(n + 1);
+  size_t w = 0;
+  for (size_t i = 0; i < x->n;) {
+    if (i + f->n <= x->n && memcmp(x->p + i, f->p, f->n) == 0) {
+      memcpy(buf + w, t->p, t->n); w += t->n; i += f->n;
+    } else buf[w++] = x->p[i++];
+  }
+  return vb_str(buf, n);
+}
+/* ponytail: ASCII only. Upgrade path is a UTF-8 case table, when a program that
+   needs one exists. */
+VbVal vb_lower(VbVal s) {
+  VbStr *x = vb_as_str(s);
+  char *buf = vb_alloc(x->n + 1);
+  for (size_t i = 0; i < x->n; i++) {
+    char c = x->p[i];
+    buf[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+  }
+  return vb_str(buf, x->n);
+}
 
 static void sb_push(VbVec *acc, const char *s, size_t n) {
   for (size_t i = 0; i < n; i++) vec_push(acc, vb_char((unsigned char)s[i]));
@@ -673,6 +736,23 @@ VbVal vb_read(VbVal path) {
   size_t got = fread(buf, 1, (size_t)n, fh);
   fclose(fh);
   return vb_str(buf, got);
+}
+/* Reads all of standard input. ponytail: doubling buffer with a copy on each
+   growth, on a bump allocator that never frees, so peak memory is about twice
+   the input. Stream it if a program ever has to filter more than it can hold. */
+VbVal vb_read_stdin(void) {
+  size_t cap = 65536, n = 0;
+  char *buf = vb_alloc(cap);
+  for (;;) {
+    size_t got = fread(buf + n, 1, cap - n, stdin);
+    n += got;
+    if (n < cap) break; /* short read: end of file, or an error */
+    char *bigger = vb_alloc(cap * 2);
+    memcpy(bigger, buf, n);
+    buf = bigger;
+    cap *= 2;
+  }
+  return vb_str(buf, n);
 }
 VbVal vb_write(VbVal path, VbVal data) {
   const char *p = vb_as_str(path)->p;
