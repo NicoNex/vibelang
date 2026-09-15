@@ -88,6 +88,26 @@ one, and this is the version that fits on one line.
 **Under exact drop:** double free. The caller drops the argument; the callee's
 caller drops the result; they are one object.
 
+**Since measured — closed for the name, open for everything derived from it.**
+`own.borrow_escapes` rejects `launder` (`tests/launder.vibe`), because
+`returned` collects the *names* in tail position and asks whether each is a
+borrow. A value *derived* from the borrow is not a name and is not collected, so
+all of these still check clean:
+
+```
+pick (r:&R) : Str = r.s                  ;; a field of a borrowed record
+f (v:&Vec R) : Size = len &(map (\x -> x) v)     ;; the element itself
+g (v:&Vec R) : Size = len &(map (\x -> x.s) v)   ;; a field of the element
+```
+
+This matters more than the one-line version it looks like. `own.rs::maybe_shared`
+states in its own comment that "a call to a *module* function counts as fresh. A
+user function that returns a value derived from a `&` parameter would break
+that, and `own.borrow_escapes` is what keeps the shape out of the language."
+`pick` is that function and it compiles, so the assumption the maybe-shared bit
+rests on does not hold. Under a shallow drop this costs nothing; it is the first
+thing a deep drop would free twice.
+
 ### 2. Prelude functions hand out interior pointers as owned values
 
 ```

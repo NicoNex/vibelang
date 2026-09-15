@@ -204,6 +204,14 @@ Carried from §16, with what has changed since:
   open. Gaps 2 and 3 are the prelude handing out interior pointers as owned
   values, and no check on user code can reach them: the fix is in the
   signatures and the runtime, not in `own.rs`.
+- **Gap 1 is closed for the name and open for every derivation of it**, which is
+  the prerequisite a deep drop actually has. `own.borrow_escapes` rejects
+  `launder (s:&Str) : Str = s`, because `own::returned` collects names in tail
+  position. `pick (r:&R) : Str = r.s` is not a name, checks clean, and hands the
+  caller a pointer into a record the caller still owns. So does
+  `map (\x -> x) v`, and so does `map (\x -> x.s) v`. `own.rs::maybe_shared`
+  assumes in writing that this shape is not in the language; it is. Shallow
+  drops pay nothing for it, and it is the first thing a deep drop frees twice.
 - Builtin refinements are hardcoded in `src/refine.rs` — `get`'s bounds
   obligation is the only one. So a new prelude function cannot carry a static
   refinement; `slice` and `index_of` return `Opt` because of this, not because
