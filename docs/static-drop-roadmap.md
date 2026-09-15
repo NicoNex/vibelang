@@ -208,7 +208,7 @@ git commit -m "own: record drop points for let-bound values"
 
 **Interfaces:** unchanged from Task 1.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -230,23 +230,23 @@ give (n:U32) : U32 =
   n + take s
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cargo test --test drop`
 Expected: FAIL — `s` is still reported as dropped in `give`, and `take` reports nothing.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 The suppression in `give` is the `!self.moved.contains_key(n)` guard from Task 1; if it does not already hold, the bug is that the call argument was walked in `Mode::Borrow`. Check `App`: the head is borrowed, the arguments inherit `mode`.
 
 The other half is new. `run` seeds `owned` from the affine parameters and never revisits them; a parameter not moved by the body dies when the frame does. After `st.walk(&f.body, Mode::Own, &owned)`, push a `DropSite` for every name in `owned` absent from `st.moved`, with `at` the span of `f.body` — with one exception, handled in Task 4: a parameter whose value reaches the result must not be dropped.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `cargo test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/own.rs tests/drop.rs tests/drop_move.vibe

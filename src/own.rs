@@ -126,6 +126,17 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             }
         }
         st.walk(&f.body, Mode::Own, &owned);
+        // A parameter is owned by the frame that received it. One the body
+        // never hands on dies with that frame.
+        for (n, _) in &owned {
+            if !st.moved.contains_key(*n) {
+                st.drops.push(DropSite {
+                    name: (*n).to_string(),
+                    at: f.body.span,
+                    path: st.path.clone(),
+                });
+            }
+        }
         out.append(&mut st.errors);
         inplace.extend(st.inplace.drain());
         drops.append(&mut st.drops);

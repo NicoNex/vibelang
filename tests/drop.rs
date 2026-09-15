@@ -20,3 +20,16 @@ fn a_let_bound_value_nothing_takes_is_dropped_at_the_end_of_its_scope() {
     let d = drops("tests/drop_let.vibe");
     assert!(d.contains("DropLet.keep.body: drop s"), "{d}");
 }
+
+#[test]
+fn a_value_given_away_is_not_dropped_by_the_giver() {
+    let d = drops("tests/drop_move.vibe");
+    assert!(
+        !d.contains("DropMove.give"),
+        "`s` belongs to `eat` now, so `give` frees nothing:\n{d}"
+    );
+    assert!(
+        d.contains("DropMove.eat"),
+        "`eat` owns its parameter and drops it:\n{d}"
+    );
+}

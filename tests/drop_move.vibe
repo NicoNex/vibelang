@@ -1,0 +1,9 @@
+mod DropMove
+
+;; `eat` owns what it is given, so `give` hands `s` over and stops being the
+;; one to free it.
+eat (s:Str) : U32 = u32 (len &s)
+
+give (n:U32) : U32 =
+  let s = concat "a" "b" in
+  n + eat s
