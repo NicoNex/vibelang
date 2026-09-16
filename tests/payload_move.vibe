@@ -24,6 +24,14 @@ folded (s:Str) : Str =
   let acc = concat &s "" in
   fmt "{}" (fold grow acc &(range 0 3))
 
+;; Each arm updates `c` in place; neither sees the other's update.
+type Counter = { hits:U64, misses:U64 }
+
+tally (c:Counter) (hit:Bool) : Counter =
+  ?hit |True  -> {c with hits=1}
+       |False -> {c with misses=c.hits}
+  end
+
 main : E! Unit =
   ?keep (Some (dup "kept")) "none" |Some v -> out &v |None -> out "lost" end ;
   out (fmt " {} {}\n" (walk "a" 3 "") (folded "x"))

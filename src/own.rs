@@ -788,9 +788,13 @@ impl State<'_> {
                 // match, and a value moved in any arm is moved after it.
                 let before = self.moved.clone();
                 let mut after = before.clone();
+                // An in-place update in one arm is not seen by its siblings.
+                let updated_before = self.mutated.clone();
+                let mut updated_after = updated_before.clone();
                 let mut kept: Vec<(String, Span)> = Vec::new();
                 for (p, body) in arms {
                     self.moved = before.clone();
+                    self.mutated = updated_before.clone();
                     let bound = pat_names(p);
                     // The scrutinee is read, not consumed, so a payload the
                     // pattern names is a pointer into a value someone else
@@ -827,6 +831,9 @@ impl State<'_> {
                     for (k, v) in self.moved.drain() {
                         after.entry(k).or_insert(v);
                     }
+                    for (k, v) in self.mutated.drain() {
+                        updated_after.entry(k).or_insert(v);
+                    }
                 }
                 // An arm that still owns a value another arm consumed frees it
                 // where the arm ends: after the match, the consuming path would
@@ -843,6 +850,7 @@ impl State<'_> {
                     }
                 }
                 self.moved = after;
+                self.mutated = updated_after;
             }
             Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Ctor(_) => {}
         }
