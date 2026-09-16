@@ -1,0 +1,99 @@
+mod Bits
+
+;; U64 bit utilities. `band bor bxor bnot shl shr` are prelude functions and are
+;; not repeated here. Bit indices are refined `< 64` so no shift loses a bit.
+test_bit (x:U64) (i:Size, i<64) : Bool = band x (shl 1 i)!=0
+
+set_bit (x:U64) (i:Size, i<64) : U64 = bor x (shl 1 i)
+
+clear_bit (x:U64) (i:Size, i<64) : U64 = band x (bnot (shl 1 i))
+
+toggle_bit (x:U64) (i:Size, i<64) : U64 = bxor x (shl 1 i)
+
+;; Counts set bits from index `k` upward; `acc<=k` keeps the sum in range.
+popcount_from (x:U64) (k:U64, k<=64) (acc:U64, acc<=k) : U64 =
+  ?(k==64)
+   |True  -> acc
+   |False -> ?band (shr x k) 1
+              |0 -> popcount_from x (k + 1) acc
+              |_ -> popcount_from x (k + 1) (acc + 1)
+             end
+  end
+  %(64 - k)
+
+popcount (x:U64) : U64 = popcount_from x 0 0
+
+is_pow2 (x:U64) : Bool =
+  ?x |0 -> False
+     |_ -> band x (x - 1)==0
+  end
+
+;; Isolates the lowest set bit; 0 for 0.
+lowest_set (x:U64) : U64 =
+  ?x |0 -> 0
+     |_ -> band x (bnot (x - 1))
+  end
+
+rotl (x:U64) (n:Size, n<64) : U64 =
+  ?n |0 -> x
+     |_ -> bor (shl x n) (shr x (64 - n))
+  end
+
+rotr (x:U64) (n:Size, n<64) : U64 =
+  ?n |0 -> x
+     |_ -> bor (shr x n) (shl x (64 - n))
+  end
+
+;; The low `n` bits set.
+low_mask (n:Size, n<=64) : U64 =
+  ?n |64 -> bnot 0
+     |_  -> shl 1 n - 1
+  end
+
+;; Index of the first set bit at or above `k`; 64 if there is none.
+first_set_from (x:U64) (k:U64, k<=64) : U64 =
+  ?(k==64)
+   |True  -> 64
+   |False -> ?band (shr x k) 1
+              |0 -> first_set_from x (k + 1)
+              |_ -> k
+             end
+  end
+  %(64 - k)
+
+;; Number of zero bits below the lowest set bit; 64 for 0.
+trailing_zeros (x:U64) : U64 = first_set_from x 0
+
+;; Zeros above the highest set bit among the low `k` bits, counted from bit 63.
+leading_from (x:U64) (k:U64, k<=64) : U64 =
+  ?k |0 -> 64
+     |_ -> ?band (shr x (k - 1)) 1
+            |0 -> leading_from x (k - 1)
+            |_ -> 64 - k
+           end
+  end
+
+;; Number of zero bits above the highest set bit; 64 for 0.
+leading_zeros (x:U64) : U64 = leading_from x 64
+
+;; True when an odd number of bits are set.
+parity (x:U64) : Bool = band (popcount x) 1==1
+
+;; Byte `i`, little-endian: byte 0 is the lowest.
+byte_at (x:U64) (i:Size, i<8) : U8 = u8 (band (shr x (i * 8)) 255)
+
+;; Combines up to eight bytes, lowest first, into a U64.
+from_bytes_from (bs:&Vec U8) (k:Size, k<=8) (acc:U64) : U64 =
+  ?(k==8)
+   |True  -> acc
+   |False -> ?(k<len bs)
+              |True  -> from_bytes_from bs
+                                        (k + 1) (bor acc (shl (u64 (get bs k)) (k * 8)))
+              |False -> acc
+             end
+  end
+  %(8 - k)
+
+from_bytes (bs:&Vec U8) : U64 = from_bytes_from bs 0 0
+
+exp c test_bit, set_bit, clear_bit, toggle_bit, popcount, is_pow2, lowest_set, rotl, rotr, low_mask, trailing_zeros, leading_zeros, parity, byte_at

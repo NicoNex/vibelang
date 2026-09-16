@@ -28,3 +28,5 @@
 /tests/dict
 /lib/check/*
 !/lib/check/*.vibe
+/lib/*.a
+/lib/*.h

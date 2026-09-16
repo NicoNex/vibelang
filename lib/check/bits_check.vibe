@@ -1,0 +1,52 @@
+mod BitsCheck
+
+expect (name:&Str) (got:U64) (want:U64) : E! Unit =
+  ?(got==want)
+   |True  -> ()
+   |False -> warn (fmt "{}: got {} want {}\n" name got want) ;
+             exit 1
+  end
+
+expect_b (name:&Str) (got:Bool) (want:Bool) : E! Unit =
+  ?(got==want)
+   |True  -> ()
+   |False -> warn (fmt "{}: got {} want {}\n" name got want) ;
+             exit 1
+  end
+
+main : E! Unit =
+  expect_b "test_bit set" (Bits.test_bit 5 2) True ;
+  expect_b "test_bit clear" (Bits.test_bit 5 1) False ;
+  expect_b "test_bit 63" (Bits.test_bit (shl (u64 1) 63) 63) True ;
+  expect "set_bit" (Bits.set_bit 5 1) 7 ;
+  expect "clear_bit" (Bits.clear_bit 7 1) 5 ;
+  expect "toggle_bit on" (Bits.toggle_bit 5 1) 7 ;
+  expect "toggle_bit off" (Bits.toggle_bit 7 0) 6 ;
+  expect "popcount 0" (Bits.popcount 0) 0 ;
+  expect "popcount 255" (Bits.popcount 255) 8 ;
+  expect "popcount max" (Bits.popcount (bnot (u64 0))) 64 ;
+  expect_b "is_pow2 0" (Bits.is_pow2 0) False ;
+  expect_b "is_pow2 64" (Bits.is_pow2 64) True ;
+  expect_b "is_pow2 6" (Bits.is_pow2 6) False ;
+  expect "lowest_set 12" (Bits.lowest_set 12) 4 ;
+  expect "lowest_set 0" (Bits.lowest_set 0) 0 ;
+  expect "rotl" (Bits.rotl (shl (u64 1) 63) 1) 1 ;
+  expect "rotl 0" (Bits.rotl 9 0) 9 ;
+  expect "rotr" (Bits.rotr 1 1) (shl (u64 1) 63) ;
+  expect "rotr 4" (Bits.rotr 240 4) 15 ;
+  expect "low_mask 0" (Bits.low_mask 0) 0 ;
+  expect "low_mask 8" (Bits.low_mask 8) 255 ;
+  expect "low_mask 64" (Bits.low_mask 64) (bnot (u64 0)) ;
+  expect "trailing_zeros 8" (Bits.trailing_zeros 8) 3 ;
+  expect "trailing_zeros 0" (Bits.trailing_zeros 0) 64 ;
+  expect "leading_zeros 1" (Bits.leading_zeros 1) 63 ;
+  expect "leading_zeros top" (Bits.leading_zeros (shl (u64 1) 63)) 0 ;
+  expect "leading_zeros 0" (Bits.leading_zeros 0) 64 ;
+  expect_b "parity 7" (Bits.parity 7) True ;
+  expect_b "parity 3" (Bits.parity 3) False ;
+  expect "byte_at 0" (u64 (Bits.byte_at 4660 0)) 52 ;
+  expect "byte_at 1" (u64 (Bits.byte_at 4660 1)) 18 ;
+  expect "byte_at 7" (u64 (Bits.byte_at (shl (u64 171) 56) 7)) 171 ;
+  expect "from_bytes" (Bits.from_bytes &[u8 52, u8 18]) 4660 ;
+  expect "from_bytes empty" (Bits.from_bytes &[]) 0 ;
+  out "ok\n"
