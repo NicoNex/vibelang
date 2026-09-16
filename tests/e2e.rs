@@ -402,3 +402,12 @@ fn a_moved_payload_and_a_nested_back_edge_are_freed_once() {
         ["kept", "a-a-a-"]
     );
 }
+
+/// A string literal is UTF-8 bytes, not one char per byte, and `byte_at` /
+/// `byte_str` reach those bytes: 0xC3 ^ 0xA9 is 106.
+#[test]
+fn a_string_is_bytes_and_bytes_are_reachable() {
+    let (ok, out) = vibe(&["run", "tests/bytes.vibe"]);
+    assert!(ok, "bytes.vibe failed to build or run:\n{out}");
+    assert!(out.starts_with("106 A "), "{out}");
+}

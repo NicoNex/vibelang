@@ -305,14 +305,15 @@ impl<'a> Lexer<'a> {
     fn string(&mut self) -> Result<Tok, Diag> {
         let start = self.pos;
         self.pos += 1;
-        let mut s = String::new();
+        // Bytes, not chars: a literal may hold UTF-8, and every escape is ASCII.
+        let mut s = Vec::new();
         loop {
             match self.peek() {
                 b'"' => {
                     self.pos += 1;
-                    return Ok(Tok::Str(s));
+                    return Ok(Tok::Str(String::from_utf8_lossy(&s).into_owned()));
                 }
-                b'\\' => s.push(self.escape()?),
+                b'\\' => s.push(self.escape()? as u8),
                 0 | b'\n' => {
                     return Err(Diag::error(
                         self.span(start),
@@ -321,7 +322,7 @@ impl<'a> Lexer<'a> {
                     ))
                 }
                 c => {
-                    s.push(c as char);
+                    s.push(c);
                     self.pos += 1;
                 }
             }

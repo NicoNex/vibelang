@@ -1159,7 +1159,7 @@ impl<'a> Gen<'a> {
         if is_checked(name) {
             return; // §7.5: the checked forms discharge the obligation at run time
         }
-        if name == "get" && args.len() == 2 {
+        if matches!(name, "get" | "byte_at") && args.len() == 2 {
             let got = (as_name(strip(args[0])), self.term(args[1]));
             if let (Some(v), Some((ti, _))) = got {
                 let v = self.var(&v);

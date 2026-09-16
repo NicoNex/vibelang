@@ -1,0 +1,13 @@
+mod Bytes
+
+sum_bytes (s:&Str) (n:Size, n==len s) (i:Size) (acc:U64) : U64 =
+  ?(i<n)
+   |False -> acc
+   |True  -> sum_bytes s n (i + 1) (bxor acc (u64 (byte_at s i)))
+  end
+  %(n - i)
+
+all (s:&Str) : U64 = sum_bytes s (len s) 0 0
+
+main : E! Unit =
+  out (fmt "{} {} {}\n" (all "é") (byte_str 65) (byte_str 195))

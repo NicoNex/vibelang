@@ -31,3 +31,4 @@
 /lib/*.a
 /lib/*.h
 /tests/payload_move
+/tests/bytes

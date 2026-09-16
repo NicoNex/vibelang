@@ -191,6 +191,8 @@ pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     ("to_cstr", "&Str -> CStr"),
     ("from_cstr", "CStr -> Str"),
     ("chr", "Char -> Str"),
+    ("byte_at", "&Str -> Size -> U8"),
+    ("byte_str", "U8 -> Str"),
     // `slice` is total by returning `Opt`: the bootstrap cannot yet phrase
     // `i <= j <= len s` as a refinement on a prelude name (spec §14).
     ("slice", "Size -> Size -> &Str -> Opt Str"),

@@ -76,6 +76,8 @@ fn builtin(name: &str) -> Option<(usize, String)> {
         "to_cstr" => t(1, "vb_to_cstr($0)"),
         "from_cstr" => t(1, "vb_from_cstr($0)"),
         "chr" => t(1, "vb_chr($0)"),
+        "byte_at" => t(2, "vb_byte_at($0, $1, $P)"),
+        "byte_str" => t(1, "vb_chr($0)"),
         "slice" => t(3, "vb_slice($0, $1, $2)"),
         "index_of" => t(2, "vb_index_of($0, $1)"),
         "replace" => t(3, "vb_replace($0, $1, $2)"),

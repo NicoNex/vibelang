@@ -193,6 +193,7 @@ VbVal vb_sqrt(VbVal a);
 VbVal vb_pow(VbVal a, VbVal b);
 VbVal vb_floor(VbVal a);
 VbVal vb_show_exact(VbVal a);
+VbVal vb_byte_at(VbVal s, VbVal i, const char *path);
 
 /* --- IO --- */
 VbVal vb_read(VbVal path);

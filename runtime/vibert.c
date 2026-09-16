@@ -359,6 +359,12 @@ VbVal vb_push(VbVal v, VbVal x) {
   return wrap_vec(w);
 }
 
+VbVal vb_byte_at(VbVal s, VbVal i, const char *path) {
+  VbStr *x = vb_as_str(s);
+  uint64_t k = vb_as_uint(i);
+  vb_require(k < x->n, path, "i < len s");
+  return vb_uint((unsigned char)x->p[k]);
+}
 VbVal vb_get(VbVal v, VbVal i, const char *path) {
   VbVec *s = vb_as_vec(v);
   uint64_t k = vb_as_uint(i);
