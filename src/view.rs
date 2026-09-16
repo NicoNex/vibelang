@@ -318,8 +318,15 @@ fn fundecl(
 /// `--explicit` does not invent any. It grows when infer starts recording it.
 fn explicit_notes(ck: &Checked, f: &FunDecl) -> Vec<String> {
     let mut v = Vec::new();
-    if let Some(s) = ck.sigs.get(&f.name) {
-        v.push(format!("{}.{} : {}", f.home, f.name, s.ty.show()));
+    // The checker knows this function by its flattened name, `Mod.f`; the
+    // projection prints the file, which spells it `f`.
+    let key = crate::ast::path(&f.home, &f.name);
+    if let Some(s) = ck.sigs.get(&key).or_else(|| ck.sigs.get(&f.name)) {
+        // A type of this module prints the way the file spells it; one from
+        // another module keeps its qualifier, which is also how the file spells
+        // it.
+        let ty = s.ty.show().replace(&format!("{}.", f.home), "");
+        v.push(format!("{} : {}", crate::ast::path(&f.home, &f.name), ty));
     }
     for p in &f.params {
         for r in &p.refines {

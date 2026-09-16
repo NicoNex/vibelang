@@ -19,7 +19,7 @@ use crate::ast::*;
 use crate::diag::{Diag, Files, Span};
 use crate::lexer::{self, Comment};
 use crate::parser;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// One file, as it was written. Modules keep their qualifiers here: only
@@ -62,48 +62,387 @@ pub fn program(path: &Path, files: &mut Files) -> Result<Program, Vec<Diag>> {
     let root = l.read(path, None)?;
     l.follow(&root.module)?;
 
-    let mut decls = Vec::new();
-    let mut home: HashMap<String, String> = HashMap::new();
-    let mut errors = Vec::new();
-    // dependencies first, so a reader of the flattened unit sees a definition
-    // before its use even though the checker does not require it
     let units: Vec<Unit> = l.order.drain(..).chain(std::iter::once(root)).collect();
+    let table: Table = units
+        .iter()
+        .map(|u| (u.module.name.clone(), syms_of(&u.module)))
+        .collect();
+
+    // Two kinds of name stay global because the rest of the compiler resolves
+    // them without a module in hand: a record field, which the checker finds by
+    // name alone, and an `ext c` symbol, which is C's name and not ours.
+    let mut errors = global_clashes(&units);
+
+    let mut decls = Vec::new();
     for u in &units {
-        let m = &u.module;
-        for d in m.decls.iter().cloned() {
-            for n in declared(&d) {
-                if let Some(first) = home.get(&n) {
-                    errors.push(
-                        Diag::error(
-                            decl_span(&d),
-                            "mod.duplicate",
-                            &format!("`{n}` is declared in both `{first}` and `{}`", m.name),
-                        )
-                        .with_path(&format!("{}.{n}", m.name))
-                        .with_fix("v0.1 has one flat namespace (spec §9): rename one of them"),
-                    );
-                } else {
-                    home.insert(n, m.name.clone());
-                }
-            }
-            decls.push(d);
+        let mut ds = u.module.decls.clone();
+        let mut mg = Mangler {
+            home: u.module.name.clone(),
+            syms: &table[&u.module.name],
+            table: &table,
+            scopes: Vec::new(),
+            errors: Vec::new(),
+        };
+        for d in &mut ds {
+            mg.decl(d);
         }
+        errors.append(&mut mg.errors);
+        decls.extend(ds);
     }
     if !errors.is_empty() {
         return Err(errors);
     }
     let root = units.last().expect("the root was pushed last");
-    let mut flat = Module {
+    let flat = Module {
         name: root.module.name.clone(),
         decls,
         span: root.module.span,
     };
-    let known: Vec<String> = home.values().cloned().collect();
-    // Only the flattened unit is resolved: a projection has to show the program
-    // as it is written, qualifiers included, or `vibe view` would edit the file
-    // every time it printed it.
-    resolve(&mut flat, &known);
     Ok(Program { flat, units })
+}
+
+/// What a module declares, by kind. The three namespaces are separate because
+/// the grammar keeps them separate: a lower-case name is a value, a capitalised
+/// one in type position is a type, and one in a pattern is a constructor.
+#[derive(Default)]
+struct Syms {
+    vals: HashSet<String>,
+    types: HashSet<String>,
+    ctors: HashSet<String>,
+}
+
+type Table = HashMap<String, Syms>;
+
+fn syms_of(m: &Module) -> Syms {
+    let mut s = Syms::default();
+    for d in &m.decls {
+        match d {
+            Decl::Fun(f) => {
+                s.vals.insert(f.name.clone());
+            }
+            Decl::Type(t) => {
+                s.types.insert(t.name.clone());
+                if let TypeBody::Variants(vs) = &t.body {
+                    s.ctors.extend(vs.iter().map(|v| v.name.clone()));
+                }
+            }
+            // `ext c` names are C's, and stay global.
+            Decl::Ext(_) | Decl::Exp(..) => {}
+        }
+    }
+    s
+}
+
+/// Names that two modules may not both declare, because nothing downstream
+/// carries a module with them.
+fn global_clashes(units: &[Unit]) -> Vec<Diag> {
+    let mut seen: HashMap<String, String> = HashMap::new();
+    let mut out = Vec::new();
+    for u in units {
+        let m = &u.module;
+        for d in &m.decls {
+            let names: Vec<String> = match d {
+                Decl::Type(t) => match &t.body {
+                    TypeBody::Record(r) => r.fields.iter().map(|(n, _)| n.clone()).collect(),
+                    _ => Vec::new(),
+                },
+                Decl::Ext(e) => e.sigs.iter().map(|s| s.name.clone()).collect(),
+                _ => Vec::new(),
+            };
+            let kind = if matches!(d, Decl::Ext(_)) {
+                "`ext c` symbol"
+            } else {
+                "record field"
+            };
+            for n in names {
+                match seen.get(&n) {
+                    Some(first) if first != &m.name => out.push(
+                        Diag::error(
+                            decl_span(d),
+                            "mod.duplicate",
+                            &format!("the {kind} `{n}` is declared in both `{first}` and `{}`", m.name),
+                        )
+                        .with_path(&format!("{}.{n}", m.name))
+                        .with_fix("rename one of them: a field and a C symbol have no module to hide behind"),
+                    ),
+                    _ => {
+                        seen.insert(n, m.name.clone());
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Rewrites one module's declarations into the flattened program's spelling:
+/// every name a module declares becomes `Mod.name`, which is exactly what a
+/// qualified reference was already written as. So `Csv.parse` and `Json.parse`
+/// are two names, a module may declare `take` without fighting the prelude, and
+/// a bare name means "mine, else the prelude's".
+///
+/// The per-file `Unit` keeps the source spelling: `vibe view` and `vibe patch`
+/// work on that, and neither has to know any of this happened.
+struct Mangler<'a> {
+    home: String,
+    syms: &'a Syms,
+    table: &'a Table,
+    /// names bound by a parameter, a `let`, a `<-`, a lambda or a pattern —
+    /// they shadow the module's own, so they are not rewritten
+    scopes: Vec<HashSet<String>>,
+    errors: Vec<Diag>,
+}
+
+impl Mangler<'_> {
+    fn mine(&self, n: &str) -> String {
+        format!("{}.{}", self.home, n)
+    }
+
+    fn shadowed(&self, n: &str) -> bool {
+        self.scopes.iter().any(|s| s.contains(n))
+    }
+
+    /// A qualified name is checked against the module it names, so a typo is a
+    /// diagnostic here rather than an unbound-name error further down.
+    fn qualified(&mut self, n: &str, span: Span, kind: &str) {
+        let Some((m, base)) = n.split_once('.') else {
+            return;
+        };
+        let Some(syms) = self.table.get(m) else {
+            return;
+        };
+        let known = match kind {
+            "value" => &syms.vals,
+            "type" => &syms.types,
+            _ => &syms.ctors,
+        };
+        if !known.contains(base) {
+            self.errors.push(
+                Diag::error(
+                    span,
+                    "mod.no_name",
+                    &format!("`{m}` declares no {kind} `{base}`"),
+                )
+                .with_path(&format!("{}.{}", self.home, base))
+                .with_fix(&format!(
+                    "check the spelling, or declare `{base}` in {m}.vibe"
+                )),
+            );
+        }
+    }
+
+    fn decl(&mut self, d: &mut Decl) {
+        match d {
+            Decl::Fun(f) => {
+                let mut bound = HashSet::new();
+                for p in &mut f.params {
+                    if let Some(t) = &mut p.ty {
+                        self.ty(t);
+                    }
+                    bound.extend(p.names.iter().cloned());
+                }
+                self.scopes.push(bound);
+                for p in &mut f.params {
+                    for r in &mut p.refines {
+                        self.expr(r);
+                    }
+                }
+                if let Some(r) = &mut f.ret {
+                    self.ty(r);
+                }
+                self.expr(&mut f.body);
+                if let Some(ms) = &mut f.measure {
+                    self.expr(ms);
+                }
+                self.scopes.pop();
+                f.name = self.mine(&f.name);
+            }
+            Decl::Type(t) => {
+                match &mut t.body {
+                    TypeBody::Variants(vs) => {
+                        for v in vs.iter_mut() {
+                            for a in &mut v.args {
+                                self.ty(a);
+                            }
+                            v.name = self.mine(&v.name);
+                        }
+                    }
+                    TypeBody::Record(r) => {
+                        let fields: HashSet<String> =
+                            r.fields.iter().map(|(n, _)| n.clone()).collect();
+                        for (_, ft) in r.fields.iter_mut() {
+                            self.ty(ft);
+                        }
+                        self.scopes.push(fields);
+                        for e in &mut r.refines {
+                            self.expr(e);
+                        }
+                        self.scopes.pop();
+                    }
+                    TypeBody::Opaque => {}
+                }
+                t.name = self.mine(&t.name);
+            }
+            Decl::Ext(e) => {
+                for s in &mut e.sigs {
+                    self.ty(&mut s.ty);
+                }
+                for t in &mut e.types {
+                    t.name = self.mine(&t.name);
+                }
+            }
+            Decl::Exp(names, _) => {
+                for n in names.iter_mut() {
+                    if self.syms.vals.contains(n) {
+                        *n = self.mine(n);
+                    }
+                }
+            }
+        }
+    }
+
+    fn ty(&mut self, t: &mut Ty) {
+        match t {
+            Ty::Con(n, args) => {
+                if n.contains('.') {
+                    let span = Span::default();
+                    self.qualified(&n.clone(), span, "type");
+                } else if self.syms.types.contains(n) {
+                    *n = self.mine(n);
+                }
+                for a in args {
+                    self.ty(a);
+                }
+            }
+            Ty::Ref(i) | Ty::Eff(i) => self.ty(i),
+            Ty::Fun(a, b) => {
+                self.ty(a);
+                self.ty(b);
+            }
+            Ty::Tuple(xs) => xs.iter_mut().for_each(|x| self.ty(x)),
+            Ty::Var(_) => {}
+        }
+    }
+
+    fn pat(&mut self, p: &mut Pat, bound: &mut HashSet<String>) {
+        match p {
+            Pat::Var(n) => {
+                bound.insert(n.clone());
+            }
+            Pat::Ctor(c, ps) => {
+                if c.contains('.') {
+                    let c = c.clone();
+                    self.qualified(&c, Span::default(), "constructor");
+                } else if self.syms.ctors.contains(c) {
+                    *c = self.mine(c);
+                }
+                for sp in ps {
+                    self.pat(sp, bound);
+                }
+            }
+            Pat::Tuple(ps) | Pat::List(ps) => {
+                for sp in ps {
+                    self.pat(sp, bound);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn expr(&mut self, e: &mut Expr) {
+        let span = e.span;
+        match &mut e.kind {
+            ExprKind::Field(base, name) => {
+                // `Csv.parse`: a qualifier is written exactly like a field
+                // access on a constructor, and this is where the two part ways.
+                if let ExprKind::Ctor(m) = &base.kind {
+                    if let Some(syms) = self.table.get(m) {
+                        if syms.vals.contains(name) {
+                            e.kind = ExprKind::Var(format!("{m}.{name}"));
+                            return;
+                        }
+                        self.errors.push(
+                            Diag::error(
+                                span,
+                                "mod.no_name",
+                                &format!("`{m}` declares no value `{name}`"),
+                            )
+                            .with_path(&format!("{}.{}", self.home, name))
+                            .with_fix(&format!(
+                                "check the spelling, or declare `{name}` in {m}.vibe"
+                            )),
+                        );
+                        return;
+                    }
+                }
+                self.expr(base);
+            }
+            ExprKind::Var(n) => {
+                if !self.shadowed(n) && self.syms.vals.contains(n) {
+                    *n = self.mine(n);
+                }
+            }
+            ExprKind::Ctor(c) => {
+                if c.contains('.') {
+                    let c = c.clone();
+                    self.qualified(&c, span, "constructor");
+                } else if self.syms.ctors.contains(c) {
+                    *c = self.mine(c);
+                }
+            }
+            ExprKind::Let(n, v, body) | ExprKind::Bind(n, v, body) => {
+                self.expr(v);
+                self.scopes.push(HashSet::from([n.clone()]));
+                self.expr(body);
+                self.scopes.pop();
+            }
+            ExprKind::Lambda(ps, body) => {
+                self.scopes.push(ps.iter().cloned().collect());
+                self.expr(body);
+                self.scopes.pop();
+            }
+            ExprKind::Match(scrut, arms) => {
+                self.expr(scrut);
+                for (p, body) in arms.iter_mut() {
+                    let mut bound = HashSet::new();
+                    self.pat(p, &mut bound);
+                    self.scopes.push(bound);
+                    self.expr(body);
+                    self.scopes.pop();
+                }
+            }
+            ExprKind::Arena(n, body) => {
+                self.scopes.push(HashSet::from([n.clone()]));
+                self.expr(body);
+                self.scopes.pop();
+            }
+            ExprKind::App(h, args) => {
+                self.expr(h);
+                for a in args {
+                    self.expr(a);
+                }
+            }
+            ExprKind::Binop(_, a, b) => {
+                self.expr(a);
+                self.expr(b);
+            }
+            ExprKind::Neg(x) | ExprKind::Not(x) | ExprKind::Borrow(x) => self.expr(x),
+            ExprKind::Record(base, fields) => {
+                if let Some(b) = base {
+                    self.expr(b);
+                }
+                for (_, v) in fields.iter_mut() {
+                    self.expr(v);
+                }
+            }
+            ExprKind::Tuple(xs) | ExprKind::List(xs) => {
+                for x in xs {
+                    self.expr(x);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 struct Loader<'a> {
@@ -115,7 +454,43 @@ struct Loader<'a> {
     order: Vec<Unit>,
 }
 
+/// Where a module may live, in order: beside the file that names it, then each
+/// entry of `VIBE_PATH`, then the `lib` directory shipped with the compiler.
+///
+/// No manifest, no lockfile, no versions. A name maps to a file mechanically,
+/// in both directions, which is the property that lets a generator write
+/// `Json.parse` without being told where `Json` came from.
+fn search_path(dir: &Path) -> Vec<PathBuf> {
+    let mut v = vec![dir.to_path_buf()];
+    if let Ok(p) = std::env::var("VIBE_PATH") {
+        v.extend(p.split(':').filter(|s| !s.is_empty()).map(PathBuf::from));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(d) = exe.parent() {
+            v.push(d.join("lib"));
+            v.push(d.join("../lib"));
+        }
+    }
+    v.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lib"));
+    v
+}
+
 impl Loader<'_> {
+    /// The file a module name resolves to. Case and underscores are the only
+    /// things allowed to differ, so `MoneyBox` is `MoneyBox.vibe` or
+    /// `money_box.vibe` and nothing else.
+    fn find(&self, name: &str) -> Option<PathBuf> {
+        for d in search_path(&self.dir) {
+            for stem in [name.to_string(), snake_case(name)] {
+                let p = d.join(format!("{stem}.vibe"));
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+        None
+    }
+
     fn read(&mut self, path: &Path, at: Option<Span>) -> Result<Unit, Vec<Diag>> {
         let src = std::fs::read_to_string(path).map_err(|e| {
             vec![Diag::error(
@@ -165,15 +540,19 @@ impl Loader<'_> {
             if self.loaded.contains_key(&name) {
                 continue; // already loaded, or being loaded: a cycle stops here
             }
-            let exact = self.dir.join(format!("{name}.vibe"));
-            let snake = self.dir.join(format!("{}.vibe", snake_case(&name)));
-            let Some(p) = [exact.clone(), snake].into_iter().find(|p| p.exists()) else {
+            let Some(p) = self.find(&name) else {
+                let looked: Vec<String> = search_path(&self.dir)
+                    .iter()
+                    .map(|d| d.join(format!("{name}.vibe")).display().to_string())
+                    .collect();
                 return Err(vec![Diag::error(
                     span,
                     "mod.missing",
-                    &format!("no module `{name}`: expected {}", exact.display()),
+                    &format!("no module `{name}`: looked in {}", looked.join(", ")),
                 )
-                .with_fix(&format!("create {name}.vibe, or fix the qualified name"))]);
+                .with_fix(&format!(
+                    "create {name}.vibe next to this file, or put it on VIBE_PATH"
+                ))]);
             };
             let dep = self.read(&p, Some(span))?;
             self.follow(&dep.module)?;
@@ -212,69 +591,111 @@ fn decl_span(d: &Decl) -> Span {
     }
 }
 
-/// The top-level names a declaration introduces. Constructors count, and so do
-/// record field names: the checker resolves a field to its owning record by
-/// name alone, so two modules that both spell a field `qty` would otherwise
-/// meet as a type error somewhere else entirely.
-fn declared(d: &Decl) -> Vec<String> {
-    match d {
-        Decl::Fun(f) => vec![f.name.clone()],
-        Decl::Type(t) => {
-            let mut v = vec![t.name.clone()];
-            match &t.body {
-                TypeBody::Variants(vs) => v.extend(vs.iter().map(|x| x.name.clone())),
-                TypeBody::Record(r) => v.extend(r.fields.iter().map(|(n, _)| n.clone())),
-                TypeBody::Opaque => {}
-            }
-            v
-        }
-        Decl::Ext(e) => e.sigs.iter().map(|s| s.name.clone()).collect(),
-        Decl::Exp(..) => Vec::new(),
-    }
-}
-
 /// Every `Mod.name` in the module, with the span to blame if `Mod` is missing.
 /// A qualifier is written exactly like a field access on a constructor, so the
 /// two are told apart by case and by whether the file exists — that check is
 /// the caller's.
 fn qualifiers(m: &Module) -> Vec<(String, Span)> {
     let mut out = Vec::new();
-    for f in m.funs() {
-        find_qualifiers(&f.body, &mut out);
+    for d in &m.decls {
+        match d {
+            Decl::Fun(f) => {
+                for p in &f.params {
+                    if let Some(t) = &p.ty {
+                        ty_qualifiers(t, f.span, &mut out);
+                    }
+                }
+                if let Some(r) = &f.ret {
+                    ty_qualifiers(r, f.span, &mut out);
+                }
+                find_qualifiers(&f.body, &mut out);
+            }
+            Decl::Type(t) => match &t.body {
+                TypeBody::Variants(vs) => {
+                    for v in vs {
+                        for a in &v.args {
+                            ty_qualifiers(a, t.span, &mut out);
+                        }
+                    }
+                }
+                TypeBody::Record(r) => {
+                    for (_, ft) in &r.fields {
+                        ty_qualifiers(ft, t.span, &mut out);
+                    }
+                }
+                TypeBody::Opaque => {}
+            },
+            Decl::Ext(e) => {
+                for sg in &e.sigs {
+                    ty_qualifiers(&sg.ty, e.span, &mut out);
+                }
+            }
+            Decl::Exp(..) => {}
+        }
     }
     out
 }
 
-fn find_qualifiers(e: &Expr, out: &mut Vec<(String, Span)>) {
-    if let ExprKind::Field(base, _) = &e.kind {
-        if let ExprKind::Ctor(mo) = &base.kind {
-            out.push((mo.clone(), e.span));
-        }
-    }
-    children(e, &mut |k| find_qualifiers(k, out));
+/// The module in a dotted name, if it has one. `Shape.Kind` is written as one
+/// name by the parser, so a module can be named by a type or a constructor and
+/// never by a call — and that module still has to be loaded.
+fn dotted(n: &str) -> Option<String> {
+    n.split_once('.').map(|(m, _)| m.to_string())
 }
 
-/// Rewrite `Mod.name` to `name` once `Mod` is known to be a module. Anything
-/// qualified by something that is not a loaded module is left alone, so a real
-/// field access on a constructor still fails where it always did.
-fn resolve(m: &mut Module, modules: &[String]) {
-    for d in &mut m.decls {
-        if let Decl::Fun(f) = d {
-            rewrite(&mut f.body, modules);
-        }
-    }
-}
-
-fn rewrite(e: &mut Expr, modules: &[String]) {
-    if let ExprKind::Field(base, name) = &e.kind {
-        if let ExprKind::Ctor(mo) = &base.kind {
-            if modules.iter().any(|x| x == mo) {
-                e.kind = ExprKind::Var(name.clone());
-                return;
+fn ty_qualifiers(t: &Ty, span: Span, out: &mut Vec<(String, Span)>) {
+    match t {
+        Ty::Con(n, args) => {
+            if let Some(m) = dotted(n) {
+                out.push((m, span));
+            }
+            for a in args {
+                ty_qualifiers(a, span, out);
             }
         }
+        Ty::Ref(i) | Ty::Eff(i) => ty_qualifiers(i, span, out),
+        Ty::Fun(a, b) => {
+            ty_qualifiers(a, span, out);
+            ty_qualifiers(b, span, out);
+        }
+        Ty::Tuple(xs) => xs.iter().for_each(|x| ty_qualifiers(x, span, out)),
+        Ty::Var(_) => {}
     }
-    children_mut(e, &mut |k| rewrite(k, modules));
+}
+
+fn pat_qualifiers(p: &Pat, span: Span, out: &mut Vec<(String, Span)>) {
+    match p {
+        Pat::Ctor(c, ps) => {
+            if let Some(m) = dotted(c) {
+                out.push((m, span));
+            }
+            ps.iter().for_each(|sp| pat_qualifiers(sp, span, out));
+        }
+        Pat::Tuple(ps) | Pat::List(ps) => ps.iter().for_each(|sp| pat_qualifiers(sp, span, out)),
+        _ => {}
+    }
+}
+
+fn find_qualifiers(e: &Expr, out: &mut Vec<(String, Span)>) {
+    match &e.kind {
+        ExprKind::Field(base, _) => {
+            if let ExprKind::Ctor(mo) = &base.kind {
+                out.push((mo.clone(), e.span));
+            }
+        }
+        ExprKind::Ctor(c) => {
+            if let Some(m) = dotted(c) {
+                out.push((m, e.span));
+            }
+        }
+        ExprKind::Match(_, arms) => {
+            for (p, _) in arms {
+                pat_qualifiers(p, e.span, out);
+            }
+        }
+        _ => {}
+    }
+    children(e, &mut |k| find_qualifiers(k, out));
 }
 
 /// Apply `f` to every direct subexpression.
@@ -300,30 +721,5 @@ fn children(e: &Expr, f: &mut dyn FnMut(&Expr)) {
             fields.iter().for_each(|(_, v)| f(v));
         }
         Tuple(xs) | List(xs) => xs.iter().for_each(&mut *f),
-    }
-}
-
-fn children_mut(e: &mut Expr, f: &mut dyn FnMut(&mut Expr)) {
-    use ExprKind::*;
-    match &mut e.kind {
-        Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Var(_) | Ctor(_) => {}
-        App(h, args) => {
-            f(h);
-            args.iter_mut().for_each(&mut *f);
-        }
-        Binop(_, a, b) | Bind(_, a, b) | Let(_, a, b) => {
-            f(a);
-            f(b);
-        }
-        Neg(i) | Not(i) | Borrow(i) | Field(i, _) | Lambda(_, i) | Arena(_, i) => f(i),
-        Match(s, arms) => {
-            f(s);
-            arms.iter_mut().for_each(|(_, b)| f(b));
-        }
-        Record(base, fields) => {
-            base.iter_mut().for_each(|b| f(b));
-            fields.iter_mut().for_each(|(_, v)| f(v));
-        }
-        Tuple(xs) | List(xs) => xs.iter_mut().for_each(&mut *f),
     }
 }

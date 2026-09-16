@@ -57,7 +57,7 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
                     "name.duplicate",
                     &format!("type `{}` is already defined", t.name),
                 )
-                .with_path(&format!("{}.{}", t.home, t.name)),
+                .with_path(&crate::ast::path(&t.home, &t.name)),
             );
         }
         collect_type(&mut c, t);
@@ -126,7 +126,7 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
                     "name.duplicate",
                     &format!("`{}` is already defined", f.name),
                 )
-                .with_path(&format!("{}.{}", f.home, f.name)),
+                .with_path(&crate::ast::path(&f.home, &f.name)),
             );
         }
         let mut vars = HashMap::new();
@@ -154,7 +154,7 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
 
     // 6. Bodies.
     for f in m.funs() {
-        let path = format!("{}.{}", f.home, f.name);
+        let path = crate::ast::path(&f.home, &f.name);
         if let Err(e) = check_fun(&mut c, f, &path) {
             c.errors.push(e.at_path(&path));
         }

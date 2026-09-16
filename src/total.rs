@@ -76,7 +76,7 @@ pub fn check(m: &Module) -> Vec<Diag> {
             continue; // effectful: non-termination is one of the effects (§6.1)
         }
         let f = funs[i];
-        let path = format!("{}.{}", f.home, f.name);
+        let path = crate::ast::path(&f.home, &f.name);
         match &f.measure {
             Some(e) => {
                 let parts: Vec<Lin> = components(e).into_iter().map(lin).collect();
@@ -166,7 +166,7 @@ pub fn check(m: &Module) -> Vec<Diag> {
                         funs[i].name, funs[c.callee].name
                     ),
                 )
-                .with_path(&format!("{}.{}", funs[i].home, funs[i].name))
+                .with_path(&crate::ast::path(&funs[i].home, &funs[i].name))
                 .with_witness(&format!("measure {}", show_lex(mi)))
                 .with_fix("make an argument shrink, or give a measure that does, e.g. `%(n-k)`"),
             );

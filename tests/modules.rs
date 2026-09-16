@@ -16,6 +16,19 @@ fn vibe_in(dir: &Path, args: &[&str]) -> (bool, String) {
     (o.status.success(), s)
 }
 
+/// Same, with `VIBE_PATH` set: where a shipped library would live.
+fn vibe_with_path(dir: &Path, path: &Path, args: &[&str]) -> (bool, String) {
+    let o = Command::new(env!("CARGO_BIN_EXE_vibe"))
+        .args(args)
+        .current_dir(dir)
+        .env("VIBE_PATH", path)
+        .output()
+        .expect("vibe runs");
+    let mut s = String::from_utf8_lossy(&o.stdout).to_string();
+    s.push_str(&String::from_utf8_lossy(&o.stderr));
+    (o.status.success(), s)
+}
+
 /// A fresh directory holding the given `(file name, contents)` pairs.
 fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
     let dir = std::env::temp_dir().join("vibe-module-tests").join(name);
@@ -96,25 +109,62 @@ fn snake_case_files_hold_pascal_case_modules() {
     assert_eq!(out.trim(), "42");
 }
 
+/// Two modules may declare the same name. The qualified spelling is what the
+/// flattened program uses, so `Money.cents` and `App.cents` are two names and
+/// neither shadows the other — and a bare `cents` inside `App` means App's.
 #[test]
-fn one_name_declared_twice_is_reported_not_shadowed() {
+fn the_same_name_in_two_modules_is_two_names() {
     let dir = project(
         "clash",
         &[
             ("money.vibe", MONEY),
             (
                 "app.vibe",
-                "mod App\n\ncents (n:F64) : I64 = 0\n\nmain : E! Unit =\n  out (show (Money.cents 1.0))\n",
+                "mod App\n\ncents (n:I64) : I64 = n + 1\n\nmain : E! Unit =\n  \
+                 out (show (Money.cents 1.0 + cents 5))\n",
+            ),
+        ],
+    );
+    let (ok, out) = vibe_in(&dir, &["run", "app.vibe"]);
+    assert!(ok, "same name, different modules, no clash:\n{out}");
+    assert_eq!(out.trim(), "106", "100 from Money, 6 from App");
+}
+
+/// A module may declare a name the prelude already has. Inside that module the
+/// declaration wins; every other module still gets the prelude's.
+#[test]
+fn a_module_may_shadow_a_prelude_name() {
+    let dir = project(
+        "shadow",
+        &[(
+            "app.vibe",
+            "mod App\n\ntake (n:I64) : I64 = n * 2\n\nmain : E! Unit =\n  \
+             out (show (take 21))\n",
+        )],
+    );
+    let (ok, out) = vibe_in(&dir, &["run", "app.vibe"]);
+    assert!(ok, "`take` is the prelude's name, not its property:\n{out}");
+    assert_eq!(out.trim(), "42");
+}
+
+/// A qualified name that the module does not declare is caught here, by name,
+/// rather than as an unbound-name error somewhere downstream.
+#[test]
+fn a_qualified_name_that_is_not_there_says_so() {
+    let dir = project(
+        "typo",
+        &[
+            ("money.vibe", MONEY),
+            (
+                "app.vibe",
+                "mod App\n\nmain : E! Unit =\n  out (show (Money.centz 1.0))\n",
             ),
         ],
     );
     let (ok, out) = vibe_in(&dir, &["check", "app.vibe", "--diag=struct"]);
-    assert!(
-        !ok,
-        "v0.1 has one flat namespace, so a clash must be an error:\n{out}"
-    );
-    assert!(out.contains("mod.duplicate"), "{out}");
-    assert!(out.contains("rename"), "the fix must be mechanical:\n{out}");
+    assert!(!ok, "{out}");
+    assert!(out.contains("mod.no_name"), "{out}");
+    assert!(out.contains("centz"), "the error must name it:\n{out}");
 }
 
 #[test]
@@ -195,4 +245,54 @@ fn a_record_field_declared_twice_is_a_clash_too() {
     assert!(!ok, "{out}");
     assert!(out.contains("mod.duplicate"), "{out}");
     assert!(out.contains("`qty` is declared in both"), "{out}");
+}
+
+/// A module does not have to sit next to the file that names it: `VIBE_PATH` is
+/// where a library lives, and the name still maps to the file mechanically.
+#[test]
+fn a_module_is_found_on_the_search_path() {
+    let lib = project(
+        "lib",
+        &[(
+            "greet.vibe",
+            "mod Greet\n\nhi (n:&Str) : Str = concat \"hi \" n\n",
+        )],
+    );
+    let app = project(
+        "path_app",
+        &[(
+            "prog.vibe",
+            "mod Prog\n\nmain : E! Unit =\n  out (Greet.hi \"there\")\n",
+        )],
+    );
+    let (ok, out) = vibe_with_path(&app, &lib, &["run", "prog.vibe"]);
+    assert!(ok, "VIBE_PATH must be searched:\n{out}");
+    assert_eq!(out.trim(), "hi there");
+
+    // and without it, the error says every place it looked
+    let (ok, out) = vibe_in(&app, &["check", "prog.vibe"]);
+    assert!(!ok, "{out}");
+    assert!(out.contains("looked in"), "{out}");
+}
+
+/// A type and a constructor can be qualified too, and a module named only that
+/// way still has to be loaded.
+#[test]
+fn a_qualified_type_loads_its_module() {
+    let dir = project(
+        "qual_ty",
+        &[
+            ("shape.vibe", "mod Shape\n\ntype Kind = Dot | Line F64\n"),
+            (
+                "app.vibe",
+                "mod App\n\nflat (k:&Shape.Kind) : F64 =\n  \
+                 ?k |Shape.Dot    -> 0.0\n     \
+                    |Shape.Line n -> n\n  end\n\n\
+                 main : E! Unit = out (show (flat &(Shape.Line 3.0)))\n",
+            ),
+        ],
+    );
+    let (ok, out) = vibe_in(&dir, &["run", "app.vibe"]);
+    assert!(ok, "a module named only by a type and a pattern:\n{out}");
+    assert_eq!(out.trim(), "3");
 }

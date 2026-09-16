@@ -11,12 +11,12 @@ static const VbInfo vbi_OutOfBounds = {"OutOfBounds", 0, 0};
 static const VbInfo vbi_Overflow = {"Overflow", 0, 0};
 static const VbInfo vbi_Some = {"Some", 1, 0};
 
-static VbVal vbf_work(VbVal *a);
-static VbVal vbf_spin(VbVal *a);
-static VbVal vbf_main(VbVal *a);
+static VbVal vbf_Churn_work(VbVal *a);
+static VbVal vbf_Churn_spin(VbVal *a);
+static VbVal vbf_Churn_main(VbVal *a);
 
 #line 5 "churn"
-static VbVal vbf_work(VbVal *a) {
+static VbVal vbf_Churn_work(VbVal *a) {
   (void)a;
   VbVal v_n_1 = a[0];
   VbVal vbret = vb_unit();
@@ -34,7 +34,7 @@ static VbVal vbf_work(VbVal *a) {
 }
 
 #line 7 "churn"
-static VbVal vbf_spin(VbVal *a) {
+static VbVal vbf_Churn_spin(VbVal *a) {
   (void)a;
   VbVal v_k_6 = a[0];
   VbVal v_acc_7 = a[1];
@@ -49,7 +49,7 @@ static VbVal vbf_spin(VbVal *a) {
     else if (1) {
       VbVal v___9 = t8;
       VbVal t10_a[] = {vb_int(5000)};
-      VbVal t10 = vbf_work(t10_a);
+      VbVal t10 = vbf_Churn_work(t10_a);
       VbVal t11 = vb_sub(v_k_6, vb_int(1));
       VbVal t12 = vb_add(v_acc_7, t10);
       v_k_6 = t11;
@@ -62,12 +62,12 @@ static VbVal vbf_spin(VbVal *a) {
 }
 
 #line 13 "churn"
-static VbVal vbf_main(VbVal *a) {
+static VbVal vbf_Churn_main(VbVal *a) {
   (void)a;
   VbVal vbret = vb_unit();
   for (;;) {
     VbVal t13_a[] = {vb_int(2000), vb_int(0)};
-    VbVal t13 = vbf_spin(t13_a);
+    VbVal t13 = vbf_Churn_spin(t13_a);
     VbVal t14 = t13;
     VbVal t15 = vb_show(t14);
     vb_dispose(t14);
@@ -84,6 +84,6 @@ static VbVal vbf_main(VbVal *a) {
 int main(int argc, char **argv) {
   vb_init();
   vb_set_args(argc, argv);
-  vbf_main(0);
+  vbf_Churn_main(0);
   return 0;
 }

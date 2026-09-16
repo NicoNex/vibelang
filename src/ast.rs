@@ -17,6 +17,17 @@ pub enum Ty {
     Tuple(Vec<Ty>),
 }
 
+/// The semantic path of a declaration — `Ledger.mean` — used by every
+/// diagnostic and by `vibe patch`. In the flattened program a name already
+/// carries the module it came from (see `src/load.rs`), so saying it twice is
+/// what this exists to prevent.
+pub fn path(home: &str, name: &str) -> String {
+    match name.strip_prefix(home) {
+        Some(rest) if rest.starts_with('.') => name.to_string(),
+        _ => format!("{home}.{name}"),
+    }
+}
+
 impl Ty {
     pub fn unit() -> Ty {
         Ty::Con("Unit".into(), vec![])

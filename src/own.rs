@@ -116,7 +116,7 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
                     "own.borrow_escapes",
                     &format!("`{}` returns a borrow", f.name),
                 )
-                .with_path(&format!("{}.{}", f.home, f.name))
+                .with_path(&crate::ast::path(&f.home, &f.name))
                 .with_witness("a borrow lives only for the call that lent it")
                 .with_fix("return an owned value, or the index of the element instead"),
             );
@@ -141,7 +141,7 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
                             "own.borrow_escapes",
                             &format!("`{}` is a borrow and is returned as owned", n),
                         )
-                        .with_path(&format!("{}.{}", f.home, f.name))
+                        .with_path(&crate::ast::path(&f.home, &f.name))
                         .with_witness("a borrow lives only for the call that lent it")
                         .with_fix(&format!("copy it with `dup {}`, or return an index", n)),
                     );
@@ -158,7 +158,7 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             mutated: HashMap::new(),
             errors: Vec::new(),
             inplace: HashSet::new(),
-            path: format!("{}.{}", f.home, f.name),
+            path: crate::ast::path(&f.home, &f.name),
             ck,
             sigs: &sigs,
             escaping,

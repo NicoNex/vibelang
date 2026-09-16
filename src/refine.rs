@@ -392,7 +392,7 @@ pub fn obligations(m: &Module, ck: &Checked) -> (Vec<Ob>, usize) {
             syms: BTreeMap::new(),
             hyps: Vec::new(),
             obs: Vec::new(),
-            fun: format!("{}.{}", f.home, f.name),
+            fun: crate::ast::path(&f.home, &f.name),
             params: Vec::new(),
             renames: HashMap::new(),
             seen: HashSet::new(),

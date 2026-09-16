@@ -92,8 +92,8 @@ pub fn nodes(m: &Module, src: &str) -> Vec<Node> {
             continue; // a span the parser could not place; not addressable
         }
         let base = match d {
-            Decl::Type(t) => format!("{}.{}", t.home, t.name),
-            Decl::Fun(f) => format!("{}.{}", f.home, f.name),
+            Decl::Type(t) => crate::ast::path(&t.home, &t.name),
+            Decl::Fun(f) => crate::ast::path(&f.home, &f.name),
             Decl::Ext(e) => format!("{}.ext.{}", m.name, ext_key(&e.header)),
             Decl::Exp(_, _) => format!("{}.exp", m.name),
         };

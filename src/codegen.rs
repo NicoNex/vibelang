@@ -284,10 +284,14 @@ impl<'a> Gen<'a> {
         o.push_str(&std::mem::take(&mut self.lifted));
         o.push_str(&bodies);
         o.push_str(&self.exports());
-        if self.arity.contains_key("main") {
-            o.push_str(
-                "\nint main(int argc, char **argv) {\n  vb_init();\n  vb_set_args(argc, argv);\n  vbf_main(0);\n  return 0;\n}\n",
-            );
+        // The entry point is the root module's `main`, which in the flattened
+        // program is spelled `Root.main` (src/load.rs).
+        let entry = format!("{}.main", self.m.name);
+        if self.arity.contains_key(entry.as_str()) {
+            o.push_str(&format!(
+                "\nint main(int argc, char **argv) {{\n  vb_init();\n  vb_set_args(argc, argv);\n  vbf_{}(0);\n  return 0;\n}}\n",
+                cname(&entry)
+            ));
         }
         o
     }
@@ -407,7 +411,7 @@ impl<'a> Gen<'a> {
     }
 
     fn function(&mut self, f: &FunDecl) -> String {
-        let path = format!("{}.{}", f.home, f.name);
+        let path = crate::ast::path(&f.home, &f.name);
         self.cur_fn = f.name.clone();
         self.cur_path = path.clone();
         self.push_scope();
@@ -489,11 +493,17 @@ impl<'a> Gen<'a> {
                 .enumerate()
                 .map(|(i, t)| box_expr(t, &format!("x{}", i)))
                 .collect();
+            // The exported symbol is `Mod_name`: the flattened name already
+            // starts with the module, so the prefix is not added twice.
+            let base = n
+                .strip_prefix(&format!("{}.", self.m.name))
+                .unwrap_or(n)
+                .to_string();
             o.push_str(&format!(
                 "{} {}_{}({}) {{\n  vb_init();\n  VbVal a[{}];\n{}  VbVal r = vbf_{}(a);\n  {}\n}}\n",
                 c_type(&ret),
                 cname(&self.m.name),
-                cname(n),
+                cname(&base),
                 if cargs.is_empty() { "void".to_string() } else { cargs.join(", ") },
                 ar.max(1),
                 boxed.iter().enumerate().map(|(i, b)| format!("  a[{}] = {};\n", i, b)).collect::<String>(),
@@ -1586,10 +1596,12 @@ pub fn header(m: &Module, ck: &Checked) -> String {
             .iter()
             .flat_map(|p| p.refines.iter().map(expr_text))
             .collect();
+        // `n` is the flattened name, `Ledger.mean`; the C symbol is `Ledger_mean`.
+        let base = n.strip_prefix(&format!("{}.", m.name)).unwrap_or(n);
         if !pres.is_empty() {
             o.push_str(&format!(
                 "/* {} — pre: {}   NOT VERIFIED ACROSS THE BOUNDARY */\n",
-                n,
+                base,
                 pres.join(" && ")
             ));
         }
@@ -1602,7 +1614,7 @@ pub fn header(m: &Module, ck: &Checked) -> String {
             "{} {}_{}({});\n",
             c_type(&ret),
             cname(&m.name),
-            cname(n),
+            cname(base),
             if args.is_empty() {
                 "void".into()
             } else {

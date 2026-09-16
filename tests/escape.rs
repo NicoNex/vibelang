@@ -30,8 +30,9 @@ fn emit_c(file: &str, stem: &str) -> String {
     std::fs::read_to_string(out.with_extension("c")).expect("the emitted C")
 }
 
-/// The body of one generated function, so a claim about `vbf_low` cannot be
-/// satisfied by something `vbf_main` happens to contain.
+/// The body of one generated function, named as the flattened program names it
+/// — `Churn_work`, module included — so a claim about one function cannot be
+/// satisfied by something another one happens to contain.
 fn body<'c>(c: &'c str, name: &str) -> &'c str {
     let head = format!("static VbVal vbf_{name}(VbVal *a) {{");
     let start = c
@@ -45,7 +46,7 @@ fn body<'c>(c: &'c str, name: &str) -> &'c str {
 #[test]
 fn a_frame_frees_what_it_allocated_and_nobody_kept() {
     let c = emit_c("examples/churn.vibe", "churn");
-    let work = body(&c, "work");
+    let work = body(&c, "Churn_work");
     assert_eq!(
         work.matches("vb_dispose(").count(),
         2,
@@ -60,7 +61,7 @@ fn a_frame_frees_what_it_allocated_and_nobody_kept() {
 #[test]
 fn handing_a_pointer_to_c_stops_the_free() {
     let c = emit_c("tests/taint_own.vibe", "taint_own");
-    let hand = body(&c, "hand");
+    let hand = body(&c, "TaintOwn_hand");
     assert!(
         !hand.contains("vb_dispose("),
         "C may keep the pointer `hand` gave it:\n{hand}"
@@ -70,13 +71,13 @@ fn handing_a_pointer_to_c_stops_the_free() {
 #[test]
 fn the_taint_reaches_the_caller() {
     let c = emit_c("tests/taint_own.vibe", "taint_own");
-    let top = body(&c, "top");
+    let top = body(&c, "TaintOwn_top");
     assert!(
         !top.contains("vb_dispose("),
         "`top` owns the string C is holding below it:\n{top}"
     );
     // and it stops at values that never reach C
-    let m = body(&c, "main");
+    let m = body(&c, "TaintOwn_main");
     assert!(
         m.contains("vb_dispose("),
         "the taint must not spread to everything:\n{m}"

@@ -165,13 +165,38 @@ impl Parser {
             )),
         }
     }
+    /// A capitalised name, with its module qualifier if it has one. `Json.Value`
+    /// is one name — the same spelling the flattened program uses for it — so
+    /// types, patterns and constructor expressions all read a qualifier without
+    /// any of them knowing what a module is. A lower-case name after the dot is
+    /// a field access and is left alone.
+    fn ctor_name(&mut self) -> (String, Span) {
+        let t = self.cur().clone();
+        let Tok::Ctor(n) = t.tok.clone() else {
+            return (String::new(), t.span);
+        };
+        self.i += 1;
+        if self.cur().is_sym(".") {
+            if let Tok::Ctor(c) = self
+                .toks
+                .get(self.i + 1)
+                .map(|t| t.tok.clone())
+                .unwrap_or(Tok::Eof)
+            {
+                self.i += 2;
+                return (format!("{n}.{c}"), t.span);
+            }
+        }
+        (n, t.span)
+    }
+
     fn ctor(&mut self) -> P<(String, Span)> {
         self.sync();
         let t = self.cur().clone();
         match t.tok {
-            Tok::Ctor(n) => {
-                self.i += 1;
-                Ok((n, t.span))
+            Tok::Ctor(_) => {
+                let (n, sp) = self.ctor_name();
+                Ok((n, sp))
             }
             _ => Err(self.err(
                 "parse.ctor",
@@ -371,8 +396,8 @@ impl Parser {
         }
         self.sync();
         match self.cur().tok.clone() {
-            Tok::Ctor(n) => {
-                self.i += 1;
+            Tok::Ctor(_) => {
+                let (n, _) = self.ctor_name();
                 Ok(Ty::Con(n, vec![]))
             }
             Tok::Name(n) => {
@@ -757,8 +782,8 @@ impl Parser {
                 self.i += 1;
                 Ok(Expr::new(ExprKind::Var(n), span))
             }
-            Tok::Ctor(n) => {
-                self.i += 1;
+            Tok::Ctor(_) => {
+                let (n, _) = self.ctor_name();
                 Ok(Expr::new(ExprKind::Ctor(n), span))
             }
             Tok::Kw("True") => {
@@ -920,8 +945,8 @@ impl Parser {
 
     fn pattern(&mut self) -> P<Pat> {
         self.sync();
-        if let Tok::Ctor(n) = self.cur().tok.clone() {
-            self.i += 1;
+        if let Tok::Ctor(_) = self.cur().tok.clone() {
+            let (n, _) = self.ctor_name();
             let mut args = Vec::new();
             while self.starts_pattern_atom() {
                 args.push(self.pattern_atom()?);
@@ -982,8 +1007,8 @@ impl Parser {
                 self.i += 1;
                 Ok(Pat::Var(n))
             }
-            Tok::Ctor(n) => {
-                self.i += 1;
+            Tok::Ctor(_) => {
+                let (n, _) = self.ctor_name();
                 Ok(Pat::Ctor(n, vec![]))
             }
             Tok::Sym("[") => {

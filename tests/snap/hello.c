@@ -11,10 +11,10 @@ static const VbInfo vbi_OutOfBounds = {"OutOfBounds", 0, 0};
 static const VbInfo vbi_Overflow = {"Overflow", 0, 0};
 static const VbInfo vbi_Some = {"Some", 1, 0};
 
-static VbVal vbf_main(VbVal *a);
+static VbVal vbf_Hello_main(VbVal *a);
 
 #line 3 "hello"
-static VbVal vbf_main(VbVal *a) {
+static VbVal vbf_Hello_main(VbVal *a) {
   (void)a;
   VbVal vbret = vb_unit();
   for (;;) {
@@ -31,6 +31,6 @@ static VbVal vbf_main(VbVal *a) {
 int main(int argc, char **argv) {
   vb_init();
   vb_set_args(argc, argv);
-  vbf_main(0);
+  vbf_Hello_main(0);
   return 0;
 }

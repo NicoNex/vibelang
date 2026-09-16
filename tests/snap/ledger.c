@@ -3,36 +3,36 @@
 #include <stdio.h>
 
 static const VbInfo vb_info_tuple = {"tuple", 0, 0};
-static const char *const vbfl_Tx[] = {"sku", "qty", "price"};
-static const VbInfo vbi_Tx = {"Tx", 3, vbfl_Tx};
-static const VbInfo vbi_Bad = {"Bad", 1, 0};
+static const char *const vbfl_Ledger_Tx[] = {"sku", "qty", "price"};
+static const VbInfo vbi_Ledger_Tx = {"Ledger.Tx", 3, vbfl_Ledger_Tx};
 static const VbInfo vbi_BadParse = {"BadParse", 0, 0};
 static const VbInfo vbi_DivZero = {"DivZero", 0, 0};
 static const VbInfo vbi_Er = {"Er", 1, 0};
+static const VbInfo vbi_Ledger_Bad = {"Ledger.Bad", 1, 0};
+static const VbInfo vbi_Ledger_Num = {"Ledger.Num", 1, 0};
+static const VbInfo vbi_Ledger_Void = {"Ledger.Void", 0, 0};
 static const VbInfo vbi_None = {"None", 0, 0};
-static const VbInfo vbi_Num = {"Num", 1, 0};
 static const VbInfo vbi_Ok = {"Ok", 1, 0};
 static const VbInfo vbi_OutOfBounds = {"OutOfBounds", 0, 0};
 static const VbInfo vbi_Overflow = {"Overflow", 0, 0};
 static const VbInfo vbi_Some = {"Some", 1, 0};
-static const VbInfo vbi_Void = {"Void", 0, 0};
 
-static VbVal vbf_parse(VbVal *a);
-static VbVal vbf_mk(VbVal *a);
-static VbVal vbf_amt(VbVal *a);
-static VbVal vbf_total(VbVal *a);
-static VbVal vbf_mean(VbVal *a);
-static VbVal vbf_top(VbVal *a);
-static VbVal vbf_load(VbVal *a);
-static VbVal vbf_main(VbVal *a);
+static VbVal vbf_Ledger_parse(VbVal *a);
+static VbVal vbf_Ledger_mk(VbVal *a);
+static VbVal vbf_Ledger_amt(VbVal *a);
+static VbVal vbf_Ledger_total(VbVal *a);
+static VbVal vbf_Ledger_mean(VbVal *a);
+static VbVal vbf_Ledger_top(VbVal *a);
+static VbVal vbf_Ledger_load(VbVal *a);
+static VbVal vbf_Ledger_main(VbVal *a);
 
-static VbVal vbw_Bad(VbVal *a) { (void)a; return vb_obj(&vbi_Bad, 0, 1, a[0]); }
 static VbVal vbw_Er(VbVal *a) { (void)a; return vb_obj(&vbi_Er, 1, 1, a[0]); }
-static VbVal vbw_Num(VbVal *a) { (void)a; return vb_obj(&vbi_Num, 1, 1, a[0]); }
+static VbVal vbw_Ledger_Bad(VbVal *a) { (void)a; return vb_obj(&vbi_Ledger_Bad, 0, 1, a[0]); }
+static VbVal vbw_Ledger_Num(VbVal *a) { (void)a; return vb_obj(&vbi_Ledger_Num, 1, 1, a[0]); }
 static VbVal vbw_Ok(VbVal *a) { (void)a; return vb_obj(&vbi_Ok, 0, 1, a[0]); }
 
 #line 10 "ledger"
-static VbVal vbf_parse(VbVal *a) {
+static VbVal vbf_Ledger_parse(VbVal *a) {
   (void)a;
   VbVal v_ln_1 = a[0];
   VbVal vbret = vb_unit();
@@ -49,13 +49,13 @@ static VbVal vbf_parse(VbVal *a) {
         VbVal v_n_7 = vb_field(vb_field(t6, 0), 0);
         VbVal v_v_8 = vb_field(vb_field(t6, 1), 0);
         VbVal t9_a[] = {vb_dup(v_s_3), v_n_7, v_v_8};
-        VbVal t9 = vbf_mk(t9_a);
+        VbVal t9 = vbf_Ledger_mk(t9_a);
         vbret = t9;
         break;
       }
       else if (1) {
         VbVal v___10 = t6;
-        VbVal t11 = vb_apply1(vb_clos(vbw_Num, "Num", 1), vb_dup(v_ln_1));
+        VbVal t11 = vb_apply1(vb_clos(vbw_Ledger_Num, "Ledger.Num", 1), vb_dup(v_ln_1));
         VbVal t12 = vb_apply1(vb_clos(vbw_Er, "Er", 1), t11);
         vbret = t12;
         break;
@@ -64,7 +64,7 @@ static VbVal vbf_parse(VbVal *a) {
     }
     else if (1) {
       VbVal v___13 = t2;
-      VbVal t14 = vb_apply1(vb_clos(vbw_Bad, "Bad", 1), vb_dup(v_ln_1));
+      VbVal t14 = vb_apply1(vb_clos(vbw_Ledger_Bad, "Ledger.Bad", 1), vb_dup(v_ln_1));
       VbVal t15 = vb_apply1(vb_clos(vbw_Er, "Er", 1), t14);
       vbret = t15;
       break;
@@ -75,7 +75,7 @@ static VbVal vbf_parse(VbVal *a) {
 }
 
 #line 19 "ledger"
-static VbVal vbf_mk(VbVal *a) {
+static VbVal vbf_Ledger_mk(VbVal *a) {
   (void)a;
   VbVal v_s_16 = a[0];
   VbVal v_n_17 = a[1];
@@ -89,20 +89,20 @@ static VbVal vbf_mk(VbVal *a) {
     }
     VbVal t20 = t19;
     if (vb_eq(t20, vb_bool(true))) {
-      VbVal t21 = vb_obj(&vbi_Tx, 0, 3, v_s_16, v_n_17, v_v_18);
+      VbVal t21 = vb_obj(&vbi_Ledger_Tx, 0, 3, v_s_16, v_n_17, v_v_18);
       {
         VbVal v_sku_22 = vb_field(t21, 0);
         VbVal v_qty_23 = vb_field(t21, 1);
         VbVal v_price_24 = vb_field(t21, 2);
-        vb_require(vb_as_bool(vb_bool(vb_cmp(v_qty_23, vb_int(0)) > 0)), "Tx.invariant", "qty > 0");
-        vb_require(vb_as_bool(vb_bool(vb_cmp(v_price_24, vb_float(0.0)) > 0)), "Tx.invariant", "price > 0");
+        vb_require(vb_as_bool(vb_bool(vb_cmp(v_qty_23, vb_int(0)) > 0)), "Ledger.Tx.invariant", "qty > 0");
+        vb_require(vb_as_bool(vb_bool(vb_cmp(v_price_24, vb_float(0.0)) > 0)), "Ledger.Tx.invariant", "price > 0");
       }
       VbVal t25 = vb_apply1(vb_clos(vbw_Ok, "Ok", 1), t21);
       vbret = t25;
       break;
     }
     else if (vb_eq(t20, vb_bool(false))) {
-      VbVal t26 = vb_apply1(vb_clos(vbw_Bad, "Bad", 1), v_s_16);
+      VbVal t26 = vb_apply1(vb_clos(vbw_Ledger_Bad, "Ledger.Bad", 1), v_s_16);
       VbVal t27 = vb_apply1(vb_clos(vbw_Er, "Er", 1), t26);
       vbret = t27;
       break;
@@ -113,7 +113,7 @@ static VbVal vbf_mk(VbVal *a) {
 }
 
 #line 25 "ledger"
-static VbVal vbf_amt(VbVal *a) {
+static VbVal vbf_Ledger_amt(VbVal *a) {
   (void)a;
   VbVal v_t_28 = a[0];
   VbVal vbret = vb_unit();
@@ -125,26 +125,26 @@ static VbVal vbf_amt(VbVal *a) {
 }
 
 #line 26 "ledger"
-static VbVal vbf_total(VbVal *a) {
+static VbVal vbf_Ledger_total(VbVal *a) {
   (void)a;
   VbVal v_ts_29 = a[0];
   VbVal vbret = vb_unit();
   for (;;) {
-    vbret = vb_sum(vb_map(vb_clos(vbf_amt, "amt", 1), v_ts_29));
+    vbret = vb_sum(vb_map(vb_clos(vbf_Ledger_amt, "Ledger.amt", 1), v_ts_29));
     break;
   }
   return vbret;
 }
 
 #line 28 "ledger"
-static VbVal vbf_mean(VbVal *a) {
+static VbVal vbf_Ledger_mean(VbVal *a) {
   (void)a;
   VbVal v_ts_30 = a[0];
   vb_require(vb_as_bool(vb_bool(vb_cmp(vb_len(v_ts_30), vb_int(0)) > 0)), "Ledger.mean.pre", "len ts > 0");
   VbVal vbret = vb_unit();
   for (;;) {
     VbVal t31_a[] = {v_ts_30};
-    VbVal t31 = vbf_total(t31_a);
+    VbVal t31 = vbf_Ledger_total(t31_a);
     vbret = vb_div(t31, vb_to_f64(vb_len(v_ts_30)), "Ledger.mean.div");
     break;
   }
@@ -152,20 +152,20 @@ static VbVal vbf_mean(VbVal *a) {
 }
 
 #line 29 "ledger"
-static VbVal vbf_top(VbVal *a) {
+static VbVal vbf_Ledger_top(VbVal *a) {
   (void)a;
   VbVal v_ts_32 = a[0];
   vb_require(vb_as_bool(vb_bool(vb_cmp(vb_len(v_ts_32), vb_int(0)) > 0)), "Ledger.top.pre", "len ts > 0");
   VbVal vbret = vb_unit();
   for (;;) {
-    vbret = vb_max_by(vb_clos(vbf_amt, "amt", 1), v_ts_32, "Ledger.top.max_by");
+    vbret = vb_max_by(vb_clos(vbf_Ledger_amt, "Ledger.amt", 1), v_ts_32, "Ledger.top.max_by");
     break;
   }
   return vbret;
 }
 
 #line 31 "ledger"
-static VbVal vbf_load(VbVal *a) {
+static VbVal vbf_Ledger_load(VbVal *a) {
   (void)a;
   VbVal v_p_33 = a[0];
   VbVal vbret = vb_unit();
@@ -174,7 +174,7 @@ static VbVal vbf_load(VbVal *a) {
     VbVal v_txt_34 = vb_read(v_p_33);
     #line 33 "ledger"
     VbVal t35 = vb_lines(v_txt_34);
-    VbVal t36 = vb_map(vb_clos(vbf_parse, "parse", 1), t35);
+    VbVal t36 = vb_map(vb_clos(vbf_Ledger_parse, "Ledger.parse", 1), t35);
     vb_dispose(t35);
     VbVal t37 = vb_seq(t36);
     if (vb_tag(t37) == 1) {
@@ -185,7 +185,7 @@ static VbVal vbf_load(VbVal *a) {
       break;
     }
     else if (vb_tag(t37) == 0 && vb_as_vec(vb_field(t37, 0))->n == 0) {
-      VbVal t40 = vb_apply1(vb_clos(vbw_Er, "Er", 1), vb_obj(&vbi_Void, 2, 0));
+      VbVal t40 = vb_apply1(vb_clos(vbw_Er, "Er", 1), vb_obj(&vbi_Ledger_Void, 2, 0));
       vb_dispose(v_txt_34);
       vbret = t40;
       break;
@@ -203,14 +203,14 @@ static VbVal vbf_load(VbVal *a) {
 }
 
 #line 39 "ledger"
-static VbVal vbf_main(VbVal *a) {
+static VbVal vbf_Ledger_main(VbVal *a) {
   (void)a;
   VbVal vbret = vb_unit();
   for (;;) {
     #line 40 "ledger"
     VbVal t43 = vb_strz("ledger.csv");
     VbVal t44_a[] = {t43};
-    VbVal t44 = vbf_load(t44_a);
+    VbVal t44 = vbf_Ledger_load(t44_a);
     vb_dispose(t43);
     VbVal v_r_45 = t44;
     #line 41 "ledger"
@@ -229,13 +229,13 @@ static VbVal vbf_main(VbVal *a) {
       VbVal t51 = vb_strz("n={} tot={} avg={} top={}");
       VbVal t52 = vb_len(v_ts_50);
       VbVal t53_a[] = {v_ts_50};
-      VbVal t53 = vbf_total(t53_a);
+      VbVal t53 = vbf_Ledger_total(t53_a);
       VbVal t54 = t53;
       VbVal t55_a[] = {v_ts_50};
-      VbVal t55 = vbf_mean(t55_a);
+      VbVal t55 = vbf_Ledger_mean(t55_a);
       VbVal t56 = t55;
       VbVal t57_a[] = {v_ts_50};
-      VbVal t57 = vbf_top(t57_a);
+      VbVal t57 = vbf_Ledger_top(t57_a);
       VbVal t58 = vb_fmt(t51, 4, t52, t54, t56, vb_field(t57, 0));
       vb_dispose(t51);
       vb_dispose(t52);
@@ -259,20 +259,20 @@ double Ledger_mean(VbVal x0) {
   vb_init();
   VbVal a[1];
   a[0] = x0;
-  VbVal r = vbf_mean(a);
+  VbVal r = vbf_Ledger_mean(a);
   return (double)vb_as_float(r);
 }
 double Ledger_total(VbVal x0) {
   vb_init();
   VbVal a[1];
   a[0] = x0;
-  VbVal r = vbf_total(a);
+  VbVal r = vbf_Ledger_total(a);
   return (double)vb_as_float(r);
 }
 
 int main(int argc, char **argv) {
   vb_init();
   vb_set_args(argc, argv);
-  vbf_main(0);
+  vbf_Ledger_main(0);
   return 0;
 }
