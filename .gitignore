@@ -26,3 +26,5 @@
 /tests/field_share
 /examples/nested
 /tests/dict
+/lib/check/*
+!/lib/check/*.vibe
