@@ -132,11 +132,11 @@ double Ledger_mean(VbVal x0);
 
 ## Status
 
-**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, C emission and its runtime, `ext c` / `exp c`, multi-file programs, four projection views, the whole CLI above. 130 tests, green.
+**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, bit operations, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, four projection views, the whole CLI above. 143 tests, green.
 
 **Partial** — refinements on prelude builtins are hardcoded; a proof about a float is a proof about a mathematical real; drops are shallow, so nested structures leak their interior; every closure is on the heap; values are dynamically tagged, so any performance claim today is a claim about a boxed interpreter.
 
-**Not yet** — no map, no bitwise operators, no `ord`; `dup` copies a `Str` and nothing else; a native backend.
+**Not yet** — no map and no set, so nothing associates a key with a value; `dup` copies a `Str` and nothing else, so two references to a `Vec` mean restructuring; record fields and `ext c` symbols are the one namespace still global; a native backend.
 
 The full list, with a file and a line for every item, is [`docs/remaining-work.md`](docs/remaining-work.md). Moving a line from one list to the next is how this section gets edited.
 

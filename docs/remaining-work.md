@@ -14,11 +14,48 @@ code is, so the first step is never a search.
 
 ---
 
+## Where the compiler is today
+
+2026-09-16. `cargo test -- --test-threads=1`: 143 tests across 12 binaries,
+green. `cargo clippy --all-targets -- -D warnings`: clean.
+
+A `.vibe` file goes to a native executable through C. What stands between the
+two: Hindley–Milner inference with ADTs, records and exhaustive matching;
+effects (`E!`); affine ownership with implicit drop and no allocator to rewind;
+termination checking for the pure fragment; refinement obligations discharged
+with z3 and cached; `ext c` / `exp c` both ways; multi-file programs with one
+namespace per module; the projections, `vibe fmt`, and the agent surface of
+§13.3 (`patch`, `deps`, `proof`).
+
+Shipped since this list was first written, each with the item it closed:
+
+- **Implicit drop, and the bump allocator deleted** (item 5). Every value is
+  freed where its owner dies. `examples/loop.vibe` — two million iterations, an
+  allocation in each, nothing kept — is flat at 1.4 MB where the bump allocator
+  grew to 197 MB. Every example runs clean under `-fsanitize=address,undefined`.
+- **A module is a namespace** (§16.3). A declared name carries the module that
+  declared it, so two modules may declare `parse`, a module may declare `take`
+  against the prelude, types and constructors qualify, and `VIBE_PATH` is where
+  a library lives. Still no `import`, no aliases, no visibility.
+- **Bit operations** — `band`, `bor`, `bxor`, `bnot`, `shl`, `shr`, `ord` — as
+  prelude functions rather than operators, because `&` and `|` are taken and a
+  call has no precedence to get wrong.
+- **`vibe fmt`**, which writes the canonical form back to the file; `--check`
+  reports and fails instead.
+- **A measure may be a lexicographic tuple** (`%(n, k)`), so a mutually
+  recursive group whose shrinking component changes has something to write.
+- **A generic payload keeps the invariant of what it holds**, so `Ok t` on a
+  `Res Err Tx` discharges what `Tx` declares.
+- **A pure function can no longer diverge through a higher-order call.** A
+  recursive name used as a value is an edge in the call graph.
+
+---
+
 ## Medium
 
 ### 1. A drop is shallow, and what may be shared is not freed at all
 
-Done: the bump allocator is gone and every value is freed where its owner dies
+The bump allocator is gone and every value is freed where its owner dies
 ([`static-drop-roadmap.md`](static-drop-roadmap.md), all nine tasks). What is
 left is the two deliberate retreats that made it safe.
 
@@ -58,13 +95,11 @@ audited as a whole.
 
 ## Large, with plans already written
 
-### 5. Implicit drop — done
+### 5. Deep drops, and a value that may alias
 
-[`static-drop-roadmap.md`](static-drop-roadmap.md) is executed end to end. The
-numbers it was written for: `examples/loop.vibe` — two million iterations, an
-allocation in each, nothing kept — is flat at 1.4 MB where the bump allocator
-grew to 197 MB, and `examples/churn.vibe` is unchanged at 1.5 MB. Every example
-runs clean under `-fsanitize=address,undefined`.
+See item 1: the two retreats that made implicit drop safe are the work that is
+left, and both come back the same way — knowing, per value, that nothing else
+points at it.
 
 ### 6. Cranelift backend → [`backend-roadmap.md`](backend-roadmap.md)
 
@@ -176,9 +211,6 @@ search path).
 
 - **No map, no set, no dictionary.** Nothing in `PRELUDE_SIGS` associates a key
   with a value. It needs a runtime type, not a library written in Vibelang.
-- **No bitwise operators.** `SYMBOLS` in `src/lexer.rs` has no `|`, `^`, `<<`
-  or `>>` — `&` is the borrow sigil — and no `ord : Char -> U32`. Hashing,
-  binary parsing and checksums have to descend into `ext c`.
 - **Copying an aggregate has no answer.** `dup` is `&Str -> Str`. With affine
   use, two references to a `Vec` or a record mean restructuring the code.
   Deep copy, shared immutable value, or a diagnostic that stops offering `dup`
