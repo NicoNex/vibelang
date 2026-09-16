@@ -98,3 +98,19 @@ fn a_mutual_group_may_use_a_lexicographic_measure() {
     let (ok, out) = check("tests/total_lex.vibe");
     assert!(ok, "a lexicographic measure must be accepted:\n{out}");
 }
+
+/// Spec §6.1. `map loopy` is a call: a recursive name used as a value is an
+/// edge in the call graph, or a pure function could diverge unnoticed and
+/// every proof that rests on purity would rest on nothing.
+#[test]
+fn recursion_through_a_higher_order_call_still_needs_a_measure() {
+    let (ok, out) = check("tests/total_value.vibe");
+    assert!(
+        !ok,
+        "`loopy` recurses through `map` and never returns:\n{out}"
+    );
+    assert!(
+        out.contains("total.no_measure"),
+        "expected total.no_measure, got:\n{out}"
+    );
+}

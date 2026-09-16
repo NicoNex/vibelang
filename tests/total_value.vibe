@@ -1,0 +1,9 @@
+mod TotalValue
+
+;; `loopy` never returns: the recursive call is hidden inside `map`, which
+;; takes it as a value. A pure function has to prove it terminates (§6.1), and
+;; a call with unknown arguments cannot show any measure decreasing.
+loopy (n:U64) : U64 = sum &(map loopy &(single n))
+
+main : E! Unit =
+  out (show (loopy 1))

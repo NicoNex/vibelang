@@ -126,6 +126,7 @@ fn the_whole_corpus_checks() {
                 "refine_bad.vibe",
                 "total_growing.vibe",
                 "total_no_measure.vibe",
+                "total_value.vibe",
                 "total_arena.vibe",
                 "diverge.vibe",
                 "ffi_bad.vibe",

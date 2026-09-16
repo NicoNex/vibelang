@@ -188,66 +188,77 @@ fn param_names(f: &FunDecl) -> Vec<String> {
         .collect()
 }
 
-/// Direct calls to module functions. ponytail: a recursive name used as a value
-/// (`map f xs`) is not an edge, so recursion through higher-order code is not
-/// seen. Upgrade path: treat any occurrence of the name as an edge with unknown
-/// arguments.
+/// Every way this body can reach a module function: a direct call, with its
+/// arguments, and a mention of the name as a *value*, with none.
+///
+/// The second kind is what `map f xs` does, and it is an edge for the same
+/// reason the first is — `sum &(map loopy &(single n))` recurses. Its arguments
+/// are unknown, so no measure can be shown to decrease at it, and a pure
+/// function that recurses this way is rejected until it stops. That is the
+/// conservative direction, and purity is what every static guarantee in the
+/// language rests on (§6.1).
 fn calls_in(body: &Expr, index: &HashMap<&str, usize>) -> Vec<Call> {
     let mut out = Vec::new();
-    walk(body, &mut |e| {
-        if let ExprKind::App(h, args) = &e.kind {
-            if let ExprKind::Var(name) = &h.kind {
-                if let Some(&i) = index.get(name.as_str()) {
-                    out.push(Call {
-                        callee: i,
-                        args: args.clone(),
-                        span: e.span,
-                    });
-                }
-            }
-        }
-    });
+    scan(body, index, &mut out);
     out
 }
 
-fn walk(e: &Expr, f: &mut dyn FnMut(&Expr)) {
-    f(e);
+fn scan(e: &Expr, index: &HashMap<&str, usize>, out: &mut Vec<Call>) {
+    if let ExprKind::App(h, args) = &e.kind {
+        if let ExprKind::Var(name) = &h.kind {
+            if let Some(&i) = index.get(name.as_str()) {
+                // The head of a saturated call, with its arguments. Counting it
+                // again below as a bare mention would be the same call twice,
+                // once with the arguments and once without.
+                out.push(Call {
+                    callee: i,
+                    args: args.clone(),
+                    span: e.span,
+                });
+                for a in args {
+                    scan(a, index, out);
+                }
+                return;
+            }
+        }
+    }
+    if let ExprKind::Var(name) = &e.kind {
+        if let Some(&i) = index.get(name.as_str()) {
+            out.push(Call {
+                callee: i,
+                args: Vec::new(),
+                span: e.span,
+            });
+        }
+    }
+    children(e, &mut |c| scan(c, index, out));
+}
+
+/// The immediate sub-expressions, in evaluation order.
+fn children(e: &Expr, f: &mut dyn FnMut(&Expr)) {
+    use ExprKind::*;
     match &e.kind {
-        ExprKind::App(h, args) => {
-            walk(h, f);
-            for a in args {
-                walk(a, f);
-            }
+        App(h, args) => {
+            f(h);
+            args.iter().for_each(&mut *f);
         }
-        ExprKind::Binop(_, a, b) | ExprKind::Bind(_, a, b) | ExprKind::Let(_, a, b) => {
-            walk(a, f);
-            walk(b, f);
+        Binop(_, a, b) | Bind(_, a, b) | Let(_, a, b) => {
+            f(a);
+            f(b);
         }
-        ExprKind::Neg(a) | ExprKind::Not(a) | ExprKind::Borrow(a) | ExprKind::Field(a, _) => {
-            walk(a, f)
+        Neg(a) | Not(a) | Borrow(a) | Field(a, _) | Lambda(_, a) | Arena(_, a) => f(a),
+        Match(s, arms) => {
+            f(s);
+            arms.iter().for_each(|(_, b)| f(b));
         }
-        ExprKind::Lambda(_, b) => walk(b, f),
-        ExprKind::Match(s, arms) => {
-            walk(s, f);
-            for (_, b) in arms {
-                walk(b, f);
-            }
-        }
-        ExprKind::Record(base, fields) => {
+        Record(base, fields) => {
             if let Some(b) = base {
-                walk(b, f);
+                f(b);
             }
-            for (_, v) in fields {
-                walk(v, f);
-            }
+            fields.iter().for_each(|(_, v)| f(v));
         }
-        ExprKind::Tuple(xs) | ExprKind::List(xs) => {
-            for x in xs {
-                walk(x, f);
-            }
-        }
-        ExprKind::Arena(_, b) => walk(b, f),
-        _ => {}
+        Tuple(xs) | List(xs) => xs.iter().for_each(f),
+        Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Var(_) | Ctor(_) => {}
     }
 }
 

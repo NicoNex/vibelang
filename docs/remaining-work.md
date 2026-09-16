@@ -148,6 +148,11 @@ Carried from §16, with what has changed since:
   signature in `PRELUDE_SIGS` is the fix.
 - The integration tests share a build directory and race when run in parallel;
   `cargo test -- --test-threads=1` is the reliable invocation, and CI pins it.
+- A recursive name used as a *value* is an edge in the totality call graph, so
+  `sum &(map loopy &(single n))` is rejected: the call has unknown arguments and
+  no measure can be shown to decrease at it. The conservative direction — a
+  terminating program written that way is rejected too, and the answer is to
+  call the function rather than pass it.
 - `vibe deps` reports callees across module boundaries but callers (`<-`) only
   within the root module, because that direction would mean walking every unit.
 - An `ext c` refinement cannot name a parameter, because an `ext` signature is a
