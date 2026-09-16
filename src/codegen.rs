@@ -27,7 +27,6 @@ pub struct Gen<'a> {
     cur_path: String,
     /// `{r with ...}` sites where `r` is uniquely owned (spec §4.3).
     inplace: HashSet<(usize, usize, usize)>,
-    releasable: HashSet<String>,
     /// Where each owned value dies, keyed by the span the free attaches to
     /// (docs/static-drop-roadmap.md).
     drops: HashMap<(usize, usize, usize), Vec<crate::own::DropSite>>,
@@ -162,7 +161,6 @@ pub fn generate(m: &Module, ck: &Checked, file: &str) -> Result<String, Vec<Diag
         cur_params: Vec::new(),
         cur_path: String::new(),
         inplace: crate::own::inplace_updates(m, ck),
-        releasable: crate::escape::releasable(m, ck),
         pending: Vec::new(),
         drops: crate::own::drop_points(m, ck).into_iter().fold(
             HashMap::new(),
@@ -455,24 +453,14 @@ impl<'a> Gen<'a> {
         }
         self.pop_scope();
 
-        // Nothing the body allocates outlives it unless it escapes, and the
-        // only escape the runtime cannot see is a pointer handed to C, which
-        // `escape::releasable` has already ruled out (spec §4.6).
-        let (mark, release) = if self.releasable.contains(&f.name) {
-            ("  VbMark vbm = vb_mark();\n", "  vb_release(vbm, vbret);\n")
-        } else {
-            ("", "")
-        };
         format!(
-            "{}static VbVal vbf_{}(VbVal *a) {{\n  (void)a;\n{}{}{}  VbVal vbret = vb_unit();\n  for (;;) {{\n{}  }}\n{}{}  return vbret;\n}}\n\n",
+            "{}static VbVal vbf_{}(VbVal *a) {{\n  (void)a;\n{}{}  VbVal vbret = vb_unit();\n  for (;;) {{\n{}  }}\n{}  return vbret;\n}}\n\n",
             self.line(f.span),
             cname(&f.name),
-            mark,
             head,
             pre,
             indent(&body, 4),
             epilogue,
-            release
         )
     }
 
@@ -730,14 +718,12 @@ impl<'a> Gen<'a> {
             ExprKind::Bool(b) => format!("vb_bool({})", if *b { "true" } else { "false" }),
             ExprKind::Unit => "vb_unit()".to_string(),
             ExprKind::Borrow(inner) => self.ex(inner, out),
-            ExprKind::Arena(_, body) => {
-                let d = self.fresh();
-                out.push_str(&format!("VbMark {}_m = vb_mark();\n", d));
-                let v = self.ex(body, out);
-                out.push_str(&format!("VbVal {} = {};\n", d, v));
-                out.push_str(&format!("vb_release({}_m, {});\n", d, d));
-                d
-            }
+            // `arena a in e` is a block and nothing more. Its other role —
+            // the manual workaround for a loop that grows — is what implicit
+            // drop removed; §4.5's own reason for it, structures linear
+            // ownership does not express, is a spec question the roadmap
+            // deliberately leaves open (Open decisions, 3).
+            ExprKind::Arena(_, body) => self.ex(body, out),
             ExprKind::Neg(x) => {
                 let v = self.ex(x, out);
                 format!("vb_neg({})", v)

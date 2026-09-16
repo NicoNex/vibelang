@@ -111,7 +111,7 @@ The specification describes more than the compiler currently proves. Every proje
 
 - **Refinement types** — a type carrying a condition it has to satisfy, so `mean (ts:&Vec Tx, len ts>0)` reads "a vector of transactions, and it is not empty". They parse and type-check as boolean expressions in the parameter scope, and are **asserted at run time** unless you ask for proof.
 - **Refinement obligations** are generated for division, indexing, overflow, record invariants and call-site preconditions, and `vibe check --prove` discharges them with `z3` — an SMT solver, which is a program that decides whether a set of arithmetic and logical facts can all hold at once, and therefore whether a condition already follows from what is known. Without `--prove`, `vibe check` only counts what is left open. A constructor pattern carries its payload into the solver, so an earlier `Ok [] ->` arm is what discharges a later `len ts > 0` — no explicit check, which is the point of the reference program.
-- **Memory.** Allocation is a bump allocator — a pointer that walks forward and never back — and most of what it hands out now comes back on its own ([Memory](#memory) explains how). The half §4.6 asks for and does not get is the free one: a closure that cannot outlive the call that made it should live on the stack, and today every closure is on the heap. Nor is there a full borrow checker — affine use is checked, the aliasing rules beyond it are not.
+- **Memory.** Allocation is `malloc` and every value is freed at the point its owner dies, computed by the ownership checker ([Memory](#memory) explains how). The half §4.6 asks for and does not get is the free one: a closure that cannot outlive the call that made it should live on the stack, and today every closure is on the heap. Nor is there a full borrow checker — affine use is checked, the aliasing rules beyond it are not, and where a value may be an alias the compiler declines to free it and counts that it did.
 
 ---
 
@@ -186,7 +186,7 @@ Honest state of `main` today. Moving a line from one list to the next is the int
 - refinement obligations generated for §7.2 and discharged with `vibe check --prove` (needs `z3` on PATH), with proved obligations cached in a sibling `.vibe-proofs` by the hash of the question asked, and a per-obligation solver budget (`--prove-timeout=`, 5 seconds by default) that reports giving up instead of pretending to refute (§16.5)
 - the projection views: `vibe view` (canonical form, byte-identical on every `.vibe` file in the repository), `--sig-only`, `--explicit`, `--flow`. Comments are anchored to tokens, so reformatting a file laid out any other way keeps them
 - escape analysis for closures — deciding which values outlive the call that built them: a closure whose value reaches the result owns its captures, one consumed during the call reads them
-- `arena a in ...` blocks: a named region you allocate into and discard whole, which releases everything it allocated when it ends
+- `arena a in ...` blocks: a named region, today a plain block — implicit drop took over the job it was doing, and §4.5's own reason for it is an open question
 - automatic release per frame: a function that cannot hand a pointer to C releases everything it allocated when it returns, and the runtime cancels the release when the result is itself heap-allocated
 - refinements of values bound by a constructor pattern: an arm learns the constructor tag, the payload's length, and the payload's record invariant
 - multi-file programs: `Money.cents` is the whole import system, resolved by loading `money.vibe` next to the file that names it, with a flat namespace and a clash reported rather than shadowed (§9)
@@ -377,21 +377,19 @@ This does not scale past a small project, and the spec says so itself. It is the
 
 ## Memory
 
-Allocation is a bump allocator. Freeing is not reference counting and not a garbage collector; it is two questions about whether anything a frame allocated got out of it.
+Allocation is `malloc`. Freeing is not reference counting and not a garbage collector: the ownership checker already computes where each value stops being its scope's, and every one of those points is a `free`. At the end of the scope that bound it, at the end of the arm that still held it, on the back edge of a loop before the parameter is overwritten, and — for a value no name ever held — when the call it was lent to returns.
 
-The first is asked by the runtime, dynamically and for free: a frame refuses to release when its own result is a string, object, vector or closure, because that value is exactly what escaped. The second is asked statically, and there is only one thing to ask, because Vibelang has no globals and no mutation of borrowed values: *did this frame hand a pointer to C?* C may keep it for as long as it likes. That taint travels to callers, since the release happens at the outermost frame.
-
-Everything else releases on return. `examples/churn.vibe` builds and discards a five-thousand-element vector two thousand times:
+`examples/loop.vibe` is the shape that has no other answer: two million iterations, an allocation in each, nothing kept, and a recursive call that is compiled to a `continue`, so there is no frame exit to free anything at.
 
 ```console
-$ /usr/bin/time -l ./churn
-10000000
-        1556480  maximum resident set size
+$ /usr/bin/time -l ./loop
+4000000
+        1458176  maximum resident set size
 ```
 
-The same program with the release suppressed peaks at 325 MB. The number that matters is not the ratio, it is that it is flat: the loop no longer grows.
+`examples/churn.vibe` peaks at 1,572,864 bytes, which is where it was under the bump allocator it replaced.
 
-The ceiling is whole-function granularity. A tail-recursive loop marks once and releases once, so its own iterations still accumulate until it returns; `arena a in ...` is the manual override for that case, and a mark per iteration is the upgrade path.
+What is *not* freed is anything that may be someone else's. A prelude function can return a pointer into its argument, a closure a callee keeps outlives the frame that built it, and a pointer given to C is C's for as long as it likes. Each of those suppresses the drop rather than risking the double free, `vibe view --drops` prints the table and counts the suppressions, and that count is the distance between what gets freed and what could be. The drop itself is shallow — a vector's spine, not its elements — because the structural operations share elements between vectors.
 
 ---
 
@@ -444,7 +442,7 @@ The exported signature currently passes the uniform runtime value `VbVal`. The s
 - [`vibelang-spec.md`](vibelang-spec.md) — the normative specification: goals and non-goals (§0), normative principles (§1), grammar and canonicity rules (§3), ownership (§4), effects (§5), totality (§6), refinements (§7), C interop (§10), implementation phases (§15). Also in Italian: [`vibelang-spec.it.md`](vibelang-spec.it.md).
 - [`docs/remaining-work.md`](docs/remaining-work.md) — what is not done, in one place: the spec's open questions, the gaps the Status list names, and the defects found while building the rest. The list to read first.
 - [`docs/backend-roadmap.md`](docs/backend-roadmap.md) — the plan for a Cranelift backend beside the C one, so a pure Vibelang program needs no C toolchain. C is not deprecated by it: `exp c` headers and `--emit-c` are the reason it stays.
-- [`docs/static-drop-roadmap.md`](docs/static-drop-roadmap.md) — the plan for deleting the bump allocator. The ownership checker already knows where every value dies; Static Drop is the work of emitting that knowledge instead of discarding it.
+- [`docs/static-drop-roadmap.md`](docs/static-drop-roadmap.md) — the plan that deleted the bump allocator, with what each task cost and what it measured.
 - [`README.it.md`](README.it.md) — this page in Italian.
 - `examples/` — the reference program and a hello world. `tests/` — the end-to-end suite, which is also the most reliable description of what the compiler actually does.
 

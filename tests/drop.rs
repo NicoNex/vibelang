@@ -86,11 +86,11 @@ fn snapshot(stem: &str) -> String {
     std::fs::read_to_string(&p).unwrap_or_else(|_| panic!("no snapshot at {p}"))
 }
 
-/// The frontend knows where every value dies and the backend still does not act
-/// on it. Update these snapshots in Task 8 of docs/static-drop-roadmap.md,
-/// deliberately, and never to make a test pass.
+/// The emitted C, byte for byte. It is where the drops are visible, and where a
+/// change to any of them shows up as a diff a human has to approve. Update
+/// these snapshots deliberately, never to make a test pass.
 #[test]
-fn drop_points_change_no_emitted_c_yet() {
+fn the_emitted_c_is_what_the_snapshots_say() {
     for (file, stem) in [
         ("examples/churn.vibe", "churn"),
         ("examples/ledger.vibe", "ledger"),
@@ -99,7 +99,7 @@ fn drop_points_change_no_emitted_c_yet() {
         assert_eq!(
             emit_c(file, stem),
             snapshot(stem),
-            "codegen must not move yet: {file}"
+            "the generated C moved: {file}"
         );
     }
 }
@@ -149,9 +149,9 @@ fn peak_rss(bin: &std::path::Path) -> u64 {
 fn a_loop_that_keeps_nothing_does_not_grow() {
     let dir = std::env::temp_dir().join("vibe-drop-tests");
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let bin = dir.join("loop-exact");
+    let bin = dir.join("loop");
     let o = Command::new(VIBE)
-        .args(["build", "--alloc=exact", "examples/loop.vibe", "-o"])
+        .args(["build", "examples/loop.vibe", "-o"])
         .arg(&bin)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()

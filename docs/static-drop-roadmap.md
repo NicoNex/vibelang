@@ -735,15 +735,25 @@ Do this only once Task 8 has been the default for long enough to trust, and only
 - Modify: `runtime/vibert.c`, `runtime/vibert.h`, `src/codegen.rs`, `src/escape.rs`
 - Modify: `tests/escape.rs`, `README.md`
 
-- [ ] **Step 1: Make the exact path the default and delete the flag.**
-- [ ] **Step 2: Delete `vb_mark`, `vb_release`, `VbMark`, and the chunk list.**
-- [ ] **Step 3: Delete the mark/release bracket in `src/codegen.rs:335` and the `Arena` lowering at `src/codegen.rs:550`** — see "Open decisions" for what happens to the `arena` *construct*, which is a spec question and not a codegen one.
-- [ ] **Step 4: Rewrite `tests/escape.rs`.** Every assertion in it is about `vb_mark()` and `vb_release(vbm, vbret)` appearing or not appearing in a named function body. Those strings will not exist. The tests are not obsolete — the questions they ask about the C boundary still matter — but they must be rewritten against drop emission. Expect this to be the most annoying hour in the plan, and do not skip it by deleting the file.
-- [ ] **Step 5: `src/escape.rs` loses its job as a memory mechanism but keeps its question.** Whether a pointer was handed to C still decides whether *we* may free it. Fold the taint into drop suppression rather than deleting the module.
-- [ ] **Step 6: Update `README.md`** — the *Memory* section, the `churn` figures, the "Designed, not yet enforced" entry, and the Status lists. Move lines between lists rather than rewriting the section, as that section asks.
-- [ ] **Step 7: Commit.**
+- [x] **Step 1: Make the exact path the default and delete the flag.**
+- [x] **Step 2: Delete `vb_mark`, `vb_release`, `VbMark`, and the chunk list.**
+- [x] **Step 3: Delete the mark/release bracket in `src/codegen.rs:335` and the `Arena` lowering at `src/codegen.rs:550`** — see "Open decisions" for what happens to the `arena` *construct*, which is a spec question and not a codegen one.
+- [x] **Step 4: Rewrite `tests/escape.rs`.** Every assertion in it is about `vb_mark()` and `vb_release(vbm, vbret)` appearing or not appearing in a named function body. Those strings will not exist. The tests are not obsolete — the questions they ask about the C boundary still matter — but they must be rewritten against drop emission. Expect this to be the most annoying hour in the plan, and do not skip it by deleting the file.
+- [x] **Step 5: `src/escape.rs` loses its job as a memory mechanism but keeps its question.** Whether a pointer was handed to C still decides whether *we* may free it. Fold the taint into drop suppression rather than deleting the module.
+- [x] **Step 6: Update `README.md`** — the *Memory* section, the `churn` figures, the "Designed, not yet enforced" entry, and the Status lists. Move lines between lists rather than rewriting the section, as that section asks.
+- [x] **Step 7: Commit.**
 
 ---
+
+Two notes from doing it:
+
+- The `arena` *keyword* stays and lowers to a plain block, as Open decision 3
+  says. `tests/arena.vibe` still computes 1000 and its generated C now frees
+  value by value instead of rewinding a region.
+- `src/escape.rs` kept its question and lost its old answer. `own.rs` reads the
+  taint and refuses to place a drop on anything a call that can reach C was
+  given; `tests/escape.rs` is rewritten against that, with `tests/taint_own.vibe`
+  as the fixture where the frame owns the string C is holding.
 
 ## The Cranelift backend
 

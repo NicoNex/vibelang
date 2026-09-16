@@ -87,6 +87,19 @@ type Analysis = (
 
 fn run(m: &Module, ck: &Checked) -> Analysis {
     let sigs = borrowed_params(m);
+    // `escape::releasable` answers "may this frame free in bulk"; with drops
+    // the same question is per value, and the answer it gives — this call may
+    // put a pointer somewhere we cannot see — is the one that still matters.
+    let releasable = crate::escape::releasable(m, ck);
+    let reaches_c: HashSet<String> = m
+        .exts()
+        .flat_map(|e| e.sigs.iter().map(|s| s.name.clone()))
+        .chain(
+            m.funs()
+                .filter(|f| !releasable.contains(&f.name))
+                .map(|f| f.name.clone()),
+        )
+        .collect();
     let mut out = Vec::new();
     let mut inplace = HashSet::new();
     let mut drops = Vec::new();
@@ -150,10 +163,7 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             sigs: &sigs,
             escaping,
             leaves,
-            exts: m
-                .exts()
-                .flat_map(|e| e.sigs.iter().map(|s| s.name.clone()))
-                .collect(),
+            exts: reaches_c.clone(),
             fun: f.name.clone(),
             arity: f.params.iter().map(|p| p.names.len()).sum(),
             shared: borrows.iter().map(|b| (*b).to_string()).collect(),
@@ -373,8 +383,10 @@ struct State<'a> {
     /// How many drops that bit suppressed: the distance between what is freed
     /// and what could be.
     suppressed: usize,
-    /// `ext c` names. C may keep a pointer for as long as it likes, so nothing
-    /// lent to one is freed when the call returns (spec §10.1).
+    /// Callees that may hand a pointer to C — an `ext c` symbol, or a function
+    /// that reaches one (`escape::releasable`). C keeps what it likes for as
+    /// long as it likes, so nothing this frame lent to such a call is freed
+    /// here (spec §4.6, §10.1).
     exts: HashSet<String>,
     /// This function's name and how many arguments a saturated call takes: a
     /// call matching both is the back edge codegen compiles to `continue`.
@@ -584,6 +596,13 @@ impl State<'_> {
                     // keeps the value alive past its own return, and so does C.
                     let lends_onward = matches!(&h.kind, Var(n)
                         if PRELUDE_SHARES.contains(&n.as_str()) || self.exts.contains(n));
+                    // What went to C is C's for as long as it likes: no name
+                    // mentioned in that argument is this frame's to free.
+                    if matches!(&h.kind, Var(n) if self.exts.contains(n)) {
+                        let mut given = HashSet::new();
+                        names_in(a, &mut given);
+                        self.shared.extend(given);
+                    }
                     if m == Mode::Borrow && !lends_onward {
                         let inner = match &a.kind {
                             Borrow(x) => x,

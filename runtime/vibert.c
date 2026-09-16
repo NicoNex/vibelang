@@ -7,26 +7,14 @@
 #include <string.h>
 
 /* ------------------------------------------------------------ allocator
- * Two paths, selected at compile time.
+ * calloc and free. Every value is freed at the point its owner dies, which the
+ * compiler computes and emits as `vb_dispose` (spec 4.2,
+ * docs/static-drop-roadmap.md); there is no region, no mark, nothing rewound in
+ * bulk, and nothing that survives to exit because the program stopped.
  *
- * Default: a bump allocator. Chunks are released only in bulk, at the end of an
- * `arena` block (spec 4.5); outside an arena nothing is freed before exit.
- * ponytail: release is skipped when the block's result is heap-allocated,
- * because that value outlives the arena. Making that case an error needs the
- * escape analysis of spec 4.6.
- *
- * -DVB_EXACT_DROP (vibe build --alloc=exact): calloc/free, so one object can be
- * freed on its own. That is the allocator Static Drop needs and nothing else
- * changes: every constructor already allocates through vb_alloc, and vb_mark /
- * vb_release become nothing, because with exact drops there is no region to
- * rewind. Until the drops are emitted, a program built this way leaks
- * everything (docs/static-drop-roadmap.md, Task 7).
- *
- * malloc is the honest first move: it is in libc, it adds no dependency, and it
- * makes the plan measurable. A size-classed free list is what a measurement
- * asks for, or does not. */
-
-#ifdef VB_EXACT_DROP
+ * ponytail: malloc is the whole allocator. Size classes and a free list are
+ * what a measurement asks for, and the measurement so far — examples/loop.vibe
+ * flat at 1.4 MB over two million iterations — has not asked. */
 
 void vb_init(void) {}
 
@@ -37,71 +25,6 @@ void *vb_alloc(size_t n) {
 }
 
 void vb_free(void *p) { free(p); }
-
-/* No region to mark, and nothing to rewind to. */
-VbMark vb_mark(void) { VbMark m; m.chunk = NULL; m.used = 0; return m; }
-void vb_release(VbMark m, VbVal result) { (void)m; (void)result; }
-
-#else
-
-typedef struct VbChunk { struct VbChunk *next; size_t used, cap; char data[]; } VbChunk;
-static VbChunk *g_chunk = NULL;
-
-#define VB_CHUNK_MIN (1u << 20)
-
-void vb_init(void) {
-  if (!g_chunk) {
-    g_chunk = malloc(sizeof(VbChunk) + VB_CHUNK_MIN);
-    if (!g_chunk) { fputs("vibe: out of memory\n", stderr); exit(70); }
-    g_chunk->next = NULL; g_chunk->used = 0; g_chunk->cap = VB_CHUNK_MIN;
-  }
-}
-
-void *vb_alloc(size_t n) {
-  n = (n + 15u) & ~(size_t)15u;
-  vb_init();
-  if (g_chunk->used + n > g_chunk->cap) {
-    size_t cap = n > VB_CHUNK_MIN ? n : VB_CHUNK_MIN;
-    VbChunk *c = malloc(sizeof(VbChunk) + cap);
-    if (!c) { fputs("vibe: out of memory\n", stderr); exit(70); }
-    c->next = g_chunk; c->used = 0; c->cap = cap;
-    g_chunk = c;
-  }
-  void *p = g_chunk->data + g_chunk->used;
-  g_chunk->used += n;
-  memset(p, 0, n);
-  return p;
-}
-
-/* An arena mark (VbMark, declared in vibert.h) is the allocation frontier at
-   the start of an `arena` block. */
-VbMark vb_mark(void) { vb_init(); VbMark m; m.chunk = g_chunk; m.used = g_chunk->used; return m; }
-
-/* Release everything allocated since the mark. Values that escape the block
-   would dangle, so a result that carries a pointer cancels the release.
-   VB_CSTR and VB_PTR belong in that list as much as the boxed types do:
-   `to_cstr (concat a b)` points into a string this frame allocated, and
-   releasing under it hands the caller freed memory. */
-void vb_release(VbMark m, VbVal result) {
-  switch (result.tag) {
-    case VB_STR: case VB_OBJ: case VB_VEC: case VB_CLOS: case VB_CSTR: case VB_PTR:
-      return;
-    default:
-      break;
-  }
-  while (g_chunk && g_chunk != m.chunk) {
-    VbChunk *dead = g_chunk;
-    g_chunk = g_chunk->next;
-    free(dead);
-  }
-  if (g_chunk) g_chunk->used = m.used;
-}
-
-/* The bump allocator cannot free one object: the whole point of the exact path.
-   Freeing nothing is correct here, only wasteful. */
-void vb_free(void *p) { (void)p; }
-
-#endif
 
 /* ---------------------------------------------------------- constructors */
 

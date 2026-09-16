@@ -1,6 +1,12 @@
-//! Escape analysis (spec §4.6): which frames may release what they allocated.
-//! The generated C is the artefact worth asserting on — it is deterministic,
-//! and it fails the moment a frame stops releasing.
+//! Escape analysis (spec §4.6). The question it used to answer — may this frame
+//! release in bulk on the way out — no longer exists: there is no bulk release,
+//! every value is freed where its owner dies. The question underneath it does:
+//! a pointer handed to C is C's for as long as C likes, and nothing this frame
+//! lent to it is this frame's to free.
+//!
+//! The generated C is still the artefact worth asserting on — it is
+//! deterministic, and it fails the moment a frame frees something it should
+//! not, or stops freeing something it should.
 
 use std::process::Command;
 
@@ -37,44 +43,48 @@ fn body<'c>(c: &'c str, name: &str) -> &'c str {
 }
 
 #[test]
-fn a_frame_that_cannot_leak_releases_what_it_allocated() {
+fn a_frame_frees_what_it_allocated_and_nobody_kept() {
     let c = emit_c("examples/churn.vibe", "churn");
     let work = body(&c, "work");
-    assert!(
-        work.contains("vb_mark()"),
-        "`work` allocates a vector nothing keeps:\n{work}"
+    assert_eq!(
+        work.matches("vb_dispose(").count(),
+        2,
+        "`work` builds a vector, reverses it, and keeps neither:\n{work}"
     );
-    assert!(work.contains("vb_release(vbm, vbret)"), "{work}");
+    assert!(
+        !work.contains("vb_mark()") && !work.contains("vb_release("),
+        "the bump allocator is gone:\n{work}"
+    );
 }
 
 #[test]
-fn handing_a_pointer_to_c_stops_the_release() {
-    let c = emit_c("tests/taint.vibe", "taint");
-    let low = body(&c, "low");
+fn handing_a_pointer_to_c_stops_the_free() {
+    let c = emit_c("tests/taint_own.vibe", "taint_own");
+    let hand = body(&c, "hand");
     assert!(
-        !low.contains("vb_mark()"),
-        "C may keep the pointer `low` gave it:\n{low}"
+        !hand.contains("vb_dispose("),
+        "C may keep the pointer `hand` gave it:\n{hand}"
     );
 }
 
 #[test]
 fn the_taint_reaches_the_caller() {
-    let c = emit_c("tests/taint.vibe", "taint");
-    let high = body(&c, "high");
+    let c = emit_c("tests/taint_own.vibe", "taint_own");
+    let top = body(&c, "top");
     assert!(
-        !high.contains("vb_mark()"),
-        "releasing in `high` would free what C is holding below it:\n{high}"
+        !top.contains("vb_dispose("),
+        "`top` owns the string C is holding below it:\n{top}"
     );
-    // and it stops at functions that cannot reach C
-    let clean = body(&c, "clean");
+    // and it stops at values that never reach C
+    let m = body(&c, "main");
     assert!(
-        clean.contains("vb_mark()"),
-        "the taint must not spread to everything:\n{clean}"
+        m.contains("vb_dispose("),
+        "the taint must not spread to everything:\n{m}"
     );
 }
 
 #[test]
-fn releasing_does_not_change_the_answer() {
+fn freeing_does_not_change_the_answer() {
     let dir = std::env::temp_dir().join("vibe-escape-tests");
     let exe = dir.join("churn");
     emit_c("examples/churn.vibe", "churn");
@@ -83,9 +93,9 @@ fn releasing_does_not_change_the_answer() {
 }
 
 /// A result that carries a pointer — `CStr` and `Ptr`, not only the boxed
-/// types — must cancel the release, or the caller is handed freed memory.
+/// types — points into a value the frame must not have freed.
 #[test]
-fn a_returned_pointer_cancels_the_release() {
+fn a_returned_pointer_is_not_freed_under_the_caller() {
     let dir = std::env::temp_dir().join("vibe-escape-tests");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let exe = dir.join("dangle");
@@ -99,6 +109,6 @@ fn a_returned_pointer_cancels_the_release() {
     assert_eq!(
         String::from_utf8_lossy(&o.stdout).trim(),
         "hello there world",
-        "the frame released memory its own result still points into"
+        "the frame freed memory its own result still points into"
     );
 }

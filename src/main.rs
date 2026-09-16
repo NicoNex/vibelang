@@ -46,7 +46,6 @@ usage: vibe <check|build|run|view|deps|proof|patch> <file.vibe> [options]
   -o <path>                  output executable (build)
   --lib                      build a static library plus its C header (build)
   --emit-c                   also keep the generated C next to the output
-  --alloc=bump|exact         allocator for the runtime (default: bump)
   -- <args...>               arguments passed to the program (run)
 ";
 
@@ -93,8 +92,6 @@ struct Opts {
     lib: bool,
     prove: bool,
     view: view::Mode,
-    /// Compile the runtime against the allocator that can free one object.
-    exact: bool,
     prog_args: Vec<String>,
     /// positionals after the file: the `patch` path, hash and new node
     rest: Vec<String>,
@@ -110,7 +107,6 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
         lib: false,
         prove: false,
         view: view::Mode::Canon,
-        exact: false,
         prog_args: Vec::new(),
         rest: Vec::new(),
     };
@@ -124,8 +120,6 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
                 break;
             }
             "--emit-c" => o.emit_c = true,
-            "--alloc=exact" => o.exact = true,
-            "--alloc=bump" => o.exact = false,
             "--lib" => o.lib = true,
             "--prove" => o.prove = true,
             _ if a.starts_with("--prove-timeout=") => {
@@ -272,7 +266,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    cc(&dir, &c_path, &exe, &module, o.exact)?;
+    cc(&dir, &c_path, &exe, &module)?;
 
     if o.cmd == "run" {
         let st = Command::new(exe.canonicalize().unwrap_or(exe.clone()))
@@ -394,11 +388,7 @@ fn archive(o: &Opts, dir: &Path, c_path: &Path, stem: &str, m: &ast::Module) -> 
     ] {
         let obj = dir.join(format!("{name}.o"));
         let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
-        let mut c = Command::new(&cc);
-        if o.exact {
-            c.arg("-DVB_EXACT_DROP");
-        }
-        let st = c
+        let st = Command::new(&cc)
             .arg("-std=c11")
             .arg("-O2")
             .arg("-c")
@@ -439,12 +429,9 @@ fn write(p: &Path, s: &str) -> Result<(), String> {
 }
 
 /// Compile the generated C plus the runtime, honouring `ext` link requirements.
-fn cc(dir: &Path, c_path: &Path, exe: &Path, m: &ast::Module, exact: bool) -> Result<(), String> {
+fn cc(dir: &Path, c_path: &Path, exe: &Path, m: &ast::Module) -> Result<(), String> {
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
     let mut cmd = Command::new(&cc);
-    if exact {
-        cmd.arg("-DVB_EXACT_DROP");
-    }
     cmd.arg("-std=c11")
         .arg("-O2")
         .arg("-o")

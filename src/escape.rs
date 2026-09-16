@@ -1,31 +1,24 @@
-//! Escape analysis, in the one form the bootstrap runtime can act on (spec
-//! §4.6): which functions may release everything they allocated when they
-//! return.
+//! Escape analysis (spec §4.6): which functions can be trusted to free what
+//! they allocated.
 //!
-//! The runtime already refuses to release when the result itself is heap
-//! allocated — `vb_release` cancels on a string, object, vector or closure —
-//! so a value that escapes through the return is handled dynamically and for
-//! free. What it cannot see is a pointer that escaped some other way, and in a
-//! language with no globals and no mutation of borrowed values there is exactly
-//! one such way: handing the pointer to C, which may keep it for as long as it
-//! likes.
+//! The bulk release this used to gate is gone — there is no region and no
+//! frontier, every value is freed where its owner dies. The question underneath
+//! it survives unchanged, because it was never about regions: in a language
+//! with no globals and no mutation of borrowed values there is exactly one way
+//! a pointer escapes without the compiler seeing it, and that is handing it to
+//! C, which may keep it for as long as it likes.
 //!
-//! So a function may release iff neither it nor anything it can reach calls an
-//! `ext c` symbol. The taint propagates to callers because the release happens
-//! at the outermost frame: if `f` releases and `g` below it gave a pointer to
-//! C, `f`'s release frees what C is still holding.
-//!
-//! ponytail: the ceiling is the whole-function granularity. A tail-recursive
-//! loop marks once and releases once, so its iterations still accumulate; the
-//! upgrade path is a mark per loop iteration, which needs to know which values
-//! cross the back edge.
+//! So a function is trustworthy iff neither it nor anything it can reach calls
+//! an `ext c` symbol, and the taint propagates to callers: if `f` frees a value
+//! it lent to `g`, and `g` gave a pointer into it to C, `f` freed what C is
+//! still holding. `own.rs` reads this set and refuses to place a drop on
+//! anything a tainted call was given.
 
 use crate::ast::*;
 use crate::infer::Checked;
 use std::collections::{HashMap, HashSet};
 
-/// Names of the functions whose body may be bracketed by `vb_mark` /
-/// `vb_release`.
+/// Names of the functions that cannot have handed a pointer to C.
 pub fn releasable(m: &Module, ck: &Checked) -> HashSet<String> {
     let mut calls: HashMap<String, Vec<String>> = HashMap::new();
     let mut tainted: HashSet<String> = HashSet::new();

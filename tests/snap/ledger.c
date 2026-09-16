@@ -34,7 +34,6 @@ static VbVal vbw_Ok(VbVal *a) { (void)a; return vb_obj(&vbi_Ok, 0, 1, a[0]); }
 #line 10 "ledger"
 static VbVal vbf_parse(VbVal *a) {
   (void)a;
-  VbMark vbm = vb_mark();
   VbVal v_ln_1 = a[0];
   VbVal vbret = vb_unit();
   for (;;) {
@@ -72,14 +71,12 @@ static VbVal vbf_parse(VbVal *a) {
     }
     else { vb_fail("Ledger.parse.match", "no match arm applied"); }
   }
-  vb_release(vbm, vbret);
   return vbret;
 }
 
 #line 19 "ledger"
 static VbVal vbf_mk(VbVal *a) {
   (void)a;
-  VbMark vbm = vb_mark();
   VbVal v_s_16 = a[0];
   VbVal v_n_17 = a[1];
   VbVal v_v_18 = a[2];
@@ -112,42 +109,36 @@ static VbVal vbf_mk(VbVal *a) {
     }
     else { vb_fail("Ledger.mk.match", "no match arm applied"); }
   }
-  vb_release(vbm, vbret);
   return vbret;
 }
 
 #line 25 "ledger"
 static VbVal vbf_amt(VbVal *a) {
   (void)a;
-  VbMark vbm = vb_mark();
   VbVal v_t_28 = a[0];
   VbVal vbret = vb_unit();
   for (;;) {
     vbret = vb_mul(vb_field(v_t_28, 2), vb_to_f64(vb_field(v_t_28, 1)));
     break;
   }
-  vb_release(vbm, vbret);
   return vbret;
 }
 
 #line 26 "ledger"
 static VbVal vbf_total(VbVal *a) {
   (void)a;
-  VbMark vbm = vb_mark();
   VbVal v_ts_29 = a[0];
   VbVal vbret = vb_unit();
   for (;;) {
     vbret = vb_sum(vb_map(vb_clos(vbf_amt, "amt", 1), v_ts_29));
     break;
   }
-  vb_release(vbm, vbret);
   return vbret;
 }
 
 #line 28 "ledger"
 static VbVal vbf_mean(VbVal *a) {
   (void)a;
-  VbMark vbm = vb_mark();
   VbVal v_ts_30 = a[0];
   vb_require(vb_as_bool(vb_bool(vb_cmp(vb_len(v_ts_30), vb_int(0)) > 0)), "Ledger.mean.pre", "len ts > 0");
   VbVal vbret = vb_unit();
@@ -157,14 +148,12 @@ static VbVal vbf_mean(VbVal *a) {
     vbret = vb_div(t31, vb_to_f64(vb_len(v_ts_30)), "Ledger.mean.div");
     break;
   }
-  vb_release(vbm, vbret);
   return vbret;
 }
 
 #line 29 "ledger"
 static VbVal vbf_top(VbVal *a) {
   (void)a;
-  VbMark vbm = vb_mark();
   VbVal v_ts_32 = a[0];
   vb_require(vb_as_bool(vb_bool(vb_cmp(vb_len(v_ts_32), vb_int(0)) > 0)), "Ledger.top.pre", "len ts > 0");
   VbVal vbret = vb_unit();
@@ -172,14 +161,12 @@ static VbVal vbf_top(VbVal *a) {
     vbret = vb_max_by(vb_clos(vbf_amt, "amt", 1), v_ts_32, "Ledger.top.max_by");
     break;
   }
-  vb_release(vbm, vbret);
   return vbret;
 }
 
 #line 31 "ledger"
 static VbVal vbf_load(VbVal *a) {
   (void)a;
-  VbMark vbm = vb_mark();
   VbVal v_p_33 = a[0];
   VbVal vbret = vb_unit();
   for (;;) {
@@ -212,14 +199,12 @@ static VbVal vbf_load(VbVal *a) {
     }
     else { vb_fail("Ledger.load.match", "no match arm applied"); }
   }
-  vb_release(vbm, vbret);
   return vbret;
 }
 
 #line 39 "ledger"
 static VbVal vbf_main(VbVal *a) {
   (void)a;
-  VbMark vbm = vb_mark();
   VbVal vbret = vb_unit();
   for (;;) {
     #line 40 "ledger"
@@ -265,7 +250,6 @@ static VbVal vbf_main(VbVal *a) {
     }
     else { vb_fail("Ledger.main.match", "no match arm applied"); }
   }
-  vb_release(vbm, vbret);
   return vbret;
 }
 

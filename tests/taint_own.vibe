@@ -1,0 +1,15 @@
+mod TaintOwn
+
+ext c "stdio.h"
+  puts : &CStr -> E! I32
+end
+
+;; `hand` gives C a pointer into `s`. C keeps what it likes for as long as it
+;; likes, so neither `hand` nor `top` — which owns the string — may free it.
+hand (s:&Str) : E! I32 = puts (to_cstr s)
+
+top (s:Str) : E! I32 = hand &s
+
+main : E! Unit =
+  n <- top (concat "hello " "C") ;
+  out (show n)

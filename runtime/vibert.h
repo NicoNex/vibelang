@@ -1,7 +1,8 @@
 /* Vibelang bootstrap runtime.
  *
- * One uniform boxed value, a bump allocator, and the primitives the prelude
- * needs. No GC, no refcount, no signal handler, nothing beyond libc.
+ * One uniform boxed value, calloc/free, and the primitives the prelude needs.
+ * Every value is freed where its owner dies, at a point the compiler computed.
+ * No GC, no refcount, no signal handler, nothing beyond libc.
  *
  * vibec debt: values are dynamically tagged and arithmetic dispatches on the
  * tag. The type checker already knows every static type, so the upgrade path is
@@ -59,7 +60,7 @@ typedef struct { VbFn fn; const char *name; uint32_t arity, nargs; VbVal *args; 
 /* --- lifecycle --- */
 void vb_init(void);
 void *vb_alloc(size_t n);
-/* Frees one object under -DVB_EXACT_DROP; a no-op under the bump allocator. */
+/* Frees one object. */
 void vb_free(void *p);
 /* Frees one value where its owner dies. Shallow: see the note in vibert.c. */
 void vb_dispose(VbVal v);
@@ -109,9 +110,6 @@ int vb_cmp(VbVal a, VbVal b);
 /* --- field / variant access --- */
 VbVal vb_field(VbVal o, uint32_t i);
 uint32_t vb_tag(VbVal o);
-typedef struct { struct VbChunk *chunk; size_t used; } VbMark;
-VbMark vb_mark(void);
-void vb_release(VbMark m, VbVal result);
 
 VbVal vb_set_fields(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals);
 VbVal vb_with(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals);

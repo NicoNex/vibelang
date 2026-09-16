@@ -52,8 +52,13 @@ fn unique_update_mutates_in_place() {
     );
 }
 
+/// `arena a in e` is a block and nothing more: implicit drop took over the job
+/// it was doing here, and §4.5's own reason for the construct — structures
+/// linear ownership does not express — is an open spec question
+/// (docs/static-drop-roadmap.md, Open decisions 3). What the program computes
+/// must not depend on which it is.
 #[test]
-fn arena_block_releases_in_bulk() {
+fn an_arena_block_is_a_block() {
     let (ok, out) = vibe(&["run", "tests/arena.vibe"]);
     assert!(ok, "arena example failed:\n{out}");
     assert_eq!(out.trim(), "1000");
@@ -62,8 +67,12 @@ fn arena_block_releases_in_bulk() {
     )
     .expect("generated C is kept next to the example");
     assert!(
-        c.contains("vb_mark") && c.contains("vb_release"),
-        "arena must mark and release:\n{c}"
+        !c.contains("vb_mark") && !c.contains("vb_release"),
+        "there is no region left to rewind:\n{c}"
+    );
+    assert!(
+        c.contains("vb_dispose("),
+        "what the block allocates is still freed, value by value:\n{c}"
     );
 }
 

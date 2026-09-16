@@ -16,7 +16,6 @@ static VbVal vbf_main(VbVal *a);
 #line 3 "hello"
 static VbVal vbf_main(VbVal *a) {
   (void)a;
-  VbMark vbm = vb_mark();
   VbVal vbret = vb_unit();
   for (;;) {
     VbVal t1 = vb_strz("hello from vibelang\n");
@@ -25,7 +24,6 @@ static VbVal vbf_main(VbVal *a) {
     vbret = t2;
     break;
   }
-  vb_release(vbm, vbret);
   return vbret;
 }
 
