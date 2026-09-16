@@ -600,10 +600,15 @@ impl<'a> Gen<'a> {
                         // The new arguments have read the old values by now;
                         // the assignment below is what makes them unreachable,
                         // so the frees go between the two.
-                        for c in self.drops_at(e.span, crate::own::DropWhen::BackEdge, None) {
+                        // A value the back edge frees may also be pending from an
+                        // enclosing `let` or arm; free it once.
+                        let back = self.drops_at(e.span, crate::own::DropWhen::BackEdge, None);
+                        for c in &back {
                             out.push_str(&format!("vb_dispose({});\n", c));
                         }
-                        self.flush(out);
+                        for c in self.pending.iter().rev().filter(|c| !back.contains(c)) {
+                            out.push_str(&format!("vb_dispose({});\n", c));
+                        }
                         for (p, t) in self.cur_params.clone().iter().zip(tmps.iter()) {
                             out.push_str(&format!("{} = {};\n", p, t));
                         }

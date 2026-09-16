@@ -389,3 +389,16 @@ fn a_dictionary_associates_a_key_with_a_value() {
     assert!(ok, "dict.vibe failed to build or run:\n{out}");
     assert_eq!(out.trim(), "2 1 20 0 2 2");
 }
+
+/// Two drops the checker used to place twice: a payload moved out of an owned
+/// scrutinee was freed again with the scrutinee, and a self-tail-call inside a
+/// nested match freed its locals both at the back edge and at the scope end.
+#[test]
+fn a_moved_payload_and_a_nested_back_edge_are_freed_once() {
+    let (ok, out) = vibe(&["run", "tests/payload_move.vibe"]);
+    assert!(ok, "payload_move.vibe failed to build or run:\n{out}");
+    assert_eq!(
+        out.split_whitespace().collect::<Vec<_>>(),
+        ["kept", "a-a-a-"]
+    );
+}

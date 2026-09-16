@@ -1,0 +1,21 @@
+mod PayloadMove
+
+;; The payload leaves with the result, so `found` must not be freed behind it.
+keep (found:Opt Str) (fallback:Str) : Opt Str =
+  ?found |Some x -> Some x
+         |None   -> Some fallback
+  end
+
+;; A self-tail-call inside a nested match: `c` and `acc` are freed once, not
+;; once by the back edge and again by the enclosing `let` and arm.
+walk (s:&Str) (i:Size) (acc:Str) : Str =
+  ?i |0 -> acc
+     |_ -> let c = concat s "-" in
+           ?c |"" -> acc
+              |_  -> walk s (i - 1) (concat &acc &c)
+           end
+  end
+
+main : E! Unit =
+  ?keep (Some (dup "kept")) "none" |Some v -> out &v |None -> out "lost" end ;
+  out (fmt " {}\n" (walk "a" 3 ""))

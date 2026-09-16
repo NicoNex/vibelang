@@ -800,6 +800,19 @@ impl State<'_> {
                     }
                     let visible = self.scope(owned, &bound, body.span);
                     self.walk(body, mode, &visible);
+                    // A payload handed on takes the scrutinee's memory with it,
+                    // so the scrutinee is consumed on this path; freeing it would
+                    // free what the arm just gave away.
+                    // ponytail: the scrutinee's outer cell leaks on that path; a
+                    // shell-only free needs Task 8's per-type `_Drop_T`.
+                    if let ExprKind::Var(sv) = &scrut.kind {
+                        if owned.contains(&sv.as_str()) && !self.moved.contains_key(sv) {
+                            if let Some(at) = bound.iter().find_map(|n| self.moved.get(n).copied())
+                            {
+                                self.moved.insert(sv.clone(), at);
+                            }
+                        }
+                    }
                     for n in &fresh {
                         self.shared.remove(n);
                     }
