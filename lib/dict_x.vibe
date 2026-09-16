@@ -18,11 +18,9 @@ update_with (f:v -> v) (d:Dict k v) (key:k) (fallback:v) : Dict k v =
   let cur = get_or &d &key fallback in
   insert d key (f cur)
 
-;; ponytail: a lone tuple pattern is not seen as exhaustive, hence the dead `_` arm;
-;; and a tuple pattern does not move its fields out (the caller's drop frees them), hence the dups.
+;; A tuple pattern on a borrow reads the fields, it does not take them, hence the dups.
 insert_pair (d:Dict k v) (p:&(k, v)) : Dict k v =
   ?p |(a, b) -> insert d (dup &a) (dup &b)
-     |_      -> d
   end
 
 ;; A later pair replaces an earlier one with the same key.

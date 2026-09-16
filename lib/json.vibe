@@ -335,7 +335,6 @@ render_go (j:&Json) (fuel:U64) : Str =
 render_pair (p:&(Str, Json)) (fuel:U64) : Str =
   ?fuel |0 -> "null"
         |_ -> ?p |(k, v) -> fmt "{}:{}" (quote &k) (render_go &v (fuel - 1))
-                 |_      -> "null"
               end
   end
   %fuel
@@ -356,7 +355,6 @@ pick_field (found:Opt Json) (p:&(Str, Json)) (key:&Str) : Opt Json =
                                    |True  -> Some (dup &v)
                                    |False -> None
                                   end
-                       |_      -> None
                     end
   end
 
