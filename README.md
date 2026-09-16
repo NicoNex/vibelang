@@ -78,6 +78,7 @@ vibe check   file.vibe [--prove]   types, ownership, totality, refinements
 vibe build   file.vibe [--lib]     a native executable, or a static library plus a C header
 vibe run     file.vibe -- args     build and run
 vibe view    file.vibe [--drops]   the canonical form, or where every value dies
+vibe fmt     file.vibe [--check]   write the canonical form back; --check fails instead
 vibe proof   file.vibe             open obligations, by semantic path
 vibe deps    file.vibe             callers and callees
 vibe patch   file.vibe <path>      hash-guarded structural edit, refused if it stops compiling
@@ -135,7 +136,7 @@ double Ledger_mean(VbVal x0);
 
 **Partial** — refinements on prelude builtins are hardcoded; a proof about a float is a proof about a mathematical real; drops are shallow, so nested structures leak their interior; every closure is on the heap; values are dynamically tagged, so any performance claim today is a claim about a boxed interpreter.
 
-**Not yet** — one flat namespace, so two modules cannot both declare `parse`; no search path, so a library has nowhere to live; no map, no bitwise operators; `dup` copies a `Str` and nothing else; a native backend.
+**Not yet** — no map, no bitwise operators, no `ord`; `dup` copies a `Str` and nothing else; a native backend.
 
 The full list, with a file and a line for every item, is [`docs/remaining-work.md`](docs/remaining-work.md). Moving a line from one list to the next is how this section gets edited.
 

@@ -97,11 +97,15 @@ Carried from §16, with what has changed since:
 - **§16.2 Overflow invariants.** Partly relieved by the range hypotheses in
   `src/refine.rs::range_hyp`, but a ghost function is still the escape hatch and
   still costs more tokens than the function it is about.
-- **§16.3 Module system.** Implemented as specified (`src/load.rs`) and, as the
-  spec predicted, the flat namespace does not scale: two modules cannot both
-  declare `parse`, and a type cannot be written `Ledger.Tx`. The constraint is
-  that a fix must not reintroduce `import`, aliases and visibility — four
-  constructs to replace one.
+- **§16.3 Module system.** Answered without adding a construct. A declared name
+  carries its module in the flattened program — `Csv.parse`, which is the
+  spelling a qualified reference already had — so two modules may declare
+  `parse`, a module may declare `take` against the prelude, and `Shape.Kind` and
+  `Shape.Line` qualify a type and a constructor. Still no `import`, no aliases,
+  no visibility: qualification at the use site is the whole system, and
+  `VIBE_PATH` says where a library lives. What is left is the two namespaces
+  that stayed global — record fields and `ext c` symbols — and module names that
+  cannot nest (`Std.Json` is not a path).
 - **§16.4 Effect granularity.** One `E!`, undivided. Unchanged.
 - **§16.5 Solver time.** Partly addressed: certificates are cached by the hash of
   the SMT text in a sibling `.vibe-proofs`, and `--prove-timeout=` budgets each
@@ -164,35 +168,31 @@ Carried from §16, with what has changed since:
 
 ## Before a standard library can be written
 
-Not a list of missing functions. These are the three things that make a library
-of more than one module impossible to write today, each confirmed against the
-compiler rather than read off the spec.
+Not a list of missing functions. What is left after the module system landed
+(`src/load.rs`: a name carries the module that declared it, so `Csv.parse` and
+`Json.parse` are two names, a module may declare `take`, types and constructors
+qualify, and `VIBE_PATH` plus a `lib` directory beside the compiler are on the
+search path).
 
-1. **A module has to be a sibling file.** `Json.parse` resolves to `Json.vibe`
-   next to the file that names it (`src/load.rs`): no search path, no
-   directories, no place for a shipped library to live. `error[mod.missing]`
-   is what a `lib/` subdirectory gets.
-2. **One flat namespace, so two modules cannot both declare `parse`.**
-   `error[mod.duplicate]`, and the fix it prints is "rename one of them". A
-   library of ten modules has to make every name in it globally unique, and a
-   type still cannot be written `Json.Value` because flattening keeps only
-   `Value`. Spec §16.3 predicted exactly this.
-3. **The prelude owns its names outright.** A module declaring `take`, `get` or
-   `map` gets `error[name.duplicate]` — the names a collections library most
-   wants are the ones it cannot have.
-
-Three and two are the same fix: per-module name resolution in `src/infer.rs`,
-after which `load.rs` keeps the loading and drops the renaming, and the prelude
-becomes one more module rather than a reserved word list. One is small and
-independent: a search path, defaulting to a directory shipped with the compiler.
+- **No map, no set, no dictionary.** Nothing in `PRELUDE_SIGS` associates a key
+  with a value. It needs a runtime type, not a library written in Vibelang.
+- **No bitwise operators.** `SYMBOLS` in `src/lexer.rs` has no `|`, `^`, `<<`
+  or `>>` — `&` is the borrow sigil — and no `ord : Char -> U32`. Hashing,
+  binary parsing and checksums have to descend into `ext c`.
+- **Copying an aggregate has no answer.** `dup` is `&Str -> Str`. With affine
+  use, two references to a `Vec` or a record mean restructuring the code.
+  Deep copy, shared immutable value, or a diagnostic that stops offering `dup`
+  for anything else — undecided (`static-drop-roadmap.md`, Open decisions 4).
+- **Fields and `ext c` symbols are still global.** Two modules cannot both
+  declare a record field `qty`, because the checker resolves a field by name
+  alone. Reported as `mod.duplicate` rather than silently wrong, but it is the
+  one namespace the module system did not close.
 
 Worth knowing before starting, none of them blocking:
 
 - Recursive helpers need a measure unless one parameter shrinks syntactically at
   every self-call; a mutually recursive pair needs the lexicographic tuple
-  written out (`%(n, k)`).
-- `dup` is `&Str -> Str` and nothing else. Copying an aggregate has no answer
-  yet — deep copy, shared immutable value, or a diagnostic that stops offering
-  it (`static-drop-roadmap.md`, Open decisions 4).
+  written out (`%(n, k)`); and a recursive name passed as a *value* is a call
+  with unknown arguments, so it is rejected.
 - A library that builds nested structures leaks the inner ones: drops are
   shallow (item 1 above).
