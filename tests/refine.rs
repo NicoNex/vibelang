@@ -313,3 +313,15 @@ fn a_postcondition_is_not_inferred_without_the_arm_that_proves_it() {
     assert!(!ok, "nothing rules out `Ok []` here:\n{out}");
     assert!(out.contains("refine.unproven"), "{out}");
 }
+
+/// Facts the solver used to lose: a length's range, a `let` of a call's range,
+/// the conjuncts of a guard it can only partly phrase, and the left side of
+/// `&&` while checking the right.
+#[test]
+fn guards_lend_what_they_can() {
+    if !have_z3() {
+        return;
+    }
+    let (ok, out) = vibe(&["check", "--prove", "tests/refine_guard.vibe"]);
+    assert!(ok, "every obligation follows from a guard:\n{out}");
+}

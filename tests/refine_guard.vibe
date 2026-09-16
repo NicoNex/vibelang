@@ -1,0 +1,20 @@
+mod RefineGuard
+
+;; A length is a Size, so `i < len s` bounds `i + 1`.
+next_byte (s:&Str) (i:Size) : Size =
+  ?(i<len s)
+   |True  -> i + 1
+   |False -> i
+  end
+
+;; A `let` of a call keeps its type's range, and a guard the solver can only
+;; partly phrase still lends the conjuncts it can.
+after_call (s:&Str) (i:Size) : Size =
+  let j = next_byte s i in
+  ?(j<len s && contains s "x")
+   |True  -> j + 1
+   |False -> 0
+  end
+
+;; The right side of `&&` runs only when the left one held.
+short_circuit (s:&Str) (i:Size) : Bool = i<=len s && len s - i>2

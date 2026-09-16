@@ -703,7 +703,7 @@ impl<'a> Gen<'a> {
                 let name = as_name(f)?;
                 if name == "len" && args.len() == 1 {
                     let v = self.var(&as_name(strip(args[0]))?);
-                    return Some(self.sym(format!("len_{v}"), Sort::Int));
+                    return Some((self.len_sym(&v), Sort::Int));
                 }
                 if let (Some(to), 1) = (conv(&name), args.len()) {
                     let (t, k) = self.term(args[0])?;
@@ -815,7 +815,20 @@ impl<'a> Gen<'a> {
         match &e.kind {
             ExprKind::Binop(op, a, b) => {
                 self.expr(a);
+                // `&&` and `||` short-circuit: the right side runs only when
+                // the left one allowed it.
+                let k = self.hyps.len();
+                if op == "&&" {
+                    for c in conjuncts(strip(a)) {
+                        if let Some((t, Sort::Bool)) = self.term(c) {
+                            self.hyps.push(t);
+                        }
+                    }
+                } else if let (Some((t, Sort::Bool)), "||") = (self.term(a), op.as_str()) {
+                    self.hyps.push(format!("(not {t})"));
+                }
                 self.expr(b);
+                self.hyps.truncate(k);
                 self.arith(e, op, a, b);
             }
             ExprKind::App(_, _) => {
@@ -873,6 +886,8 @@ impl<'a> Gen<'a> {
                 }
                 if let Some(t) = ty {
                     self.tys.insert(sym.clone(), t);
+                    // a `let` of a call the solver cannot phrase still has its type's range
+                    self.range_hyp(&sym);
                 }
                 if !targs.is_empty() {
                     self.tyargs.insert(sym, targs);
@@ -896,6 +911,14 @@ impl<'a> Gen<'a> {
                     if let Some(h) = self.arm_hyp(&s, scrut, p) {
                         self.hyps.push(h.clone());
                         seen.push(format!("(not {h})"));
+                    } else if matches!(p, Pat::Bool(true)) {
+                        // The whole guard is out of the solver's fragment, but
+                        // every conjunct it can phrase still holds in this arm.
+                        for c in conjuncts(strip(scrut)) {
+                            if let Some((t, Sort::Bool)) = self.term(c) {
+                                self.hyps.push(t);
+                            }
+                        }
                     }
                     self.expr(body);
                     self.hyps.truncate(k);
@@ -1051,8 +1074,16 @@ impl<'a> Gen<'a> {
         self.hyps.push(format!("(>= {l} {k})"));
     }
 
+    /// A length is a `Size`, so it carries that range: `i < len s` then bounds
+    /// `i + 1`.
     fn len_sym(&mut self, v: &str) -> String {
-        self.sym(format!("len_{v}"), Sort::Int).0
+        let l = self.sym(format!("len_{v}"), Sort::Int).0;
+        let hi = format!("(<= {l} 18446744073709551615)");
+        if !self.hyps.contains(&hi) {
+            self.hyps.push(format!("(>= {l} 0)"));
+            self.hyps.push(hi);
+        }
+        l
     }
 
     fn arith(&mut self, e: &Expr, op: &str, a: &Expr, b: &Expr) {
@@ -1470,6 +1501,18 @@ fn replace_sym(t: &str, from: &str, to: &str) -> String {
     out
 }
 
+/// The operands of a chain of `&&`.
+fn conjuncts(e: &Expr) -> Vec<&Expr> {
+    match &e.kind {
+        ExprKind::Binop(op, a, b) if op == "&&" => {
+            let mut v = conjuncts(strip(a));
+            v.extend(conjuncts(strip(b)));
+            v
+        }
+        _ => vec![e],
+    }
+}
+
 fn strip(e: &Expr) -> &Expr {
     match &e.kind {
         ExprKind::Borrow(i) => strip(i),
@@ -1509,7 +1552,27 @@ fn show(e: &Expr) -> String {
         ExprKind::Neg(i) => format!("-{}", show(i)),
         ExprKind::Not(i) => format!("!{}", show(i)),
         ExprKind::Field(b, f) => format!("{}.{}", show(b), f),
-        ExprKind::Binop(op, a, b) => format!("{} {} {}", show(a), op, show(b)),
+        ExprKind::Binop(op, a, b) => {
+            // Parenthesise a side only where precedence would regroup it.
+            let prec = |o: &str| match o {
+                "||" => 1,
+                "&&" => 2,
+                "==" | "!=" | "<" | "<=" | ">" | ">=" => 3,
+                "++" => 4,
+                "+" | "-" => 5,
+                _ => 6,
+            };
+            let side = |x: &Expr, right: bool| match &x.kind {
+                ExprKind::Binop(o, ..)
+                    if prec(o) < prec(op)
+                        || (right && prec(o) == prec(op) && matches!(op.as_str(), "-" | "/")) =>
+                {
+                    format!("({})", show(x))
+                }
+                _ => show(x),
+            };
+            format!("{} {} {}", side(a, false), op, side(b, true))
+        }
         ExprKind::App(_, _) => {
             let (f, args) = flatten(e);
             let mut s = show(f);
