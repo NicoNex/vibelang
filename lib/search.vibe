@@ -1,0 +1,177 @@
+mod Search
+
+;; First index in [lo, hi) whose value is not below `x`; `hi` when there is none.
+;; Each step halves `hi - lo`, so 64 fuel never runs out. The fuel is there because
+;; the measure checker cannot see `(hi - lo) / 2 < hi - lo`. Every `get` in this
+;; module is proved in bounds: no `get_checked`, no run-time index assert.
+lower_from (v:&Vec U64) (x:U64) (lo:Size) (hi:Size, lo<=hi && hi<=len v) (fuel:U64) : Size =
+  ?(lo<hi && fuel>0)
+   |False -> lo
+   |True  -> let mid = lo + (hi - lo) / 2 in
+             ?(get v mid<x)
+              |True  -> lower_from v x (mid + 1) hi (fuel - 1)
+              |False -> lower_from v x lo mid (fuel - 1)
+             end
+  end
+  %fuel
+
+;; First index in [lo, hi) whose value is above `x`; `hi` when there is none.
+upper_from (v:&Vec U64) (x:U64) (lo:Size) (hi:Size, lo<=hi && hi<=len v) (fuel:U64) : Size =
+  ?(lo<hi && fuel>0)
+   |False -> lo
+   |True  -> let mid = lo + (hi - lo) / 2 in
+             ?(get v mid<=x)
+              |True  -> upper_from v x (mid + 1) hi (fuel - 1)
+              |False -> upper_from v x lo mid (fuel - 1)
+             end
+  end
+  %fuel
+
+lower_n (v:&Vec U64) (x:U64) (n:Size, n==len v) : Size = lower_from v x 0 n 64
+
+upper_n (v:&Vec U64) (x:U64) (n:Size, n==len v) : Size = upper_from v x 0 n 64
+
+;; On a sorted `v`: the first index whose value is `>= x`, `len v` when none.
+lower_bound (v:&Vec U64) (x:U64) : Size = lower_n v x (len v)
+
+;; On a sorted `v`: the first index whose value is `> x`, `len v` when none.
+upper_bound (v:&Vec U64) (x:U64) : Size = upper_n v x (len v)
+
+;; `Some i` when `i` is in bounds and holds `x`.
+found_at (v:&Vec U64) (x:U64) (i:Size) : Opt Size =
+  ?(i<len v)
+   |False -> None
+   |True  -> ?(get v i==x)
+              |True  -> Some i
+              |False -> None
+             end
+  end
+
+;; On a sorted `v`: the index of the first `x`, if any.
+binary_search (v:&Vec U64) (x:U64) : Opt Size = found_at v x (lower_bound v x)
+
+;; `lower_from` for a vector sorted by `key`.
+lower_from_by (key:a -> I64) (v:&Vec a) (x:I64) (lo:Size) (hi:Size, lo<=hi && hi<=len v) (fuel:U64) : Size =
+  ?(lo<hi && fuel>0)
+   |False -> lo
+   |True  -> let mid = lo + (hi - lo) / 2 in
+             ?(key (dup &(get v mid))<x)
+              |True  -> lower_from_by key v x (mid + 1) hi (fuel - 1)
+              |False -> lower_from_by key v x lo mid (fuel - 1)
+             end
+  end
+  %fuel
+
+lower_n_by (key:a -> I64) (v:&Vec a) (x:I64) (n:Size, n==len v) : Size =
+  lower_from_by key v x 0 n 64
+
+;; On a `v` sorted by `key`: the first index whose key is `>= x`, `len v` when none.
+lower_bound_by (key:a -> I64) (v:&Vec a) (x:I64) : Size =
+  lower_n_by key v x (len v)
+
+;; `Some i` when `i` is in bounds and its key is `x`.
+found_at_by (key:a -> I64) (v:&Vec a) (x:I64) (i:Size) : Opt Size =
+  ?(i<len v)
+   |False -> None
+   |True  -> ?(key (dup &(get v i))==x)
+              |True  -> Some i
+              |False -> None
+             end
+  end
+
+;; On a `v` sorted by `key`: the index of the first element whose key is `x`, if any.
+binary_search_by (key:a -> I64) (v:&Vec a) (x:I64) : Opt Size =
+  found_at_by key v x (lower_bound_by key v x)
+
+sorted_from (v:&Vec I64) (i:Size) (n:Size, n==len v) : Bool =
+  ?(i<n)
+   |False -> True
+   |True  -> let next = i + 1 in
+             ?(next<n)
+              |False -> True
+              |True  -> get v i<=get v next && sorted_from v (i + 1) n
+             end
+  end
+  %(n - i)
+
+;; Non-decreasing; the empty vector is sorted.
+is_sorted (v:&Vec I64) : Bool = sorted_from v 0 (len v)
+
+;; Inserts `x` after any equal elements, so a sorted `v` stays sorted.
+insert_sorted (v:&Vec U64) (x:U64) : Vec U64 =
+  let i = upper_bound v x in
+  concat_vec &(push (take i v) x) &(drop i v)
+
+merge_from (a:&Vec U64) (b:&Vec U64) (i:Size) (na:Size, na==len a) (j:Size) (nb:Size, nb==len b) (acc:Vec U64) : Vec U64 =
+  ?(i<na)
+   |False -> concat_vec &acc &(drop j b)
+   |True  -> ?(j<nb)
+              |False -> concat_vec &acc &(drop i a)
+              |True  -> ?(get b j<get a i)
+                         |True  -> merge_from a
+                                              b i na (j + 1) nb (push acc (get b j))
+                         |False -> merge_from a
+                                              b (i + 1) na j nb (push acc (get a i))
+                        end
+             end
+  end
+  %(na - i, nb - j)
+
+;; Two sorted vectors into one; on ties the element of `a` comes first.
+merge (a:&Vec U64) (b:&Vec U64) : Vec U64 =
+  merge_from a b 0 (len a) 0 (len b) empty
+
+unique_from (v:&Vec U64) (i:Size) (n:Size, n==len v) (last:U64) (acc:Vec U64) : Vec U64 =
+  ?(i<n)
+   |False -> acc
+   |True  -> ?(get v i==last)
+              |True  -> unique_from v (i + 1) n last acc
+              |False -> unique_from v (i + 1) n (get v i) (push acc (get v i))
+             end
+  end
+  %(n - i)
+
+;; A sorted `v` with each run of equal values kept once.
+unique_sorted (v:&Vec U64) : Vec U64 =
+  ?(len v>0)
+   |False -> empty
+   |True  -> unique_from v 1 (len v) (get v 0) (single (get v 0))
+  end
+
+;; The `k`th smallest value, counting from 0.
+;; `sort_by` keeps the length, but no postcondition says so; the fallback arm is
+;; unreachable, and still proved in bounds.
+kth_smallest (v:&Vec U64) (k:Size, k<len v) : U64 =
+  let s = sort_by (\x -> x) v in
+  ?(k<len &s)
+   |True  -> get &s k
+   |False -> get v k
+  end
+
+min_from (v:&Vec I64) (i:Size) (n:Size, n==len v) (best:Size, best<n) : Size =
+  ?(i<n)
+   |False -> best
+   |True  -> let cand = i in
+             ?(get v cand<get v best)
+              |True  -> min_from v (i + 1) n cand
+              |False -> min_from v (i + 1) n best
+             end
+  end
+  %(n - i)
+
+max_from (v:&Vec I64) (i:Size) (n:Size, n==len v) (best:Size, best<n) : Size =
+  ?(i<n)
+   |False -> best
+   |True  -> let cand = i in
+             ?(get v cand>get v best)
+              |True  -> max_from v (i + 1) n cand
+              |False -> max_from v (i + 1) n best
+             end
+  end
+  %(n - i)
+
+;; Index of the first smallest element.
+min_index (v:&Vec I64, len v>0) : Size = min_from v 1 (len v) 0
+
+;; Index of the first largest element.
+max_index (v:&Vec I64, len v>0) : Size = max_from v 1 (len v) 0

@@ -1,0 +1,63 @@
+mod SearchCheck
+
+fail (what:Str) : E! Unit =
+  warn (concat &what "\n") ;
+  exit 1
+
+expect (ok:Bool) (what:Str) : E! Unit =
+  ?ok |True  -> ()
+      |False -> fail what
+  end
+
+pair_key (p:(I64, Str)) : I64 =
+  ?p |(k, s) -> k
+     |_      -> 0
+  end
+
+main : E! Unit =
+  let v = [1, 3, 3, 3, 7, 9] in
+  let none = [] in
+  expect (Search.lower_bound &v 3==1) "lower_bound dup" ;
+  expect (Search.upper_bound &v 3==4) "upper_bound dup" ;
+  expect (Search.lower_bound &v 0==0) "lower_bound below" ;
+  expect (Search.lower_bound &v 10==6) "lower_bound above" ;
+  expect (Search.upper_bound &v 9==6) "upper_bound last" ;
+  expect (Search.lower_bound &none 5==0) "lower_bound empty" ;
+  expect (Search.upper_bound &none 5==0) "upper_bound empty" ;
+  expect (Search.binary_search &v 3==Some 1) "binary_search dup" ;
+  expect (Search.binary_search &v 9==Some 5) "binary_search last" ;
+  expect (Search.binary_search &v 1==Some 0) "binary_search first" ;
+  expect (Search.binary_search &v 4==None) "binary_search missing" ;
+  expect (Search.binary_search &v 10==None) "binary_search above" ;
+  expect (Search.binary_search &none 1==None) "binary_search empty" ;
+  let ps = [(0 - 5, "a"), (2, "b"), (2, "c"), (8, "d")] in
+  expect (Search.lower_bound_by pair_key &ps 2==1) "lower_bound_by" ;
+  expect (Search.lower_bound_by pair_key &ps 9==4) "lower_bound_by above" ;
+  expect (Search.binary_search_by pair_key &ps (0 - 5)==Some 0) "binary_search_by negative" ;
+  expect (Search.binary_search_by pair_key &ps 2==Some 1) "binary_search_by dup" ;
+  expect (Search.binary_search_by pair_key &ps 3==None) "binary_search_by missing" ;
+  expect (Search.is_sorted &[0 - 2, 0, 0, 5]) "is_sorted" ;
+  expect (Search.is_sorted &[1, 0 - 1]==False) "is_sorted no" ;
+  expect (Search.is_sorted &[]) "is_sorted empty" ;
+  expect (Search.is_sorted &[4]) "is_sorted single" ;
+  expect (Search.insert_sorted &v 3==[1, 3, 3, 3, 3, 7, 9]) "insert_sorted dup" ;
+  expect (Search.insert_sorted &v 0==[0, 1, 3, 3, 3, 7, 9]) "insert_sorted front" ;
+  expect (Search.insert_sorted &v 12==[1, 3, 3, 3, 7, 9, 12]) "insert_sorted back" ;
+  expect (Search.insert_sorted &none 2==[2]) "insert_sorted empty" ;
+  expect (Search.merge &[1, 4, 4, 8] &[2, 4, 9]==[1, 2, 4, 4, 4, 8, 9]) "merge" ;
+  expect (Search.merge &none &[2, 3]==[2, 3]) "merge empty left" ;
+  expect (Search.merge &[2, 3] &none==[2, 3]) "merge empty right" ;
+  expect (len &(Search.merge &none &none)==0) "merge both empty" ;
+  expect (Search.unique_sorted &v==[1, 3, 7, 9]) "unique_sorted" ;
+  expect (Search.unique_sorted &[5, 5, 5]==[5]) "unique_sorted all same" ;
+  expect (len &(Search.unique_sorted &none)==0) "unique_sorted empty" ;
+  let mixed = [9, 1, 7, 3, 3] in
+  expect (Search.kth_smallest &mixed 0==1) "kth_smallest 0" ;
+  expect (Search.kth_smallest &mixed 2==3) "kth_smallest dup" ;
+  expect (Search.kth_smallest &mixed 4==9) "kth_smallest last" ;
+  let ws = [4, 0 - 2, 8, 0 - 2, 8] in
+  expect (Search.min_index &ws==1) "min_index first of ties" ;
+  expect (Search.max_index &ws==2) "max_index first of ties" ;
+  expect (Search.min_index &[7]==0) "min_index single" ;
+  expect (Search.max_index &[7]==0) "max_index single" ;
+  out "ok"
