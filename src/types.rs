@@ -551,6 +551,15 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 
+/// A pattern every value of its type matches: `_`, a name, or a tuple of those.
+fn irrefutable(p: &Pat) -> bool {
+    match p {
+        Pat::Wild | Pat::Var(_) => true,
+        Pat::Tuple(ps) => ps.iter().all(irrefutable),
+        _ => false,
+    }
+}
+
 pub fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a String>) -> Option<String> {
     let mut best: Option<(usize, String)> = None;
     for c in candidates {
@@ -572,7 +581,7 @@ impl Checker {
         let pending = std::mem::take(&mut self.pending_matches);
         for (span, scrut, pats, path) in pending {
             let ty = self.resolve(&scrut);
-            let has_catchall = pats.iter().any(|p| matches!(p, Pat::Wild | Pat::Var(_)));
+            let has_catchall = pats.iter().any(irrefutable);
             if has_catchall {
                 continue;
             }

@@ -107,11 +107,16 @@ pub fn check(m: &Module) -> Vec<Diag> {
             // must say what decreases. Upgrade path: try each parameter position
             // across the whole group at once.
             None => {
-                let solo = calls[i].iter().all(|c| c.callee == i);
+                // Only calls back into the group bear on termination; a call to
+                // a function that cannot reach this one is no recursion at all.
+                let solo = calls[i]
+                    .iter()
+                    .all(|c| c.callee == i || !same_group(i, c.callee));
                 let inferred = params[i].iter().find(|p| {
                     let cand = Lin::var(p);
                     solo && calls[i]
                         .iter()
+                        .filter(|c| c.callee == i)
                         .all(|c| delta(&cand, &cand, &params[i], &c.args).is_some_and(|d| d > 0))
                 });
                 match inferred {
@@ -266,8 +271,8 @@ fn children(e: &Expr, f: &mut dyn FnMut(&Expr)) {
 /// opaque sub-expressions keyed by how they are written.
 #[derive(Clone, Default)]
 struct Lin {
-    terms: HashMap<String, i64>,
-    c: i64,
+    terms: HashMap<String, i128>,
+    c: i128,
 }
 
 impl Lin {
@@ -276,7 +281,7 @@ impl Lin {
         l.terms.insert(name.to_string(), 1);
         l
     }
-    fn add_scaled(&mut self, o: &Lin, k: i64) {
+    fn add_scaled(&mut self, o: &Lin, k: i128) {
         self.c += o.c * k;
         for (a, v) in &o.terms {
             let e = self.terms.entry(a.clone()).or_insert(0);
@@ -336,7 +341,7 @@ fn show_lex(m: &[Lin]) -> String {
 /// How far the callee's component sits below the caller's, once the call
 /// arguments stand in for the callee's parameters. `None` when the other atoms
 /// do not cancel exactly, because then no gap holds for every value they take.
-fn delta(caller: &Lin, callee: &Lin, callee_params: &[String], args: &[Expr]) -> Option<i64> {
+fn delta(caller: &Lin, callee: &Lin, callee_params: &[String], args: &[Expr]) -> Option<i128> {
     if args.len() != callee_params.len() {
         return None; // partial application: nothing to substitute into
     }

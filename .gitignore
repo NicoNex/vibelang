@@ -32,3 +32,4 @@
 /lib/*.h
 /tests/payload_move
 /tests/bytes
+/tests/tuple_total

@@ -699,7 +699,7 @@ impl<'a> Gen<'a> {
     fn pat_cond(&mut self, p: &Pat, s: &str) -> String {
         match p {
             Pat::Wild | Pat::Var(_) => "1".to_string(),
-            Pat::Int(n) => format!("vb_eq({}, vb_int({}))", s, n),
+            Pat::Int(n) => format!("vb_eq({}, {})", s, int_c(*n)),
             Pat::Float(x) => format!("vb_eq({}, vb_float({:?}))", s, x),
             Pat::Str(t) => format!("vb_eq({}, vb_strz({}))", s, cstring(t)),
             Pat::Char(c) => format!("vb_eq({}, vb_char({}))", s, *c as u32),
@@ -784,7 +784,7 @@ impl<'a> Gen<'a> {
 
     fn ex(&mut self, e: &Expr, out: &mut String) -> String {
         match &e.kind {
-            ExprKind::Int(n) => format!("vb_int({})", n),
+            ExprKind::Int(n) => int_c(*n),
             ExprKind::Float(x) => format!("vb_float({:?})", x),
             ExprKind::Str(s) => format!("vb_strz({})", cstring(s)),
             ExprKind::Char(c) => format!("vb_char({})", *c as u32),
@@ -1383,6 +1383,15 @@ fn pat_vars(p: &Pat, out: &mut Vec<String>) {
             ps.iter().for_each(|x| pat_vars(x, out))
         }
         _ => {}
+    }
+}
+
+/// An integer literal as a C value: one above `i64::MAX` only fits unsigned.
+fn int_c(n: i128) -> String {
+    if n > i64::MAX as i128 {
+        format!("vb_uint({n}ULL)")
+    } else {
+        format!("vb_int({n})")
     }
 }
 

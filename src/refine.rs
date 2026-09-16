@@ -646,7 +646,7 @@ impl<'a> Gen<'a> {
     /// ADTs) instead of flattening them to symbols.
     fn term(&mut self, e: &Expr) -> Option<(String, Sort)> {
         match &e.kind {
-            ExprKind::Int(n) => Some((int_lit(*n as i128), Sort::Int)),
+            ExprKind::Int(n) => Some((int_lit(*n), Sort::Int)),
             ExprKind::Float(f) => Some((real_lit(*f), Sort::Real)),
             ExprKind::Bool(b) => Some((b.to_string(), Sort::Bool)),
             ExprKind::Var(n) => {
@@ -747,17 +747,14 @@ impl<'a> Gen<'a> {
                 if let Some(t) = self.ret_ty(&name, args.len()).and_then(|t| base_name(&t)) {
                     return Some(t);
                 }
-                // A saturated prelude call with a scalar result: `byte_at s i`
+                // A saturated prelude call with a numeric result: `byte_at s i`
                 // is a U8, and a `let` of it carries that range.
                 let (_, sig) = crate::types::PRELUDE_SIGS
                     .iter()
                     .find(|(p, _)| *p == name)?;
                 let parts: Vec<&str> = sig.split(" -> ").collect();
                 let ret = parts.last()?;
-                (parts.len() == args.len() + 1
-                    && ret.chars().all(|c| c.is_ascii_alphanumeric())
-                    && ret.starts_with(|c: char| c.is_ascii_uppercase()))
-                .then(|| ret.to_string())
+                (parts.len() == args.len() + 1 && range(ret).is_some()).then(|| ret.to_string())
             }
             _ => None,
         }
@@ -958,7 +955,7 @@ impl<'a> Gen<'a> {
         }
         let (t, k) = s.clone()?;
         match p {
-            Pat::Int(n) if k == Sort::Int => Some(format!("(= {t} {})", int_lit(*n as i128))),
+            Pat::Int(n) if k == Sort::Int => Some(format!("(= {t} {})", int_lit(*n))),
             Pat::Bool(b) if k == Sort::Bool => Some(if *b { t } else { format!("(not {t})") }),
             Pat::List(ps) => {
                 let v = self.var(&as_name(strip(scrut))?);
@@ -994,7 +991,7 @@ impl<'a> Gen<'a> {
             }
             Pat::Int(i) => {
                 let (s, _) = self.sym(v.to_string(), Sort::Int);
-                Some(format!("(= {s} {})", int_lit(*i as i128)))
+                Some(format!("(= {s} {})", int_lit(*i)))
             }
             Pat::Bool(b) => {
                 let (s, _) = self.sym(v.to_string(), Sort::Bool);

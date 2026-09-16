@@ -38,7 +38,7 @@ impl Ty {
 pub enum Pat {
     Wild,
     Var(String),
-    Int(i64),
+    Int(i128),
     Float(f64),
     Str(String),
     Char(char),
@@ -56,7 +56,7 @@ pub struct Expr {
 
 #[derive(Clone, Debug)]
 pub enum ExprKind {
-    Int(i64),
+    Int(i128),
     Float(f64),
     Str(String),
     Char(char),

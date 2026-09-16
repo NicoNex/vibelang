@@ -18,7 +18,7 @@ use crate::diag::{Diag, Span};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tok {
-    Int(i64),
+    Int(i128),
     Float(f64),
     Str(String),
     Char(char),
@@ -269,13 +269,18 @@ impl<'a> Lexer<'a> {
         if is_float {
             Ok(Tok::Float(text.parse().unwrap()))
         } else {
-            text.parse::<i64>().map(Tok::Int).map_err(|_| {
-                Diag::error(
-                    self.span(start),
-                    "lex.int",
-                    "integer literal does not fit in 64 bits",
-                )
-            })
+            // Up to u64::MAX: a U64 constant is as legitimate as an I64 one.
+            text.parse::<i128>()
+                .ok()
+                .filter(|n| *n <= u64::MAX as i128)
+                .map(Tok::Int)
+                .ok_or_else(|| {
+                    Diag::error(
+                        self.span(start),
+                        "lex.int",
+                        "integer literal does not fit in 64 bits",
+                    )
+                })
         }
     }
 

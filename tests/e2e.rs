@@ -415,3 +415,13 @@ fn a_string_is_bytes_and_bytes_are_reachable() {
         "wrapping arithmetic:\n{out}"
     );
 }
+
+/// Three refusals of programs that were fine: a tuple of names as the only
+/// pattern, a recursive function calling a helper outside its group, and an
+/// integer literal above `i64::MAX`.
+#[test]
+fn a_tuple_pattern_a_helper_call_and_a_u64_literal_are_accepted() {
+    let (ok, out) = vibe(&["run", "tests/tuple_total.vibe"]);
+    assert!(ok, "tuple_total.vibe failed to build or run:\n{out}");
+    assert_eq!(out.trim(), "18446744073709551613");
+}

@@ -1,0 +1,15 @@
+mod TupleTotal
+
+step (n:U64) : (U64, U64) = (n, n + 1)
+
+;; A lone tuple of names covers every value, and a recursive function that
+;; also calls a helper outside its group still has its measure inferred.
+count (k:U64) (acc:U64) : U64 =
+  ?k |0 -> acc
+     |_ -> ?step acc
+            |(a, b) -> count (k - 1) b
+           end
+  end
+
+main : E! Unit =
+  out (show (count 3 18446744073709551610))
