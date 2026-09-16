@@ -1,0 +1,55 @@
+mod ListCheck
+
+;; Exercises every public function of `List`; exits 1 on the first mismatch.
+fail (msg:Str) : E! Unit =
+  warn &msg ;
+  exit 1
+
+expect (name:&Str) (got:&Str) (want:&Str) : E! Unit =
+  ?(got==want)
+   |True  -> ()
+   |False -> fail (fmt "List.{}: got {} want {}\n" name got want)
+  end
+
+big (x:U64) : Bool = x>2
+
+main : E! Unit =
+  let xs = [1, 2, 3, 4, 5] in
+  expect "any" &(show (List.any big &xs)) "True" ;
+  expect "any empty" &(show (List.any big &(take 0 &xs))) "False" ;
+  expect "all" &(show (List.all big &xs)) "False" ;
+  expect "all drop" &(show (List.all big &(drop 2 &xs))) "True" ;
+  expect "count" &(show (List.count big &xs)) "3" ;
+  expect "contains" &(show (List.contains &4 &xs)) "True" ;
+  expect "contains no" &(show (List.contains &9 &xs)) "False" ;
+  expect "find" &(show (List.find big &xs)) &(show (Some 3)) ;
+  expect "find none" &(show (List.find (\x -> x>9) &xs)) &(show (List.find (\x -> x>99) &xs)) ;
+  expect "position" &(show (List.position big &xs)) &(show (Some 2)) ;
+  expect "first" &(show (List.first &xs)) "1" ;
+  expect "last" &(show (List.last &xs)) "5" ;
+  expect "first_opt" &(show (List.first_opt &xs)) &(show (Some 1)) ;
+  expect "last_opt empty" &(show (List.last_opt &(take 0 &xs))) &(show (List.find big &(take 0 &xs))) ;
+  expect "sum_by" &(show (List.sum_by (\x -> x * 2) &xs)) "30" ;
+  expect "flatten" &(show (List.flatten &[[1, 2], [3], [4, 5]])) &(show xs) ;
+  expect "enumerate" &(show (List.enumerate &["a", "b"])) &(show [(0, "a"), (1, "b")]) ;
+  expect "repeat" &(show (List.repeat 3 &"x")) &(show ["x", "x", "x"]) ;
+  expect "partition" &(show (List.partition big &xs)) &(show ([3, 4, 5], [1, 2])) ;
+  expect "take_while" &(show (List.take_while (\x -> x<3) &xs)) &(show [1, 2]) ;
+  expect "drop_while" &(show (List.drop_while (\x -> x<3) &xs)) &(show [3, 4, 5]) ;
+  expect "take_while all" &(show (List.take_while (\x -> x<9) &xs)) &(show xs) ;
+  expect "zip" &(show (List.zip &xs &["a", "b"])) &(show [(1, "a"), (2, "b")]) ;
+  expect "chunks" &(show (List.chunks 2 &xs)) &(show [[1, 2], [3, 4], [5]]) ;
+  expect "windows" &(show (List.windows 3 &xs)) &(show [[1, 2, 3], [2, 3, 4], [3, 4, 5]]) ;
+  expect "windows short" &(show (len (List.windows 9 &xs))) "0" ;
+  expect "dedup" &(show (List.dedup &[1, 1, 2, 2, 2, 1, 3])) &(show [1, 2, 1, 3]) ;
+  expect "swap" &(show (List.swap (dup &xs) 0 4)) &(show [5, 2, 3, 4, 1]) ;
+  expect "get_or" &(show (List.get_or 0 &xs 1)) "2" ;
+  expect "get_or out" &(show (List.get_or 0 &xs 7)) "0" ;
+  let ws = ["a", "a", "b", "c", "c"] in
+  expect "dedup str" &(show (List.dedup &ws)) &(show ["a", "b", "c"]) ;
+  expect "chunks str" &(show (List.chunks 2 &ws)) &(show [["a", "a"], ["b", "c"], ["c"]]) ;
+  expect "windows str" &(show (List.windows 4 &ws)) &(show [["a", "a", "b", "c"], ["a", "b", "c", "c"]]) ;
+  expect "position str" &(show (List.position (\w -> w=="c") &ws)) &(show (Some 3)) ;
+  expect "contains str" &(show (List.contains &"b" &ws)) "True" ;
+  expect "last str" &(List.last &ws) "c" ;
+  out "ok\n"

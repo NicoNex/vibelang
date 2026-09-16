@@ -1,0 +1,135 @@
+mod List
+
+;; Vec utilities the prelude does not have. Everything borrows the vector and
+;; hands back fresh values; partial ones carry a refinement instead of a check.
+any (p:a -> Bool) (xs:&Vec a) : Bool = fold (\acc x -> acc || p x) False xs
+
+all (p:a -> Bool) (xs:&Vec a) : Bool = fold (\acc x -> acc && p x) True xs
+
+count (p:a -> Bool) (xs:&Vec a) : Size = len (filter p xs)
+
+contains (y:&a) (xs:&Vec a) : Bool = fold (\acc x -> acc || x==y) False xs
+
+find (p:a -> Bool) (xs:&Vec a) : Opt a =
+  let hits = filter p xs in
+  ?(len hits>0)
+   |True  -> Some (dup &(get &hits 0))
+   |False -> None
+  end
+
+position (p:a -> Bool) (xs:&Vec a) : Opt Size =
+  fold (position_step p) None &(enumerate xs)
+
+;; ponytail: the `|_` arm is unreachable; the exhaustiveness checker does not
+;; accept a tuple pattern of binders as total.
+position_step (p:a -> Bool) (found:Opt Size) (pair:&(Size, a)) : Opt Size =
+  ?found |Some k -> Some k
+         |None   -> ?pair |(i, x) -> ?p x
+                                      |True  -> Some i
+                                      |False -> None
+                                     end
+                          |_      -> None
+                    end
+  end
+
+first (xs:&Vec a, len xs>0) : a = dup &(get xs 0)
+
+last (xs:&Vec a, len xs>0) : a = dup &(get xs (len xs - 1))
+
+first_opt (xs:&Vec a) : Opt a =
+  ?(len xs>0)
+   |True  -> Some (first xs)
+   |False -> None
+  end
+
+last_opt (xs:&Vec a) : Opt a =
+  ?(len xs>0)
+   |True  -> Some (last xs)
+   |False -> None
+  end
+
+sum_by (f:a -> U64) (xs:&Vec a) : U64 = sum &(map f xs)
+
+flatten (xss:&Vec (Vec a)) : Vec a =
+  fold (\acc xs -> concat_vec &acc &xs) empty xss
+
+enumerate (xs:&Vec a) : Vec (Size, a) =
+  fold (\acc x -> push acc (len acc, dup &x)) empty xs
+
+repeat (n:Size) (x:&a) : Vec a = map (\i -> dup x) &(range 0 n)
+
+partition (p:a -> Bool) (xs:&Vec a) : (Vec a, Vec a) =
+  (filter p xs, filter (\x -> !(p x)) xs)
+
+take_while (p:a -> Bool) (xs:&Vec a) : Vec a =
+  ?position (\x -> !(p x)) xs
+   |Some k -> take k xs
+   |None   -> dup xs
+  end
+
+drop_while (p:a -> Bool) (xs:&Vec a) : Vec a =
+  ?position (\x -> !(p x)) xs
+   |Some k -> drop k xs
+   |None   -> empty
+  end
+
+zip (xs:&Vec a) (ys:&Vec b) : Vec (a, b) =
+  ?(len xs<=len ys)
+   |True  -> zip_from xs ys 0 (len xs) empty
+   |False -> zip_from xs ys 0 (len ys) empty
+  end
+
+zip_from (xs:&Vec a) (ys:&Vec b) (i:Size) (n:Size, n<=len xs && n<=len ys) (acc:Vec (a, b)) : Vec (a, b) =
+  ?(i<n)
+   |True  -> zip_from xs
+                      ys (i + 1) n (push acc (dup &(get xs i), dup &(get ys i)))
+   |False -> acc
+  end
+  %(n - i)
+
+chunks (n:Size, n>0) (xs:&Vec a) : Vec (Vec a) = fold (chunk_step n) empty xs
+
+;; Appends to the last chunk while it has room, else opens a new one.
+chunk_step (n:Size) (acc:Vec (Vec a)) (x:&a) : Vec (Vec a) =
+  ?(len acc>0)
+   |True  -> let k = len acc - 1 in
+             let tail = dup &(get &acc k) in
+             ?(len tail<n)
+              |True  -> set acc k (push tail (dup &x))
+              |False -> push acc (single (dup &x))
+             end
+   |False -> push acc (single (dup &x))
+  end
+
+windows (n:Size, n>0) (xs:&Vec a) : Vec (Vec a) =
+  map (window_at n xs) &(enumerate &(drop (n - 1) xs))
+
+;; ponytail: the `|_` arm is unreachable, as in `position_step`.
+window_at (n:Size) (xs:&Vec a) (pair:&(Size, a)) : Vec a =
+  ?pair |(i, x) -> take n &(drop i xs)
+        |_      -> empty
+  end
+
+dedup (xs:&Vec a) : Vec a = fold dedup_step empty xs
+
+;; Element parameters are borrows: taking one by value would free a slot the
+;; vector still owns.
+dedup_step (acc:Vec a) (x:&a) : Vec a =
+  ?(len acc>0)
+   |True  -> ?(get &acc (len acc - 1)==x)
+              |True  -> acc
+              |False -> push acc (dup &x)
+             end
+   |False -> push acc (dup &x)
+  end
+
+swap (xs:Vec a) (i:Size, i<len xs) (j:Size, j<len xs) : Vec a =
+  let xi = dup &(get &xs i) in
+  let xj = dup &(get &xs j) in
+  set (set xs i xj) j xi
+
+get_or (fallback:a) (xs:&Vec a) (i:Size) : a =
+  ?(i<len xs)
+   |True  -> dup &(get xs i)
+   |False -> fallback
+  end
