@@ -22,7 +22,13 @@ static VbVal vbf_work(VbVal *a) {
   VbVal v_n_1 = a[0];
   VbVal vbret = vb_unit();
   for (;;) {
-    vbret = vb_len(vb_rev(vb_range(vb_int(0), v_n_1)));
+    VbVal t2 = vb_range(vb_int(0), v_n_1);
+    VbVal t3 = vb_rev(t2);
+    vb_dispose(t2);
+    VbVal t4 = t3;
+    VbVal t5 = vb_len(t4);
+    vb_dispose(t4);
+    vbret = t5;
     break;
   }
   vb_release(vbm, vbret);
@@ -33,24 +39,24 @@ static VbVal vbf_work(VbVal *a) {
 static VbVal vbf_spin(VbVal *a) {
   (void)a;
   VbMark vbm = vb_mark();
-  VbVal v_k_2 = a[0];
-  VbVal v_acc_3 = a[1];
+  VbVal v_k_6 = a[0];
+  VbVal v_acc_7 = a[1];
   VbVal vbret = vb_unit();
   for (;;) {
     #line 8 "churn"
-    VbVal t4 = v_k_2;
-    if (vb_eq(t4, vb_int(0))) {
-      vbret = v_acc_3;
+    VbVal t8 = v_k_6;
+    if (vb_eq(t8, vb_int(0))) {
+      vbret = v_acc_7;
       break;
     }
     else if (1) {
-      VbVal v___5 = t4;
-      VbVal t6_a[] = {vb_int(5000)};
-      VbVal t6 = vbf_work(t6_a);
-      VbVal t7 = vb_sub(v_k_2, vb_int(1));
-      VbVal t8 = vb_add(v_acc_3, t6);
-      v_k_2 = t7;
-      v_acc_3 = t8;
+      VbVal v___9 = t8;
+      VbVal t10_a[] = {vb_int(5000)};
+      VbVal t10 = vbf_work(t10_a);
+      VbVal t11 = vb_sub(v_k_6, vb_int(1));
+      VbVal t12 = vb_add(v_acc_7, t10);
+      v_k_6 = t11;
+      v_acc_7 = t12;
       continue;
     }
     else { vb_fail("Churn.spin.match", "no match arm applied"); }
@@ -65,9 +71,15 @@ static VbVal vbf_main(VbVal *a) {
   VbMark vbm = vb_mark();
   VbVal vbret = vb_unit();
   for (;;) {
-    VbVal t9_a[] = {vb_int(2000), vb_int(0)};
-    VbVal t9 = vbf_spin(t9_a);
-    vbret = vb_out(vb_show(t9));
+    VbVal t13_a[] = {vb_int(2000), vb_int(0)};
+    VbVal t13 = vbf_spin(t13_a);
+    VbVal t14 = t13;
+    VbVal t15 = vb_show(t14);
+    vb_dispose(t14);
+    VbVal t16 = t15;
+    VbVal t17 = vb_out(t16);
+    vb_dispose(t16);
+    vbret = t17;
     break;
   }
   vb_release(vbm, vbret);

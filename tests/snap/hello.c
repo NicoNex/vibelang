@@ -19,7 +19,10 @@ static VbVal vbf_main(VbVal *a) {
   VbMark vbm = vb_mark();
   VbVal vbret = vb_unit();
   for (;;) {
-    vbret = vb_out(vb_strz("hello from vibelang\n"));
+    VbVal t1 = vb_strz("hello from vibelang\n");
+    VbVal t2 = vb_out(t1);
+    vb_dispose(t1);
+    vbret = t2;
     break;
   }
   vb_release(vbm, vbret);

@@ -141,6 +141,25 @@ VbVal vb_clos(VbFn fn, const char *name, uint32_t arity) {
   VbVal v; v.tag = VB_CLOS; v.v.p = c; return v;
 }
 
+/* Free one value, at the point its owner dies (spec 4.2,
+   docs/static-drop-roadmap.md). A no-op under the bump allocator, where
+   `vb_free` is itself a no-op, so the same generated C serves both.
+
+   ponytail: shallow. The spine goes, the elements do not: `vb_rev` and friends
+   copy element pointers into a new vector, so two vectors can hold the same
+   `Str` and freeing through both would free it twice (docs/aliasing-audit.md
+   gap 3). Upgrade path: a deep drop for values the frontend knows are unshared,
+   which is the same knowledge that would let it stop suppressing those drops. */
+void vb_dispose(VbVal v) {
+  switch (v.tag) {
+    case VB_STR:  { VbStr  *s = v.v.p; vb_free(s->p);    vb_free(s); break; }
+    case VB_VEC:  { VbVec  *w = v.v.p; vb_free(w->a);    vb_free(w); break; }
+    case VB_OBJ:  { VbObj  *o = v.v.p; vb_free(o->f);    vb_free(o); break; }
+    case VB_CLOS: { VbClos *c = v.v.p; vb_free(c->args); vb_free(c); break; }
+    default: break;
+  }
+}
+
 /* -------------------------------------------------------------- failures */
 
 void vb_fail(const char *path, const char *what) {
@@ -343,6 +362,8 @@ static void vec_push(VbVec *w, VbVal x) {
     size_t cap = w->cap ? w->cap * 2 : 8;
     VbVal *a = vb_alloc(sizeof(VbVal) * cap);
     for (size_t i = 0; i < w->n; i++) a[i] = w->a[i];
+    /* The old array is internal to this vector: no other value points at it. */
+    vb_free(w->a);
     w->a = a; w->cap = cap;
   }
   w->a[w->n++] = x;

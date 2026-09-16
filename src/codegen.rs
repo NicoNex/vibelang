@@ -29,10 +29,13 @@ pub struct Gen<'a> {
     inplace: HashSet<(usize, usize, usize)>,
     releasable: HashSet<String>,
     /// Where each owned value dies, keyed by the span the free attaches to
-    /// (docs/static-drop-roadmap.md). Carried, not acted on: the bump allocator
-    /// cannot free one object, so Task 7 comes first.
-    #[allow(dead_code)]
+    /// (docs/static-drop-roadmap.md).
     drops: HashMap<(usize, usize, usize), Vec<crate::own::DropSite>>,
+    /// Values whose scope ends at the next exit of the body being emitted,
+    /// innermost last. A scope in tail position ends at a `break` or a
+    /// `continue` that is emitted deeper in, so the free cannot simply follow
+    /// the body: it is flushed at the exit itself.
+    pending: Vec<String>,
 }
 
 /// name -> (arity, C call template). `$0`..`$n` are the arguments, `$P` the
@@ -160,6 +163,7 @@ pub fn generate(m: &Module, ck: &Checked, file: &str) -> Result<String, Vec<Diag
         cur_path: String::new(),
         inplace: crate::own::inplace_updates(m, ck),
         releasable: crate::escape::releasable(m, ck),
+        pending: Vec::new(),
         drops: crate::own::drop_points(m, ck).into_iter().fold(
             HashMap::new(),
             |mut acc: HashMap<_, Vec<_>>, d| {
@@ -337,6 +341,73 @@ impl<'a> Gen<'a> {
         o
     }
 
+    /// The C variables to free at `span`, for one kind of site. A name with no
+    /// variable in scope is not this scope's to free and is skipped.
+    fn drops_at(&self, span: Span, when: crate::own::DropWhen, only: Option<&str>) -> Vec<String> {
+        let Some(sites) = self.drops.get(&(span.file, span.line, span.col)) else {
+            return Vec::new();
+        };
+        sites
+            .iter()
+            .filter(|d| d.when == when && only.is_none_or(|n| d.name == n))
+            .filter_map(|d| self.lookup(&d.name))
+            .collect()
+    }
+
+    /// Whether the value computed at this span is a borrowed temporary: one no
+    /// name holds, lent to a call that has now returned.
+    fn is_temp(&self, span: Span) -> bool {
+        self.drops
+            .get(&(span.file, span.line, span.col))
+            .is_some_and(|v| v.iter().any(|d| d.when == crate::own::DropWhen::Temp))
+    }
+
+    /// Emit the arguments of a call, forcing every borrowed temporary into a
+    /// variable of its own so the call can be followed by its free.
+    fn args_with_temps(&mut self, args: &[Expr], out: &mut String) -> (Vec<String>, Vec<String>) {
+        let mut vs = Vec::new();
+        let mut temps = Vec::new();
+        for a in args {
+            let v = self.ex(a, out);
+            let inner = match &a.kind {
+                ExprKind::Borrow(x) => x,
+                _ => a,
+            };
+            if self.is_temp(inner.span) {
+                let t = self.fresh();
+                out.push_str(&format!("VbVal {} = {};\n", t, v));
+                temps.push(t.clone());
+                vs.push(t);
+            } else {
+                vs.push(v);
+            }
+        }
+        (vs, temps)
+    }
+
+    /// The call's result, with the temporaries it borrowed freed behind it. The
+    /// result has to be forced into a variable first: the frees are statements
+    /// and the call was an expression.
+    fn after_call(&mut self, call: String, temps: &[String], out: &mut String) -> String {
+        if temps.is_empty() {
+            return call;
+        }
+        let d = self.fresh();
+        out.push_str(&format!("VbVal {} = {};\n", d, call));
+        for t in temps {
+            out.push_str(&format!("vb_dispose({});\n", t));
+        }
+        d
+    }
+
+    /// Free everything the enclosing scopes are about to lose, innermost first.
+    /// The caller has already evaluated whatever it still needs to read.
+    fn flush(&self, out: &mut String) {
+        for c in self.pending.iter().rev() {
+            out.push_str(&format!("vb_dispose({});\n", c));
+        }
+    }
+
     fn function(&mut self, f: &FunDecl) -> String {
         let path = format!("{}.{}", f.home, f.name);
         self.cur_fn = f.name.clone();
@@ -374,6 +445,14 @@ impl<'a> Gen<'a> {
 
         let mut body = String::new();
         self.tail(&f.body, &mut body);
+        // A parameter the body never handed on dies with the frame, after the
+        // loop the body compiles to and before the result leaves.
+        let mut epilogue = String::new();
+        for c in self.drops_at(f.body.span, crate::own::DropWhen::ScopeEnd, None) {
+            if params.contains(&c) {
+                epilogue.push_str(&format!("  vb_dispose({});\n", c));
+            }
+        }
         self.pop_scope();
 
         // Nothing the body allocates outlives it unless it escapes, and the
@@ -385,13 +464,14 @@ impl<'a> Gen<'a> {
             ("", "")
         };
         format!(
-            "{}static VbVal vbf_{}(VbVal *a) {{\n  (void)a;\n{}{}{}  VbVal vbret = vb_unit();\n  for (;;) {{\n{}  }}\n{}  return vbret;\n}}\n\n",
+            "{}static VbVal vbf_{}(VbVal *a) {{\n  (void)a;\n{}{}{}  VbVal vbret = vb_unit();\n  for (;;) {{\n{}  }}\n{}{}  return vbret;\n}}\n\n",
             self.line(f.span),
             cname(&f.name),
             mark,
             head,
             pre,
             indent(&body, 4),
+            epilogue,
             release
         )
     }
@@ -448,7 +528,14 @@ impl<'a> Gen<'a> {
                 self.push_scope();
                 let c = self.bind(n);
                 out.push_str(&format!("VbVal {} = {};\n", c, v));
+                let mark = self.pending.len();
+                self.pending.extend(self.drops_at(
+                    body.span,
+                    crate::own::DropWhen::ScopeEnd,
+                    Some(n),
+                ));
                 self.tail(body, out);
+                self.pending.truncate(mark);
                 self.pop_scope();
             }
             ExprKind::Match(scrut, arms) => {
@@ -470,6 +557,13 @@ impl<'a> Gen<'a> {
                         for (t, v) in tmps.iter().zip(vals.iter()) {
                             out.push_str(&format!("VbVal {} = {};\n", t, v));
                         }
+                        // The new arguments have read the old values by now;
+                        // the assignment below is what makes them unreachable,
+                        // so the frees go between the two.
+                        for c in self.drops_at(e.span, crate::own::DropWhen::BackEdge, None) {
+                            out.push_str(&format!("vb_dispose({});\n", c));
+                        }
+                        self.flush(out);
                         for (p, t) in self.cur_params.clone().iter().zip(tmps.iter()) {
                             out.push_str(&format!("{} = {};\n", p, t));
                         }
@@ -478,10 +572,12 @@ impl<'a> Gen<'a> {
                     }
                 }
                 let v = self.ex(e, out);
+                self.flush(out);
                 out.push_str(&format!("vbret = {};\nbreak;\n", v));
             }
             _ => {
                 let v = self.ex(e, out);
+                self.flush(out);
                 out.push_str(&format!("vbret = {};\nbreak;\n", v));
             }
         }
@@ -508,12 +604,23 @@ impl<'a> Gen<'a> {
             let mut inner = String::new();
             self.push_scope();
             self.pat_bind(p, &sv, &mut inner);
+            // An arm that still owns a value another arm gave away frees it
+            // where the arm ends (own.rs, Task 3 of the drop roadmap).
+            let arm_drops = self.drops_at(body.span, crate::own::DropWhen::ScopeEnd, None);
             match dest {
                 Some(d) => {
                     let v = self.ex(body, &mut inner);
                     inner.push_str(&format!("{} = {};\n", d, v));
+                    for c in &arm_drops {
+                        inner.push_str(&format!("vb_dispose({});\n", c));
+                    }
                 }
-                None => self.tail(body, &mut inner),
+                None => {
+                    let mark = self.pending.len();
+                    self.pending.extend(arm_drops);
+                    self.tail(body, &mut inner);
+                    self.pending.truncate(mark);
+                }
             }
             self.pop_scope();
             out.push_str(&indent(&inner, 2));
@@ -691,6 +798,11 @@ impl<'a> Gen<'a> {
                 let c = self.bind(n);
                 out.push_str(&format!("VbVal {} = {};\n", c, v));
                 let r = self.ex(body, out);
+                // In value position the scope ends here, with no jump to sit in
+                // front of: the free simply follows the body.
+                for d in self.drops_at(body.span, crate::own::DropWhen::ScopeEnd, Some(n)) {
+                    out.push_str(&format!("vb_dispose({});\n", d));
+                }
                 self.pop_scope();
                 r
             }
@@ -942,20 +1054,21 @@ impl<'a> Gen<'a> {
             if self.lookup(n).is_none() {
                 // fmt is variadic by rule, not by signature.
                 if n == "fmt" {
-                    let vs: Vec<String> = args.iter().map(|a| self.ex(a, out)).collect();
+                    let (vs, temps) = self.args_with_temps(args, out);
                     let rest = &vs[1..];
-                    return format!(
+                    let call = format!(
                         "vb_fmt({}, {}{}{})",
                         vs[0],
                         rest.len(),
                         if rest.is_empty() { "" } else { ", " },
                         rest.join(", ")
                     );
+                    return self.after_call(call, &temps, out);
                 }
                 if let Some(ci) = self.ck.data.ctors.get(n).cloned() {
                     if args.len() == ci.args.len() {
-                        let vs: Vec<String> = args.iter().map(|a| self.ex(a, out)).collect();
-                        return format!(
+                        let (vs, temps) = self.args_with_temps(args, out);
+                        let call = format!(
                             "vb_obj(&vbi_{}, {}, {}{}{})",
                             cname(n),
                             ci.tag,
@@ -963,6 +1076,7 @@ impl<'a> Gen<'a> {
                             if vs.is_empty() { "" } else { ", " },
                             vs.join(", ")
                         );
+                        return self.after_call(call, &temps, out);
                     }
                 }
                 if let Some(sig) = self.ck.ext.get(n).cloned() {
@@ -972,22 +1086,25 @@ impl<'a> Gen<'a> {
                 }
                 if let Some(ar) = self.arity.get(n).copied() {
                     if args.len() == ar {
-                        let vs: Vec<String> = args.iter().map(|a| self.ex(a, out)).collect();
+                        let (vs, temps) = self.args_with_temps(args, out);
                         let d = self.fresh();
                         out.push_str(&format!("VbVal {}_a[] = {{{}}};\n", d, vs.join(", ")));
                         out.push_str(&format!("VbVal {} = vbf_{}({}_a);\n", d, cname(n), d));
+                        for t in &temps {
+                            out.push_str(&format!("vb_dispose({});\n", t));
+                        }
                         return d;
                     }
                 }
                 if let Some((ar, tpl)) = builtin(n) {
                     if args.len() == ar {
-                        let vs: Vec<String> = args.iter().map(|a| self.ex(a, out)).collect();
+                        let (vs, temps) = self.args_with_temps(args, out);
                         let mut b = tpl;
                         for (i, v) in vs.iter().enumerate() {
                             b = b.replace(&format!("${}", i), v);
                         }
                         b = b.replace("$P", &cstring(&format!("{}.{}", self.cur_path, n)));
-                        return b;
+                        return self.after_call(b, &temps, out);
                     }
                 }
             }

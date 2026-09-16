@@ -1,0 +1,15 @@
+mod Loop
+
+;; The shape the bump allocator has no answer for: a loop that allocates every
+;; iteration and keeps nothing. The release a frame does on the way out never
+;; runs here — the recursive call is the frame, and it is a `continue`. Under
+;; exact drops the string dies where it stops being used, so the figure is flat
+;; whether the loop runs two million times or for ever.
+step (k:U64) (acc:U32) : U32 =
+  ?k |0 -> acc
+     |_ -> step (k - 1) (acc + u32 (len &(concat "x" "y")))
+  end
+  %k
+
+main : E! Unit =
+  out (show (step 2000000 0))

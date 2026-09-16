@@ -614,7 +614,7 @@ git commit -m "runtime: an allocation path that can free one object"
 
 **Interfaces:** for each record and variant type in `Checked::data`, codegen emits the type's drop function — `_Drop_T` in the design's terms, spelled `static void vbd_<T>(VbVal v);` to match the `vbf_` / `vbi_` / `vbe_` prefixes `src/codegen.rs` already uses. It frees the nested strings and vectors the value owns, then the value itself. At each drop site, `vbd_<T>(x);` is emitted for the statically known `T`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// Peak resident set of a run, in bytes, read from `/usr/bin/time -l` — the
@@ -658,27 +658,67 @@ main : E! Unit =
 
 The threshold is a ceiling, not a benchmark: the assertion is that the figure is flat, in the same sense the README's `churn` figure is flat. Do not tune it into a performance claim.
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cargo test --test drop`
 Expected: FAIL — the loop grows without bound.
 
-- [ ] **Step 3: Emit the drop functions**
+- [x] **Step 3: Emit the drop functions**
+
+Landed as one generic `vb_dispose(VbVal)` rather than a `vbd_<T>` per type. The
+value is dynamically tagged, so the runtime can already see what it is holding;
+a static per-type drop needs resolved types threaded into codegen, which is the
+debt `vibert.h` opens with. The count Step 4 asks for is therefore the whole
+table: every drop is a tag dispatch today.
+
+The drop is also **shallow** — the spine, not the elements. `rev` and friends
+copy element pointers into a fresh vector, so a deep drop would free an element
+twice (docs/aliasing-audit.md gap 3). Shallow is what makes those same
+operations safe to drop at all, and it is why `PRELUDE_SHARES` lists only the
+functions whose result *is* part of an argument.
+
+**Temporaries, which this plan did not account for.** `examples/churn.vibe` and
+the `loop.vibe` below both allocate values no name ever holds — `len &(range 0
+n)` — and a drop table keyed on binders never frees them. A borrow lives only
+for the call that lent it (§4.4), so a computed value in a borrow position is
+dead when the call returns: that is `DropWhen::Temp`. Two callees break the
+rule and are excluded — a prelude function whose result points into its argument
+(`to_cstr`), and any `ext c` function, because C may keep the pointer.
 
 Walk `Checked::data` to generate one `vbd_<T>` per type, recursing into fields whose type is itself heap-carrying and calling `vb_free` on the payload pointers. `VbStr` owns `p`; `VbVec` owns `a` and each element; `VbObj` owns `f` and each field; `VbClos` owns `args`.
 
-- [ ] **Step 4: Emit the drops**
+- [x] **Step 4: Emit the drops**
 
 At each site in the table, emit the call. Respect the ordering contract from Task 5: back-edge drops precede the parameter assignments.
 
 **The zero-cost claim depends on a debt already recorded elsewhere.** `runtime/vibert.h` opens with it: values are dynamically tagged, arithmetic dispatches on the tag, and the upgrade path is to thread resolved types into codegen. Until that lands, a drop cannot always name a static `T` and must dispatch on the tag at run time — which is a call and a branch, not zero cost. Emit the static call where the type is known and fall back to a generic `vb_drop(VbVal)` where it is not; count the fallbacks and report the count, because that number is the remaining distance to the objective.
 
-- [ ] **Step 5: Run the tests under a checker**
+- [x] **Step 5: Run the tests under a checker**
 
 Run: `cargo test`, then rebuild the examples with `-fsanitize=address` and run them.
 Expected: PASS, no double free, no use-after-free. Leaks are now visible for the first time and are findings, not noise.
 
-- [ ] **Step 6: Commit**
+Every example and every `tests/*.vibe` with a `main` was rebuilt with
+`-fsanitize=address,undefined -DVB_EXACT_DROP` and run: clean. The one finding
+was real and is fixed above — `puts (to_cstr "through libc")` freed the string
+the `CStr` pointed into, which is gap 8 arriving exactly where the audit said it
+would.
+
+Measured, same machine as Task 7:
+
+```console
+$ /usr/bin/time -l ./churn-exact       # was 330 MB with no drops
+        1556480  maximum resident set size
+$ /usr/bin/time -l ./loop-exact        # 197 MB under the bump allocator
+        1474560  maximum resident set size
+```
+
+`examples/loop.vibe` is the point of the plan: two million iterations, an
+allocation in each, nothing kept, and a flat figure. Under the bump allocator
+the same program grows to 197 MB, because the frame it would release on the way
+out is the frame that never returns.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/codegen.rs tests/drop.rs examples/loop.vibe

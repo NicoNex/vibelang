@@ -56,6 +56,10 @@ pub enum DropWhen {
     ScopeEnd,
     /// before the parameter assignments of the self-tail-call at `at`
     BackEdge,
+    /// after the call that borrowed the unnamed value computed at `at`. A
+    /// borrow lives only for the call that lent it (§4.4), so the temporary is
+    /// dead the moment the call returns, and no name ever held it.
+    Temp,
 }
 
 /// Where every owned value dies. The same traversal that reports affine misuse
@@ -146,6 +150,10 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             sigs: &sigs,
             escaping,
             leaves,
+            exts: m
+                .exts()
+                .flat_map(|e| e.sigs.iter().map(|s| s.name.clone()))
+                .collect(),
             fun: f.name.clone(),
             arity: f.params.iter().map(|p| p.names.len()).sum(),
             shared: borrows.iter().map(|b| (*b).to_string()).collect(),
@@ -365,6 +373,9 @@ struct State<'a> {
     /// How many drops that bit suppressed: the distance between what is freed
     /// and what could be.
     suppressed: usize,
+    /// `ext c` names. C may keep a pointer for as long as it likes, so nothing
+    /// lent to one is freed when the call returns (spec §10.1).
+    exts: HashSet<String>,
     /// This function's name and how many arguments a saturated call takes: a
     /// call matching both is the back edge codegen compiles to `continue`.
     fun: String,
@@ -563,6 +574,44 @@ impl State<'_> {
                         let mut captured = HashSet::new();
                         names_in(a, &mut captured);
                         self.shared.extend(captured);
+                    }
+                    // `len &(range 0 n)` allocates a vector no name ever holds.
+                    // The callee borrowed it, so it is dead when the call
+                    // returns, and it is the shape `examples/churn.vibe` is
+                    // about: without this the value would live to the end of
+                    // the frame, or, inside a loop, for ever.
+                    // A callee whose result can point into what it was lent
+                    // keeps the value alive past its own return, and so does C.
+                    let lends_onward = matches!(&h.kind, Var(n)
+                        if PRELUDE_SHARES.contains(&n.as_str()) || self.exts.contains(n));
+                    if m == Mode::Borrow && !lends_onward {
+                        let inner = match &a.kind {
+                            Borrow(x) => x,
+                            _ => a,
+                        };
+                        // Whether the source wrote the `&` does not matter:
+                        // the position is a borrow either way.
+                        // A name is somebody's and a scalar literal is nobody's
+                        // allocation, so neither is a temporary to free.
+                        let computed = !matches!(
+                            inner.kind,
+                            Var(_)
+                                | Field(..)
+                                | Borrow(_)
+                                | Int(_)
+                                | Float(_)
+                                | Bool(_)
+                                | Char(_)
+                                | Unit
+                        );
+                        if computed && !self.maybe_shared(inner) {
+                            self.drops.push(DropSite {
+                                name: String::new(),
+                                at: inner.span,
+                                path: self.path.clone(),
+                                when: DropWhen::Temp,
+                            });
+                        }
                     }
                     self.walk(a, m, owned);
                 }

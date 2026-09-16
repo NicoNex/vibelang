@@ -25,8 +25,8 @@ fn a_let_bound_value_nothing_takes_is_dropped_at_the_end_of_its_scope() {
 fn a_value_given_away_is_not_dropped_by_the_giver() {
     let d = drops("tests/drop_move.vibe");
     assert!(
-        !d.contains("DropMove.give"),
-        "`s` belongs to `eat` now, so `give` frees nothing:\n{d}"
+        !d.lines().any(|l| l == "DropMove.give.body: drop s"),
+        "`s` belongs to `eat` now, so `give` does not free it:\n{d}"
     );
     assert!(
         d.contains("DropMove.eat"),
@@ -47,10 +47,11 @@ fn an_arm_that_keeps_the_value_drops_it_and_the_arm_that_gives_it_away_does_not(
 #[test]
 fn a_value_that_leaves_through_the_return_is_never_dropped() {
     let d = drops("tests/drop_escape.vibe");
-    assert!(!d.contains("drop s"), "`s` is the result:\n{d}");
-    assert!(!d.contains("drop t"), "`t` is inside the result:\n{d}");
+    let drops_name = |n: &str| d.lines().any(|l| l.ends_with(&format!(": drop {n}")));
+    assert!(!drops_name("s"), "`s` is the result:\n{d}");
+    assert!(!drops_name("t"), "`t` is inside the result:\n{d}");
     assert!(
-        !d.contains("drop r"),
+        !drops_name("r"),
         "`r.s` is a pointer into `r`, so `r` outlives the frame too:\n{d}"
     );
 }
@@ -115,4 +116,47 @@ fn a_value_that_may_alias_another_is_not_dropped_here() {
         d.contains("1 drop(s) suppressed"),
         "and the count says so:\n{d}"
     );
+}
+
+/// Peak resident set of a run, in bytes, read from `/usr/bin/time -l` — the
+/// tool the README's `churn` figure was measured with. The crate has no
+/// dependencies, so there is no `getrusage` to call; the platform gate is the
+/// price of not adding one.
+#[cfg(target_os = "macos")]
+fn peak_rss(bin: &std::path::Path) -> u64 {
+    let o = Command::new("/usr/bin/time")
+        .arg("-l")
+        .arg(bin)
+        .output()
+        .expect("time runs");
+    let err = String::from_utf8_lossy(&o.stderr);
+    let line = err
+        .lines()
+        .find(|l| l.contains("maximum resident set size"))
+        .unwrap_or_else(|| panic!("no rss line in:\n{err}"));
+    line.split_whitespace()
+        .next()
+        .expect("a number")
+        .parse()
+        .expect("a number")
+}
+
+/// The point of the whole exercise: a loop that allocates every iteration and
+/// keeps nothing does not grow. The threshold is a ceiling, not a benchmark —
+/// the claim is that the figure is flat, not that it is any particular number.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_loop_that_keeps_nothing_does_not_grow() {
+    let dir = std::env::temp_dir().join("vibe-drop-tests");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let bin = dir.join("loop-exact");
+    let o = Command::new(VIBE)
+        .args(["build", "--alloc=exact", "examples/loop.vibe", "-o"])
+        .arg(&bin)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("vibe runs");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let rss = peak_rss(&bin);
+    assert!(rss < 8 * 1024 * 1024, "the loop grew to {rss} bytes");
 }

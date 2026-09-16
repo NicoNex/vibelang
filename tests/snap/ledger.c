@@ -186,22 +186,28 @@ static VbVal vbf_load(VbVal *a) {
     #line 32 "ledger"
     VbVal v_txt_34 = vb_read(v_p_33);
     #line 33 "ledger"
-    VbVal t35 = vb_seq(vb_map(vb_clos(vbf_parse, "parse", 1), vb_lines(v_txt_34)));
-    if (vb_tag(t35) == 1) {
-      VbVal v_e_36 = vb_field(t35, 0);
-      VbVal t37 = vb_apply1(vb_clos(vbw_Er, "Er", 1), v_e_36);
-      vbret = t37;
+    VbVal t35 = vb_lines(v_txt_34);
+    VbVal t36 = vb_map(vb_clos(vbf_parse, "parse", 1), t35);
+    vb_dispose(t35);
+    VbVal t37 = vb_seq(t36);
+    if (vb_tag(t37) == 1) {
+      VbVal v_e_38 = vb_field(t37, 0);
+      VbVal t39 = vb_apply1(vb_clos(vbw_Er, "Er", 1), v_e_38);
+      vb_dispose(v_txt_34);
+      vbret = t39;
       break;
     }
-    else if (vb_tag(t35) == 0 && vb_as_vec(vb_field(t35, 0))->n == 0) {
-      VbVal t38 = vb_apply1(vb_clos(vbw_Er, "Er", 1), vb_obj(&vbi_Void, 2, 0));
-      vbret = t38;
-      break;
-    }
-    else if (vb_tag(t35) == 0) {
-      VbVal v_ts_39 = vb_field(t35, 0);
-      VbVal t40 = vb_apply1(vb_clos(vbw_Ok, "Ok", 1), v_ts_39);
+    else if (vb_tag(t37) == 0 && vb_as_vec(vb_field(t37, 0))->n == 0) {
+      VbVal t40 = vb_apply1(vb_clos(vbw_Er, "Er", 1), vb_obj(&vbi_Void, 2, 0));
+      vb_dispose(v_txt_34);
       vbret = t40;
+      break;
+    }
+    else if (vb_tag(t37) == 0) {
+      VbVal v_ts_41 = vb_field(t37, 0);
+      VbVal t42 = vb_apply1(vb_clos(vbw_Ok, "Ok", 1), v_ts_41);
+      vb_dispose(v_txt_34);
+      vbret = t42;
       break;
     }
     else { vb_fail("Ledger.load.match", "no match arm applied"); }
@@ -217,25 +223,44 @@ static VbVal vbf_main(VbVal *a) {
   VbVal vbret = vb_unit();
   for (;;) {
     #line 40 "ledger"
-    VbVal t41_a[] = {vb_strz("ledger.csv")};
-    VbVal t41 = vbf_load(t41_a);
-    VbVal v_r_42 = t41;
+    VbVal t43 = vb_strz("ledger.csv");
+    VbVal t44_a[] = {t43};
+    VbVal t44 = vbf_load(t44_a);
+    vb_dispose(t43);
+    VbVal v_r_45 = t44;
     #line 41 "ledger"
-    VbVal t43 = v_r_42;
-    if (vb_tag(t43) == 1) {
-      VbVal v_e_44 = vb_field(t43, 0);
-      vbret = vb_warn(vb_show(v_e_44));
+    VbVal t46 = v_r_45;
+    if (vb_tag(t46) == 1) {
+      VbVal v_e_47 = vb_field(t46, 0);
+      VbVal t48 = vb_show(v_e_47);
+      VbVal t49 = vb_warn(t48);
+      vb_dispose(t48);
+      vb_dispose(v_r_45);
+      vbret = t49;
       break;
     }
-    else if (vb_tag(t43) == 0) {
-      VbVal v_ts_45 = vb_field(t43, 0);
-      VbVal t46_a[] = {v_ts_45};
-      VbVal t46 = vbf_total(t46_a);
-      VbVal t47_a[] = {v_ts_45};
-      VbVal t47 = vbf_mean(t47_a);
-      VbVal t48_a[] = {v_ts_45};
-      VbVal t48 = vbf_top(t48_a);
-      vbret = vb_out(vb_fmt(vb_strz("n={} tot={} avg={} top={}"), 4, vb_len(v_ts_45), t46, t47, vb_field(t48, 0)));
+    else if (vb_tag(t46) == 0) {
+      VbVal v_ts_50 = vb_field(t46, 0);
+      VbVal t51 = vb_strz("n={} tot={} avg={} top={}");
+      VbVal t52 = vb_len(v_ts_50);
+      VbVal t53_a[] = {v_ts_50};
+      VbVal t53 = vbf_total(t53_a);
+      VbVal t54 = t53;
+      VbVal t55_a[] = {v_ts_50};
+      VbVal t55 = vbf_mean(t55_a);
+      VbVal t56 = t55;
+      VbVal t57_a[] = {v_ts_50};
+      VbVal t57 = vbf_top(t57_a);
+      VbVal t58 = vb_fmt(t51, 4, t52, t54, t56, vb_field(t57, 0));
+      vb_dispose(t51);
+      vb_dispose(t52);
+      vb_dispose(t54);
+      vb_dispose(t56);
+      VbVal t59 = t58;
+      VbVal t60 = vb_out(t59);
+      vb_dispose(t59);
+      vb_dispose(v_r_45);
+      vbret = t60;
       break;
     }
     else { vb_fail("Ledger.main.match", "no match arm applied"); }

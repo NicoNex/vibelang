@@ -61,6 +61,8 @@ void vb_init(void);
 void *vb_alloc(size_t n);
 /* Frees one object under -DVB_EXACT_DROP; a no-op under the bump allocator. */
 void vb_free(void *p);
+/* Frees one value where its owner dies. Shallow: see the note in vibert.c. */
+void vb_dispose(VbVal v);
 
 /* --- constructors --- */
 VbVal vb_unit(void);

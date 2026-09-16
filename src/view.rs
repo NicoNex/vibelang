@@ -53,6 +53,9 @@ fn drops(m: &Module, ck: &Checked) -> String {
             crate::own::DropWhen::BackEdge => {
                 format!("{}.body: drop {} before the back edge\n", d.path, d.name)
             }
+            crate::own::DropWhen::Temp => {
+                format!("{}.body: drop the borrowed temporary\n", d.path)
+            }
         })
         .collect();
     // The count is the point: it is how much of the program's memory the
