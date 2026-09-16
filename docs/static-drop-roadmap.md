@@ -88,6 +88,18 @@ Two honest gaps, because the map is not literally the drop table:
 - `cargo test` green on `master`, and the `examples/churn.vibe` figure reproduced locally. It is the before-picture, and the after-picture has to be compared against a number measured on the same machine.
 - **§4.6 implemented as an error, not as a guess.** `src/own.rs` says outright that a lambda stored in a structure that a callee then returns is missed, and that deciding conservatively costs no soundness "because the direction it errs in is *read*, and reads are already checked." That sentence stops being true the moment drops are emitted: under-approximating escape then means freeing something that escaped. §4.6 already asks for an error demanding an explicit `move` when the analysis cannot decide. That error must exist and fire before Task 8, and it is the gate on the whole second half of this plan.
 - **A decision about aliasing.** The README states that there is no full borrow checker: affine use is checked, the aliasing rules beyond it are not. Under a bump allocator an unsound alias costs nothing. Under exact drop it is a double free. Either the aliasing rules get checked, or Task 8 is not safe to enable by default. This is not scheduled below; it is a precondition, and it may be larger than this plan.
+
+  **Decided, the conservative way** ([`aliasing-audit.md`](aliasing-audit.md),
+  "conservative suppression"). Gaps 1, 5 and 6 are closed as local checks
+  (`own.borrow_escapes`, `own.borrow_after_move`, `own.use_after_update`). Gaps
+  2, 3, 4 and 8 are the may-alias family, and instead of proving them absent the
+  compiler declines to free anything that may be one: `types::PRELUDE_SHARES`
+  names the runtime functions that hand out an interior pointer, a field read
+  and a pattern binder carry the same bit, and `own::shared_suppressed` counts
+  every drop the bit suppressed. What is left is a leak proportional to how much
+  of a function's data came from outside it — never the loop shape this plan
+  exists for, whose allocations are built fresh in the body. Gap 7's second half
+  is region inference and stays out.
 - **An allocator that can free one object.** `vb_alloc` cannot, by construction. Task 7 is that work and everything after it depends on it.
 - The backend roadmap's IR decision, or an explicit agreement to defer it. See "Open decisions".
 

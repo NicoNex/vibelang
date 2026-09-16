@@ -121,6 +121,35 @@ type Fault = Overflow | DivZero | OutOfBounds | BadParse
 
 /// Prelude signatures. `name : type`, one per line. Everything here is
 /// implemented by the C runtime in runtime/vibert.c.
+/// Prelude names whose result can be a pointer into an argument rather than a
+/// fresh value. `get` returns the element itself (`return s->a[k]`), and the
+/// structural vector operations allocate a new spine while copying the same
+/// element pointers into it, so two owned names end up over one set of values
+/// (docs/aliasing-audit.md, gaps 2, 3 and 8).
+///
+/// A binder holding one of these carries the *maybe-shared* bit in `own.rs`, and
+/// nothing carrying it is freed by the frame that named it. The table is the
+/// compiler's own knowledge of its runtime, written by a human once; §4.2's ban
+/// is on lifetime annotations in the source language, which this is not.
+pub const PRELUDE_SHARES: &[&str] = &[
+    "get",
+    "max_by",
+    "min_by",
+    "sum",
+    "fold",
+    "push",
+    "set",
+    "rev",
+    "filter",
+    "sort_by",
+    "map",
+    "concat_vec",
+    "take",
+    "drop",
+    "seq",
+    "to_cstr",
+];
+
 pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     // Vec
     ("empty", "Vec a"),

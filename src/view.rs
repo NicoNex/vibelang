@@ -46,7 +46,7 @@ pub fn render(m: &Module, ck: &Checked, mode: Mode) -> String {
 /// tool for work in progress: the backend does not act on it yet
 /// (docs/static-drop-roadmap.md).
 fn drops(m: &Module, ck: &Checked) -> String {
-    crate::own::drop_points(m, ck)
+    let mut out: String = crate::own::drop_points(m, ck)
         .iter()
         .map(|d| match d.when {
             crate::own::DropWhen::ScopeEnd => format!("{}.body: drop {}\n", d.path, d.name),
@@ -54,7 +54,16 @@ fn drops(m: &Module, ck: &Checked) -> String {
                 format!("{}.body: drop {} before the back edge\n", d.path, d.name)
             }
         })
-        .collect()
+        .collect();
+    // The count is the point: it is how much of the program's memory the
+    // compiler declines to free because it cannot prove nobody else holds it.
+    let n = crate::own::shared_suppressed(m, ck);
+    if n > 0 {
+        out.push_str(&format!(
+            "{n} drop(s) suppressed: the value may alias one the caller owns\n"
+        ));
+    }
+    out
 }
 
 // ------------------------------------------------------------------ grouping

@@ -102,3 +102,17 @@ fn drop_points_change_no_emitted_c_yet() {
         );
     }
 }
+
+#[test]
+fn a_value_that_may_alias_another_is_not_dropped_here() {
+    let d = drops("tests/drop_alias.vibe");
+    assert!(d.contains("drop v"), "the vector is this frame's:\n{d}");
+    assert!(
+        !d.contains("drop x"),
+        "`x` is an element of `v`, not a value of its own:\n{d}"
+    );
+    assert!(
+        d.contains("1 drop(s) suppressed"),
+        "and the count says so:\n{d}"
+    );
+}

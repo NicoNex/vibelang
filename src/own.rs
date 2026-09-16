@@ -22,7 +22,7 @@
 use crate::ast::*;
 use crate::diag::{Diag, Span};
 use crate::infer::Checked;
-use crate::types::{is_num, is_special, PRELUDE_SIGS};
+use crate::types::{is_num, is_special, PRELUDE_SHARES, PRELUDE_SIGS};
 use std::collections::{HashMap, HashSet};
 
 pub fn check(m: &Module, ck: &Checked) -> Vec<Diag> {
@@ -67,13 +67,26 @@ pub fn drop_points(m: &Module, ck: &Checked) -> Vec<DropSite> {
     v
 }
 
-type Analysis = (Vec<Diag>, HashSet<(usize, usize, usize)>, Vec<DropSite>);
+/// How many drops the maybe-shared bit suppressed. The count is the distance
+/// between what this frees and what it could free if aliasing were checked
+/// rather than assumed (docs/aliasing-audit.md).
+pub fn shared_suppressed(m: &Module, ck: &Checked) -> usize {
+    run(m, ck).3
+}
+
+type Analysis = (
+    Vec<Diag>,
+    HashSet<(usize, usize, usize)>,
+    Vec<DropSite>,
+    usize,
+);
 
 fn run(m: &Module, ck: &Checked) -> Analysis {
     let sigs = borrowed_params(m);
     let mut out = Vec::new();
     let mut inplace = HashSet::new();
     let mut drops = Vec::new();
+    let mut suppressed = 0usize;
     for f in m.funs().filter(|f| !f.ghost) {
         // A borrow lives for the call that lent it (spec §4.4), so returning
         // one hands the caller a pointer into a value it may already have
@@ -135,6 +148,8 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             leaves,
             fun: f.name.clone(),
             arity: f.params.iter().map(|p| p.names.len()).sum(),
+            shared: borrows.iter().map(|b| (*b).to_string()).collect(),
+            suppressed: 0,
         };
         let mut owned: Vec<(&str, bool)> = Vec::new();
         for p in &f.params {
@@ -148,19 +163,15 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
         // never hands on dies with that frame.
         for (n, _) in &owned {
             if !st.moved.contains_key(*n) && !st.leaves.contains(*n) {
-                st.drops.push(DropSite {
-                    name: (*n).to_string(),
-                    at: f.body.span,
-                    path: st.path.clone(),
-                    when: DropWhen::ScopeEnd,
-                });
+                st.drop_site(n, f.body.span, DropWhen::ScopeEnd);
             }
         }
         out.append(&mut st.errors);
         inplace.extend(st.inplace.drain());
         drops.append(&mut st.drops);
+        suppressed += st.suppressed;
     }
-    (out, inplace, drops)
+    (out, inplace, drops, suppressed)
 }
 
 /// Argument positions the callee declared `&`, by callee name. Passing an
@@ -347,6 +358,13 @@ struct State<'a> {
     escaping: HashSet<(usize, usize, usize)>,
     /// Names whose value can leave through the result: never dropped here.
     leaves: HashSet<String>,
+    /// Names that may point into a value the caller owns, so this frame must
+    /// not free them (docs/aliasing-audit.md). Seeded with the borrowed
+    /// parameters and grown by `maybe_shared`.
+    shared: HashSet<String>,
+    /// How many drops that bit suppressed: the distance between what is freed
+    /// and what could be.
+    suppressed: usize,
     /// This function's name and how many arguments a saturated call takes: a
     /// call matching both is the back edge codegen compiles to `continue`.
     fun: String,
@@ -376,6 +394,49 @@ impl State<'_> {
             }
         }
         v
+    }
+
+    /// Whether this expression can evaluate to a pointer into a value some
+    /// other name still owns. A prelude call that hands out an interior pointer
+    /// is one (`PRELUDE_SHARES`); a field read is one; anything built out of a
+    /// shared name is one.
+    ///
+    /// ponytail: a call to a *module* function counts as fresh. A user function
+    /// that returns a value derived from a `&` parameter would break that, and
+    /// `own.borrow_escapes` is what keeps the shape out of the language —
+    /// deciding it in general is region inference (docs/aliasing-audit.md,
+    /// "the part that really is bigger than the plan").
+    fn maybe_shared(&self, e: &Expr) -> bool {
+        use ExprKind::*;
+        match &e.kind {
+            Var(n) => self.shared.contains(n),
+            // `r.f` is a pointer into `r`, whoever owns `r`.
+            Field(..) => true,
+            Borrow(x) | Neg(x) | Not(x) | Arena(_, x) => self.maybe_shared(x),
+            Let(_, _, b) | Bind(_, _, b) => self.maybe_shared(b),
+            Match(_, arms) => arms.iter().any(|(_, a)| self.maybe_shared(a)),
+            Tuple(xs) | List(xs) => xs.iter().any(|x| self.maybe_shared(x)),
+            Record(base, fields) => {
+                base.as_ref().is_some_and(|b| self.maybe_shared(b))
+                    || fields.iter().any(|(_, v)| self.maybe_shared(v))
+            }
+            App(h, _) => matches!(&h.kind, Var(n) if PRELUDE_SHARES.contains(&n.as_str())),
+            _ => false,
+        }
+    }
+
+    /// Record a drop, unless the value may belong to someone else as well.
+    fn drop_site(&mut self, name: &str, at: Span, when: DropWhen) {
+        if self.shared.contains(name) {
+            self.suppressed += 1;
+            return;
+        }
+        self.drops.push(DropSite {
+            name: name.to_string(),
+            at,
+            path: self.path.clone(),
+            when,
+        });
     }
 
     fn use_var(&mut self, n: &str, span: Span, mode: Mode, owned: &[(&str, bool)]) {
@@ -492,12 +553,7 @@ impl State<'_> {
                 if back_edge {
                     for (n, _) in owned {
                         if !self.moved.contains_key(*n) && !self.leaves.contains(*n) {
-                            self.drops.push(DropSite {
-                                name: (*n).to_string(),
-                                at: e.span,
-                                path: self.path.clone(),
-                                when: DropWhen::BackEdge,
-                            });
+                            self.drop_site(n, e.span, DropWhen::BackEdge);
                         }
                     }
                 }
@@ -541,6 +597,10 @@ impl State<'_> {
             }
             Let(n, v, body) | Bind(n, v, body) => {
                 self.walk(v, mode, owned);
+                let was = self.shared.contains(n);
+                if self.maybe_shared(v) {
+                    self.shared.insert(n.clone());
+                }
                 let bound = [n.clone()];
                 let inner = self.scope(owned, &bound, body.span);
                 self.walk(body, mode, &inner);
@@ -550,16 +610,15 @@ impl State<'_> {
                     && !self.moved.contains_key(n)
                     && !self.leaves.contains(n)
                 {
-                    self.drops.push(DropSite {
-                        name: n.clone(),
-                        at: body.span,
-                        path: self.path.clone(),
-                        when: DropWhen::ScopeEnd,
-                    });
+                    self.drop_site(n, body.span, DropWhen::ScopeEnd);
                 }
                 // The name leaves scope here: a later binder of the same name
-                // is a different value, and its move is not this one's.
+                // is a different value, and neither its move nor its sharing is
+                // this one's.
                 self.moved.remove(n);
+                if !was {
+                    self.shared.remove(n);
+                }
             }
             Lambda(_, body) => {
                 let key = (e.span.file, e.span.line, e.span.col);
@@ -582,8 +641,20 @@ impl State<'_> {
                 for (p, body) in arms {
                     self.moved = before.clone();
                     let bound = pat_names(p);
+                    // The scrutinee is read, not consumed, so a payload the
+                    // pattern names is a pointer into a value someone else
+                    // still owns (docs/aliasing-audit.md gap 4).
+                    let mut fresh: Vec<String> = Vec::new();
+                    for n in &bound {
+                        if self.shared.insert(n.clone()) {
+                            fresh.push(n.clone());
+                        }
+                    }
                     let visible = self.scope(owned, &bound, body.span);
                     self.walk(body, mode, &visible);
+                    for n in &fresh {
+                        self.shared.remove(n);
+                    }
                     for (n, _) in &visible {
                         if !self.moved.contains_key(*n) && !self.leaves.contains(*n) {
                             kept.push(((*n).to_string(), body.span));
@@ -604,12 +675,7 @@ impl State<'_> {
                 // taken apart, which needs Task 8's per-type `_Drop_T`.
                 for (n, at) in kept {
                     if after.contains_key(&n) {
-                        self.drops.push(DropSite {
-                            name: n,
-                            at,
-                            path: self.path.clone(),
-                            when: DropWhen::ScopeEnd,
-                        });
+                        self.drop_site(&n, at, DropWhen::ScopeEnd);
                     }
                 }
                 self.moved = after;

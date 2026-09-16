@@ -1,0 +1,8 @@
+mod DropAlias
+
+;; `get` returns the element itself, not a copy, so `x` and `v` are two names
+;; over one `Str`. The vector is freed here; the element is not, because freeing
+;; both frees it twice (docs/aliasing-audit.md gap 2).
+peek (v:Vec Str) : U32 =
+  let x = get &v 0 in
+  u32 (len &x)
