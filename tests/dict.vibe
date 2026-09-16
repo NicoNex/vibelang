@@ -1,0 +1,24 @@
+mod Dict
+
+;; A dictionary is an association from a key to a value. It is a vector of pairs
+;; underneath, so a drop frees it to the bottom and `len` already worked on it;
+;; what it needed was five names and an equality, and `vb_eq` is the equality
+;; the language already has.
+count (n:U32) : Dict Str U32 =
+  let a = insert dict "one" 1 in
+  let b = insert a "two" 2 in
+  let c = insert b "three" 3 in
+  ;; a second `insert` on a live key replaces it rather than growing the vector
+  let d = insert c "two" n in
+  remove d "three"
+
+found (d:&Dict Str U32) (k:&Str) : U32 =
+  ?lookup d k
+   |Some v -> v
+   |None   -> 0
+  end
+
+main : E! Unit =
+  let d = count 20 in
+  out (fmt "{} {} {} {} {}\n"
+           (len &d) (found &d &"one") (found &d &"two") (found &d &"three") (len &(keys &d)))

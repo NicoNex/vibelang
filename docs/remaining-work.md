@@ -16,7 +16,7 @@ code is, so the first step is never a search.
 
 ## Where the compiler is today
 
-2026-09-16. `cargo test -- --test-threads=1`: 149 tests across 12 binaries,
+2026-09-16. `cargo test -- --test-threads=1`: 150 tests across 12 binaries,
 green. `cargo clippy --all-targets -- -D warnings`: clean.
 
 A `.vibe` file goes to a native executable through C. What stands between the
@@ -40,6 +40,13 @@ Shipped since this list was first written, each with the item it closed:
 - **Bit operations** — `band`, `bor`, `bxor`, `bnot`, `shl`, `shr`, `ord` — as
   prelude functions rather than operators, because `&` and `|` are taken and a
   call has no precedence to get wrong.
+- **A dictionary.** `dict`, `insert`, `lookup`, `remove`, `keys`, and `len`
+  which already worked on anything. It needed no runtime *tag*: a `Dict k v` is
+  a vector of two-field objects, so the deep drop, `vb_dup` and `show` were
+  already right for it, and the representation can change without any of them
+  knowing. Keys compare with `vb_eq`, the equality the language already has. A
+  set is a `Dict k Unit` and gets no names of its own. Lookup is a linear scan
+  — see the ceiling below.
 - **A drop is deep.** `vb_dispose` recurses into a vector's elements and an
   object's fields. `examples/nested.vibe` — 200,000 iterations, eight fresh
   strings in each, nothing kept — is flat at 1.5 MB where the shallow drop grew
@@ -202,6 +209,10 @@ Carried from §16, with what has changed since:
 
 ## Things that are true and easy to forget
 
+- A dictionary lookup is a linear scan, so holding n entries costs O(n) per
+  lookup and building one costs O(n²). The upgrade path is a hash table behind
+  the same five names, and it needs a hash for every tag `vb_eq` compares.
+  Nothing has been slow yet.
 - `VbVal` is dynamically tagged, and resolved types are not threaded into
   codegen. `runtime/vibert.h` says so in its own header comment. Several of the
   items above would be cheaper afterwards, and any performance claim made before
@@ -283,8 +294,6 @@ Not a list of missing functions. What is left after the module system landed
 qualify, and `VIBE_PATH` plus a `lib` directory beside the compiler are on the
 search path).
 
-- **No map, no set, no dictionary.** Nothing in `PRELUDE_SIGS` associates a key
-  with a value. It needs a runtime type, not a library written in Vibelang.
 
 Worth knowing before starting, none of them blocking:
 

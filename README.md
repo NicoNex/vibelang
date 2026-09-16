@@ -151,11 +151,11 @@ How much of this is delivered rather than intended is the next section. The comp
 
 ## Status
 
-**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, deep drops for vectors and records, bit operations, a deep and generic `dup`, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, record fields resolved per use site, four projection views, the whole CLI above. 149 tests, green.
+**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, deep drops for vectors and records, a dictionary, bit operations, a deep and generic `dup`, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, record fields resolved per use site, four projection views, the whole CLI above. 150 tests, green.
 
-**Partial** — inference is not bidirectional, so a lambda parameter takes no type from the signature it is passed to, and a `.field` there has to be unambiguous; refinements on prelude builtins are hardcoded; a proof about a float is a proof about a mathematical real; a closure's captures are not freed with it, and a value that may alias one the caller owns is not freed at all — `vibe view --drops` counts both; every closure is on the heap; values are dynamically tagged, so any performance claim today is a claim about a boxed interpreter.
+**Partial** — inference is not bidirectional, so a lambda parameter takes no type from the signature it is passed to, and a `.field` there has to be unambiguous; refinements on prelude builtins are hardcoded; a proof about a float is a proof about a mathematical real; a dictionary is an association vector, so a lookup is a linear scan; a closure's captures are not freed with it, and a value that may alias one the caller owns is not freed at all — `vibe view --drops` counts both; every closure is on the heap; values are dynamically tagged, so any performance claim today is a claim about a boxed interpreter.
 
-**Not yet** — no map and no set, so nothing associates a key with a value; a native backend.
+**Not yet** — a native backend.
 
 The full list, with a file and a line for every item, is [`docs/remaining-work.md`](docs/remaining-work.md). Moving a line from one list to the next is how this section gets edited.
 

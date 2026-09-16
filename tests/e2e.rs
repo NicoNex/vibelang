@@ -376,3 +376,16 @@ fn a_nested_structure_is_freed_to_the_bottom() {
     assert!(ok, "nested.vibe failed to build or run:\n{out}");
     assert_eq!(out.trim(), "1600000");
 }
+
+/// A dictionary associates a key with a value, which nothing in the prelude did
+/// before. It is a vector of two-field objects underneath, so a drop already
+/// frees it to the bottom and `len` already counted it; `insert` replaces a live
+/// key rather than growing, and `lookup` copies the value out because handing
+/// out the entry's own pointer would be interior to a dictionary the caller
+/// still owns.
+#[test]
+fn a_dictionary_associates_a_key_with_a_value() {
+    let (ok, out) = vibe(&["run", "tests/dict.vibe"]);
+    assert!(ok, "dict.vibe failed to build or run:\n{out}");
+    assert_eq!(out.trim(), "2 1 20 0 2");
+}

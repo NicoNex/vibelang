@@ -739,6 +739,78 @@ VbVal vb_er(VbVal x) { return vb_obj(&vb_info_Er, 1, 1, x); }
 VbVal vb_some(VbVal x) { return vb_obj(&vb_info_Some, 0, 1, x); }
 VbVal vb_none(void) { return vb_obj(&vb_info_None, 1, 0); }
 
+/* ------------------------------------------------------------------ Dict
+
+   An association vector: a `VB_VEC` whose elements are two-field objects. It is
+   not a new tag, which is the point — `vb_dispose`, `vb_dup`, `vb_len` and
+   `show` already do the right thing for a vector of objects, and the
+   representation can change without any of them knowing.
+
+   Keys are compared with `vb_eq`, the language's own equality, so a key is
+   whatever the type system already lets you write one of.
+
+   ponytail: lookup is a linear scan, so a dictionary of n entries costs O(n)
+   and building one costs O(n^2). Upgrade path: a hash table behind the same
+   five functions, which needs a hash for every tag that `vb_eq` compares — do
+   it when a program is slow, not because the complexity is embarrassing. */
+
+static const char *const vb_entry_fields[] = {"key", "value"};
+static const VbInfo vb_info_entry = {"entry", 2, vb_entry_fields};
+
+VbVal vb_dict(void) { return wrap_vec(vec_alloc(0)); }
+
+/* The index of `k`, or `d->n` when it is not there. */
+static size_t dict_find(VbVec *d, VbVal k) {
+  for (size_t i = 0; i < d->n; i++)
+    if (vb_eq(((VbObj *)d->a[i].v.p)->f[0], k)) return i;
+  return d->n;
+}
+
+/* Takes the dictionary by value, so the entries move rather than copy and the
+   old spine is this function's to free. An entry the new key displaces is
+   nobody's after this, so it goes too. */
+VbVal vb_insert(VbVal d, VbVal k, VbVal v) {
+  VbVec *s = vb_as_vec(d);
+  size_t at = dict_find(s, k);
+  VbVec *w = vec_alloc(s->n + 1);
+  for (size_t i = 0; i < s->n; i++) {
+    if (i == at) vb_dispose(s->a[i]); else vec_push(w, s->a[i]);
+  }
+  vec_push(w, vb_obj(&vb_info_entry, 0, 2, k, v));
+  vb_free(s->a);
+  vb_free(s);
+  return wrap_vec(w);
+}
+
+/* Borrows, so the value comes back as a copy: handing out the entry's own
+   pointer would be an interior pointer into a dictionary the caller still owns
+   (docs/aliasing-audit.md, gap 2). */
+VbVal vb_lookup(VbVal d, VbVal k) {
+  VbVec *s = vb_as_vec(d);
+  size_t at = dict_find(s, k);
+  if (at == s->n) return vb_none();
+  return vb_some(vb_dup(((VbObj *)s->a[at].v.p)->f[1]));
+}
+
+VbVal vb_remove(VbVal d, VbVal k) {
+  VbVec *s = vb_as_vec(d);
+  size_t at = dict_find(s, k);
+  VbVec *w = vec_alloc(s->n);
+  for (size_t i = 0; i < s->n; i++) {
+    if (i == at) vb_dispose(s->a[i]); else vec_push(w, s->a[i]);
+  }
+  vb_free(s->a);
+  vb_free(s);
+  return wrap_vec(w);
+}
+
+VbVal vb_keys(VbVal d) {
+  VbVec *s = vb_as_vec(d);
+  VbVec *w = vec_alloc(s->n);
+  for (size_t i = 0; i < s->n; i++) vec_push(w, vb_dup(((VbObj *)s->a[i].v.p)->f[0]));
+  return wrap_vec(w);
+}
+
 VbVal vb_seq(VbVal v) {
   VbVec *s = vb_as_vec(v);
   VbVec *w = vec_alloc(s->n);

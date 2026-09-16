@@ -115,6 +115,13 @@ uint32_t vb_tag(VbVal o);
 VbVal vb_set_fields(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals);
 VbVal vb_with(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals);
 
+/* --- Dict: an association vector, see the note in vibert.c --- */
+VbVal vb_dict(void);
+VbVal vb_insert(VbVal d, VbVal k, VbVal v);
+VbVal vb_lookup(VbVal d, VbVal k);
+VbVal vb_remove(VbVal d, VbVal k);
+VbVal vb_keys(VbVal d);
+
 /* --- Vec --- */
 VbVal vb_vec_new(void);
 VbVal vb_vec_lit(uint32_t n, ...);

@@ -488,11 +488,14 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                     let a = infer(c, &args[0], path)?;
                     if n == "len" {
                         if let T::Con(tn, _) = c.resolve(&a) {
-                            if tn != "Vec" && tn != "Str" {
+                            if tn != "Vec" && tn != "Str" && tn != "Dict" {
                                 return Err(Diag::error(
                                     args[0].span,
                                     "type.mismatch",
-                                    &format!("`len` works on `Vec a` or `Str`, not `{}`", tn),
+                                    &format!(
+                                        "`len` works on `Vec a`, `Str` or `Dict k v`, not `{}`",
+                                        tn
+                                    ),
                                 ));
                             }
                         }
