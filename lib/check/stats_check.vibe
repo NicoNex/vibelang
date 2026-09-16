@@ -1,0 +1,44 @@
+mod StatsCheck
+
+fail (what:Str) : E! Unit =
+  warn (concat &what "\n") ;
+  exit 1
+
+near (got:F64) (want:F64) : Bool = abs (got - want)<0.000001
+
+expect (ok:Bool) (what:Str) : E! Unit =
+  ?ok |True  -> ()
+      |False -> fail what
+  end
+
+same_vec (got:&Vec F64) (want:&Vec F64) : Bool =
+  len got==len want && Stats.dot got got + Stats.dot want want - 2.0 * Stats.dot got want<0.000001
+
+main : E! Unit =
+  let xs = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0] in
+  let odd = [3.0, 1.0, 2.0] in
+  expect (near (Stats.mean &xs) 5.0) "mean" ;
+  expect (near (Stats.median &xs) 4.5) "median even" ;
+  expect (near (Stats.median &odd) 2.0) "median odd" ;
+  expect (near (Stats.variance &xs) 4.0) "variance" ;
+  expect (near (Stats.sample_variance &xs) (32.0 / 7.0)) "sample_variance" ;
+  expect (near (Stats.stddev &xs) 2.0) "stddev" ;
+  expect (near (Stats.sample_stddev &xs) (sqrt (32.0 / 7.0))) "sample_stddev" ;
+  expect (near (Stats.minimum &xs) 2.0) "minimum" ;
+  expect (near (Stats.maximum &xs) 9.0) "maximum" ;
+  expect (near (Stats.range_width &xs) 7.0) "range_width" ;
+  expect (near (Stats.sum_sq &odd) 14.0) "sum_sq" ;
+  expect (near (Stats.sum_sq &[]) 0.0) "sum_sq empty" ;
+  expect (near (Stats.dot &odd &[1.0, 2.0, 3.0]) 11.0) "dot" ;
+  expect (near (Stats.weighted_mean &[1.0, 3.0] &[3.0, 1.0]) 1.5) "weighted_mean" ;
+  expect (near (Stats.weighted_mean &[1.0, 3.0] &[0.0, 0.0]) 0.0) "weighted_mean zero weight" ;
+  expect (same_vec &(Stats.normalize &odd) &[1.0, 0.0, 0.5]) "normalize" ;
+  expect (same_vec &(Stats.normalize &[4.0, 4.0]) &[0.0, 0.0]) "normalize flat" ;
+  expect (near (Stats.zscore 9.0 &xs) 2.0) "zscore" ;
+  expect (near (Stats.zscore 9.0 &[1.0]) 0.0) "zscore flat" ;
+  expect (near (Stats.percentile 0.0 &xs) 2.0) "percentile 0" ;
+  expect (near (Stats.percentile 0.5 &xs) 4.0) "percentile 0.5" ;
+  expect (near (Stats.percentile 1.0 &xs) 9.0) "percentile 1" ;
+  expect (show (Stats.histogram 7 &xs)=="[1, 0, 3, 2, 0, 1, 1]") "histogram" ;
+  expect (show (Stats.histogram 2 &[1.0, 1.0])=="[2, 0]") "histogram flat" ;
+  out "ok"

@@ -1,0 +1,102 @@
+mod Stats
+
+;; Descriptive statistics over `&Vec F64`.
+;; Every proof here is about mathematical reals, not IEEE floats: nothing is claimed
+;; about rounding, overflow to infinity, or NaN.
+mean (xs:&Vec F64, len xs>0) : F64 = sum xs / f64 (len xs)
+
+minimum (xs:&Vec F64, len xs>0) : F64 = min_by (\x -> x) xs
+
+maximum (xs:&Vec F64, len xs>0) : F64 = max_by (\x -> x) xs
+
+range_width (xs:&Vec F64, len xs>0) : F64 = maximum xs - minimum xs
+
+;; Sum of squared values.
+sum_sq (xs:&Vec F64) : F64 = fold (\acc x -> acc + x * x) 0.0 xs
+
+;; Sum of squared deviations from the mean.
+sq_dev (xs:&Vec F64, len xs>0) : F64 =
+  let m = mean xs in
+  fold (\acc x -> acc + (x - m) * (x - m)) 0.0 xs
+
+variance (xs:&Vec F64, len xs>0) : F64 = sq_dev xs / f64 (len xs)
+
+sample_variance (xs:&Vec F64, len xs>1) : F64 = sq_dev xs / f64 (len xs - 1)
+
+stddev (xs:&Vec F64, len xs>0) : F64 = sqrt (variance xs)
+
+sample_stddev (xs:&Vec F64, len xs>1) : F64 = sqrt (sample_variance xs)
+
+dot_step (xs:&Vec F64) (ys:&Vec F64) (acc:F64) (i:Size) : F64 =
+  ?(i<len xs && i<len ys)
+   |True  -> acc + get xs i * get ys i
+   |False -> acc
+  end
+
+dot (xs:&Vec F64) (ys:&Vec F64, len ys==len xs) : F64 =
+  fold (dot_step xs ys) 0.0 &(range 0 (len xs))
+
+;; ponytail: `sum ws>0.0` cannot be a refinement (a call in a refinement teaches the
+;; body nothing), so zero total weight gives 0.0.
+weighted_mean (xs:&Vec F64) (ws:&Vec F64, len ws==len xs) : F64 =
+  let total = sum ws in
+  ?(total==0.0)
+   |True  -> 0.0
+   |False -> dot xs ws / total
+  end
+
+;; `sort_by` keeps the length, but no postcondition says so; the fallback arm is
+;; unreachable.
+at (v:&Vec F64) (i:Size) : F64 =
+  ?(i<len v)
+   |True  -> get v i
+   |False -> 0.0
+  end
+
+median (xs:&Vec F64, len xs>0) : F64 =
+  let s = sort_by (\x -> x) xs in
+  let n = len xs in
+  ?(n - n / 2==n / 2)
+   |True  -> (at &s (n / 2 - 1) + at &s (n / 2)) / 2.0
+   |False -> at &s (n / 2)
+  end
+
+;; Lower nearest rank on the sorted data: index floor (p * (n - 1)).
+percentile (p:F64, p>=0.0 && p<=1.0) (xs:&Vec F64, len xs>0) : F64 =
+  let s = sort_by (\x -> x) xs in
+  at &s (min (len xs - 1) (size (floor (p * f64 (len xs - 1)))))
+
+;; Min-max scaling into [0, 1].
+;; ponytail: `maximum xs>minimum xs` cannot be a refinement the body can use; zero
+;; spread maps every value to 0.0.
+normalize (xs:&Vec F64, len xs>0) : Vec F64 =
+  let lo = minimum xs in
+  let w = maximum xs - lo in
+  ?(w>0.0)
+   |True  -> map (\x -> (x - lo) / w) xs
+   |False -> map (\x -> 0.0) xs
+  end
+
+;; How many standard deviations `x` lies from the mean; 0.0 when the spread is zero.
+zscore (x:F64) (xs:&Vec F64, len xs>0) : F64 =
+  let sd = stddev xs in
+  ?(sd>0.0)
+   |True  -> (x - mean xs) / sd
+   |False -> 0.0
+  end
+
+bucket_of (n:Size, n>0) (lo:F64) (w:F64, w>0.0) (x:F64) : Size =
+  min (n - 1) (size (floor ((x - lo) / w * f64 n)))
+
+;; Counts per bucket of `n` equal-width buckets over [minimum, maximum]; the maximum
+;; lands in the last bucket, and zero spread puts everything in the first.
+histogram (n:Size, n>0) (xs:&Vec F64, len xs>0) : Vec Size =
+  let lo = minimum xs in
+  let w = maximum xs - lo in
+  ?(w>0.0)
+   |True  -> map (\k -> len (filter (\x -> bucket_of n lo w x==k) xs))
+                 &(range 0 n)
+   |False -> map (\k -> ?k |0 -> len xs |_ -> 0 end) &(range 0 n)
+  end
+
+exp c mean, median, variance, sample_variance, stddev, sample_stddev, minimum, maximum, range_width, sum_sq, dot, weighted_mean, percentile, zscore
