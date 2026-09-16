@@ -704,6 +704,65 @@ VbVal vb_abs(VbVal a) {
   int64_t x = vb_as_int(a);
   return vb_int(x < 0 ? -x : x);
 }
+/* Bit operations are functions, not operators: `&` is the borrow sigil and `|`
+   separates match arms, and the two spellings that were left would have brought
+   a precedence table with them — the one where `a band b == c` silently means
+   `a band (b == c)` in C. A call has no precedence to get wrong.
+
+   A bit pattern is an integer. A float here is a mistake rather than a value to
+   coerce, so it is refused instead of truncated. */
+static uint64_t bits(VbVal v, const char *what) {
+  vb_require(v.tag != VB_FLOAT, "<program>", what);
+  return vb_as_uint(v);
+}
+
+/* Unsigned wins, as it does for arithmetic: the result of a bit operation on a
+   `U64` is a `U64`. */
+static VbVal as_wide(VbVal a, VbVal b, uint64_t x) {
+  return (a.tag == VB_UINT || b.tag == VB_UINT) ? vb_uint(x) : vb_int((int64_t)x);
+}
+
+VbVal vb_band(VbVal a, VbVal b) {
+  return as_wide(a, b, bits(a, "band needs an integer") & bits(b, "band needs an integer"));
+}
+VbVal vb_bor(VbVal a, VbVal b) {
+  return as_wide(a, b, bits(a, "bor needs an integer") | bits(b, "bor needs an integer"));
+}
+VbVal vb_bxor(VbVal a, VbVal b) {
+  return as_wide(a, b, bits(a, "bxor needs an integer") ^ bits(b, "bxor needs an integer"));
+}
+VbVal vb_bnot(VbVal a) {
+  uint64_t x = ~bits(a, "bnot needs an integer");
+  return a.tag == VB_UINT ? vb_uint(x) : vb_int((int64_t)x);
+}
+
+/* A shift wider than the word is zero — or, for a signed right shift of a
+   negative value, all ones. C leaves both undefined, which is not an answer a
+   generated program can be given. */
+VbVal vb_shl(VbVal a, VbVal n) {
+  uint64_t k = bits(n, "a shift count is an integer");
+  uint64_t x = bits(a, "shl needs an integer");
+  uint64_t r = k >= 64 ? 0 : x << k;
+  return a.tag == VB_UINT ? vb_uint(r) : vb_int((int64_t)r);
+}
+
+VbVal vb_shr(VbVal a, VbVal n) {
+  uint64_t k = bits(n, "a shift count is an integer");
+  if (a.tag == VB_UINT) {
+    uint64_t x = a.v.u;
+    return vb_uint(k >= 64 ? 0 : x >> k);
+  }
+  /* Signed: arithmetic, so the sign is kept. */
+  int64_t x = vb_as_int(a);
+  if (k >= 64) return vb_int(x < 0 ? -1 : 0);
+  return vb_int(x >> k);
+}
+
+/* The inverse of `chr`: a character's code point. */
+VbVal vb_ord(VbVal c) {
+  return vb_uint(c.tag == VB_CHAR ? c.v.c : (uint64_t)vb_as_int(c));
+}
+
 VbVal vb_min(VbVal a, VbVal b) { return vb_cmp(a, b) <= 0 ? a : b; }
 VbVal vb_max(VbVal a, VbVal b) { return vb_cmp(a, b) >= 0 ? a : b; }
 VbVal vb_sqrt(VbVal a) { return vb_float(sqrt(vb_as_float(a))); }

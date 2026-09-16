@@ -301,3 +301,34 @@ fn churn_computes_the_same_answer_without_the_bump_allocator() {
     let o = Command::new(&bin).output().expect("the program runs");
     assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "10000000");
 }
+
+/// Bit operations are prelude functions, so there is no precedence to get
+/// wrong. The two that C leaves undefined are pinned here: a shift wider than
+/// the word, and a signed right shift, which keeps the sign.
+#[test]
+fn the_bit_operations_agree_with_the_hardware() {
+    let (ok, out) = vibe(&["run", "tests/bits.vibe"]);
+    assert!(ok, "bits.vibe failed to build or run:\n{out}");
+    assert_eq!(out.trim(), "255 7 6 1024 128 15 65 -4 0");
+}
+
+/// A bit pattern is an integer. A float is a mistake, not a value to truncate.
+#[test]
+fn a_bit_operation_refuses_a_float() {
+    let dir = std::env::temp_dir().join("vibe-bits-test");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let src = dir.join("Half.vibe");
+    std::fs::write(
+        &src,
+        "mod Half\n\nmain : E! Unit = out (show (band 1.5 3))\n",
+    )
+    .expect("fixture");
+    let o = Command::new(VIBE)
+        .arg("run")
+        .arg(&src)
+        .output()
+        .expect("vibe runs");
+    assert!(!o.status.success(), "a float is not a bit pattern");
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("band needs an integer"), "{err}");
+}

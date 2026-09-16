@@ -171,6 +171,13 @@ VbVal vb_parse_int(VbVal s, int sign);
 VbVal vb_parse_f64(VbVal s);
 
 /* --- Math --- */
+VbVal vb_band(VbVal a, VbVal b);
+VbVal vb_bor(VbVal a, VbVal b);
+VbVal vb_bxor(VbVal a, VbVal b);
+VbVal vb_bnot(VbVal a);
+VbVal vb_shl(VbVal a, VbVal n);
+VbVal vb_shr(VbVal a, VbVal n);
+VbVal vb_ord(VbVal c);
 VbVal vb_abs(VbVal a);
 VbVal vb_min(VbVal a, VbVal b);
 VbVal vb_max(VbVal a, VbVal b);

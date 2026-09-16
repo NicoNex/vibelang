@@ -1,0 +1,10 @@
+mod Bits
+
+;; Bit operations are prelude functions rather than operators: `&` is the borrow
+;; sigil, `|` separates match arms, and a call carries no precedence to get
+;; wrong. `shr` is arithmetic on a signed value and logical on an unsigned one.
+low8 (x:U64) : U64 = band x 255
+
+main : E! Unit =
+  out (fmt "{} {} {} {} {} {} {} {} {}\n"
+           (low8 65535) (bor 5 2) (bxor 12 10) (shl 1 10) (shr 1024 3) (band (bnot 0) 15) (ord 'A') (shr (0 - 16) 2) (shl 1 99))

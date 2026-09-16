@@ -191,6 +191,18 @@ pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     ("parse_u32", "&Str -> Opt U32"),
     ("parse_u64", "&Str -> Opt U64"),
     ("parse_f64", "&Str -> Opt F64"),
+    // Bits. Functions, not operators: `&` is the borrow sigil and `|` separates
+    // match arms, and inventing symbols for the rest would add a precedence
+    // table — the one where `a & b == c` means `a & (b == c)` in C. A call has
+    // no precedence. `shr` is arithmetic on a signed value and logical on an
+    // unsigned one, which is what the value's own type already says.
+    ("band", "a -> a -> a"),
+    ("bor", "a -> a -> a"),
+    ("bxor", "a -> a -> a"),
+    ("bnot", "a -> a"),
+    ("shl", "a -> Size -> a"),
+    ("shr", "a -> Size -> a"),
+    ("ord", "Char -> U32"),
     // Math
     ("abs", "a -> a"),
     ("min", "a -> a -> a"),
