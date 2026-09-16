@@ -612,13 +612,21 @@ impl<'a> Gen<'a> {
                     }
                 }
                 let v = self.ex(e, out);
-                let v = if self.pending.is_empty() { v } else { self.settle(v, out) };
+                let v = if self.pending.is_empty() {
+                    v
+                } else {
+                    self.settle(v, out)
+                };
                 self.flush(out);
                 out.push_str(&format!("vbret = {};\nbreak;\n", v));
             }
             _ => {
                 let v = self.ex(e, out);
-                let v = if self.pending.is_empty() { v } else { self.settle(v, out) };
+                let v = if self.pending.is_empty() {
+                    v
+                } else {
+                    self.settle(v, out)
+                };
                 self.flush(out);
                 out.push_str(&format!("vbret = {};\nbreak;\n", v));
             }
@@ -841,7 +849,11 @@ impl<'a> Gen<'a> {
                 // In value position the scope ends here, with no jump to sit in
                 // front of: the free simply follows the body.
                 let ds = self.drops_at(body.span, crate::own::DropWhen::ScopeEnd, Some(n));
-                let r = if ds.is_empty() { r } else { self.settle(r, out) };
+                let r = if ds.is_empty() {
+                    r
+                } else {
+                    self.settle(r, out)
+                };
                 for d in ds {
                     out.push_str(&format!("vb_dispose({});\n", d));
                 }

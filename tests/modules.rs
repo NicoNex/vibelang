@@ -246,7 +246,11 @@ fn two_modules_may_declare_the_same_field() {
     );
     let (ok, out) = vibe_in(&dir, &["run", "b.vibe"]);
     assert!(ok, "two modules may name a field the same way:\n{out}");
-    assert_eq!(out.trim(), "7", "the field resolved to the wrong record:\n{out}");
+    assert_eq!(
+        out.trim(),
+        "7",
+        "the field resolved to the wrong record:\n{out}"
+    );
 }
 
 /// An `ext c` symbol is C's, so two modules naming it are naming one function

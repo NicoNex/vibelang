@@ -765,9 +765,7 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                     let bt = infer(c, b, path)?;
                     match c.resolve(&bt) {
                         T::Con(n, _) if c.data.records.contains_key(&n) => n,
-                        T::Var(_)
-                            if given.iter().any(|f| c.data.field_ambiguous.contains(f)) =>
-                        {
+                        T::Var(_) if given.iter().any(|f| c.data.field_ambiguous.contains(f)) => {
                             let f = given
                                 .iter()
                                 .find(|f| c.data.field_ambiguous.contains(*f))

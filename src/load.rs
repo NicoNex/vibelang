@@ -584,7 +584,6 @@ fn snake_case(s: &str) -> String {
     out
 }
 
-
 /// Every `Mod.name` in the module, with the span to blame if `Mod` is missing.
 /// A qualifier is written exactly like a field access on a constructor, so the
 /// two are told apart by case and by whether the file exists — that check is
