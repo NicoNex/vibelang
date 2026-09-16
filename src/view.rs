@@ -305,7 +305,7 @@ fn fundecl(
     if oneline(f, mode) && !matches!(body.kind, ExprKind::Let(..)) {
         out.push_str(&format!("{h} {}\n", P.flat(&body, 0)));
     } else {
-        out.push_str(&format!("{h}\n  {}\n", P.lay(&body, 2)));
+        out.push_str(&format!("{h}\n  {}\n", P.lay(&body, 2, false)));
     }
     if let Some(ms) = &f.measure {
         out.push_str(&format!("  %{}\n", P.flat(ms, 10)));
@@ -350,18 +350,26 @@ const P: Printer = Printer;
 
 impl Printer {
     /// Print `e` starting at column `col`, breaking lines when it does not fit.
-    fn lay(&self, e: &Expr, col: usize) -> String {
+    /// `nested` is whether a bracket or a match encloses it: outside both, a
+    /// newline after a complete expression ends the declaration (lexer.rs), so
+    /// an application may not break there.
+    fn lay(&self, e: &Expr, col: usize, nested: bool) -> String {
         match &e.kind {
             ExprKind::Match(s, arms) => self.lay_match(s, arms, col),
             ExprKind::Bind(n, v, rest) if n == crate::parser::SEQ => {
-                format!("{} ;\n{}{}", self.flat(v, 0), sp(col), self.lay(rest, col))
+                format!(
+                    "{} ;\n{}{}",
+                    self.flat(v, 0),
+                    sp(col),
+                    self.lay(rest, col, nested)
+                )
             }
             ExprKind::Bind(n, v, rest) => {
                 format!(
                     "{n} <- {} ;\n{}{}",
                     self.flat(v, 0),
                     sp(col),
-                    self.lay(rest, col)
+                    self.lay(rest, col, nested)
                 )
             }
             ExprKind::Let(n, v, rest) => {
@@ -369,12 +377,16 @@ impl Printer {
                     "let {n} = {} in\n{}{}",
                     self.flat(v, 0),
                     sp(col),
-                    self.lay(rest, col)
+                    self.lay(rest, col, nested)
                 )
             }
             // The block body is indented one step in, as the parser expects.
             ExprKind::Arena(a, body) => {
-                format!("arena {a} in\n{}{}", sp(col + 2), self.lay(body, col + 2))
+                format!(
+                    "arena {a} in\n{}{}",
+                    sp(col + 2),
+                    self.lay(body, col + 2, nested)
+                )
             }
             ExprKind::App(f, args) if !is_pipe(e) => {
                 let flat = self.flat(e, 0);
@@ -385,8 +397,15 @@ impl Printer {
                 // below, aligned under the first argument.
                 let h = self.flat(f, 10);
                 let acol = col + h.len() + 1;
-                let mut s = format!("{h} {}", self.lay_arg(&args[0], acol));
-                if args.len() > 1 {
+                let mut s = format!("{h} {}", self.lay_arg(&args[0], acol, nested));
+                if !nested {
+                    // No break at this level; a parenthesised argument may
+                    // still break inside its own brackets.
+                    for a in &args[1..] {
+                        s.push(' ');
+                        s.push_str(&self.lay_arg(a, acol, nested));
+                    }
+                } else if args.len() > 1 {
                     let rest: Vec<String> = args[1..].iter().map(|a| self.flat(a, 10)).collect();
                     s.push_str(&format!("\n{}{}", sp(acol), rest.join(" ")));
                 }
@@ -396,11 +415,11 @@ impl Printer {
         }
     }
 
-    fn lay_arg(&self, e: &Expr, col: usize) -> String {
+    fn lay_arg(&self, e: &Expr, col: usize, nested: bool) -> String {
         if power(&e.kind) < 10 {
-            format!("({})", self.lay(e, col + 1))
+            format!("({})", self.lay(e, col + 1, true))
         } else {
-            self.lay(e, col)
+            self.lay(e, col, nested)
         }
     }
 
@@ -424,7 +443,7 @@ impl Printer {
             }
             let lead = format!("|{} -> ", pad(&pat(p), w));
             out.push_str(&lead);
-            out.push_str(&self.lay(b, acol + lead.len()));
+            out.push_str(&self.lay(b, acol + lead.len(), true));
         }
         // `end` closes the match; it is what lets a nested one sit inside an
         // arm without any alignment.

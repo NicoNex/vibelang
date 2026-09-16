@@ -112,3 +112,20 @@ fn check_accepts_a_canonical_file() {
     assert!(ok, "--check must pass what `fmt` just wrote:\n{out}");
     assert_eq!(out, "");
 }
+
+/// A long application that is a whole function body sits outside every bracket
+/// and match, where a newline after a complete expression ends the declaration.
+/// Breaking it there used to write a file that no longer parsed.
+#[test]
+fn a_long_top_level_application_is_not_broken() {
+    let body = "mod Ragged\n\nf (acc:Str) (k:Size) : Str = replace &acc &(chr 'a') &(fmt \"{}{}{}{}{}\" (show k) (show k) (show k) (show k) (show k))\n";
+    let f = fixture("toplevel", body);
+    let (ok, out) = fmt(&f, &[]);
+    assert!(ok, "{out}");
+    let (ok, out) = vibe(&["check", f.to_str().expect("utf-8")]);
+    assert!(
+        ok,
+        "the formatted file must still parse:\n{}\n{out}",
+        read(&f)
+    );
+}
