@@ -1,0 +1,94 @@
+mod Path
+
+;; POSIX paths as text: `/` separates, nothing touches the file system.
+is_absolute (p:&Str) : Bool = starts_with p "/"
+
+;; The non-empty parts between slashes.
+segments (p:&Str) : Vec Str = filter (\s -> len &s>0) &(split '/' p)
+
+;; `b` under `a`; an absolute `b` stands on its own.
+join (a:&Str) (b:&Str) : Str =
+  ?(is_absolute b || len a==0)
+   |True  -> dup b
+   |False -> ?Text.ends_with a "/"
+              |True  -> concat a b
+              |False -> fmt "{}/{}" a b
+             end
+  end
+
+;; The last segment; "/" for the root and "" for an empty path.
+basename (p:&Str) : Str =
+  let parts = segments p in
+  ?(len &parts>0)
+   |True  -> dup &(get &parts (len &parts - 1))
+   |False -> ?is_absolute p
+              |True  -> "/"
+              |False -> ""
+             end
+  end
+
+;; Everything before the last segment; "." when that is nothing.
+dirname (p:&Str) : Str =
+  let parts = segments p in
+  let head = Text.join "/" &(rev &(drop 1 &(rev &parts))) in
+  ?is_absolute p
+   |True  -> concat "/" &head
+   |False -> ?(len &head==0)
+              |True  -> "."
+              |False -> head
+             end
+  end
+
+;; The text after the last `.` of the basename, "" when there is none. A
+;; leading dot names a hidden file rather than starting an extension.
+extension (p:&Str) : Str =
+  let parts = split '.' &(basename p) in
+  ?(len &parts>1 && len &(get &parts 0)>0)
+   |True  -> dup &(get &parts (len &parts - 1))
+   |False -> ?(len &parts>2)
+              |True  -> dup &(get &parts (len &parts - 1))
+              |False -> ""
+             end
+  end
+
+;; The basename without its extension.
+stem (p:&Str) : Str =
+  let base = basename p in
+  let suffix = extension p in
+  ?(len &suffix>0)
+   |True  -> ?(len &suffix<len &base)
+              |True  -> ?slice 0 (len &base - len &suffix - 1) &base
+                         |Some s -> s
+                         |None   -> dup &base
+                        end
+              |False -> dup &base
+             end
+   |False -> base
+  end
+
+;; One segment applied to the ones kept so far.
+step (absolute:Bool) (kept:Vec Str) (seg:&Str) : Vec Str =
+  ?(seg==".")
+   |True  -> kept
+   |False -> ?(seg=="..")
+              |False -> push kept (dup seg)
+              |True  -> ?(len &kept>0 && get &kept (len &kept - 1)!="..")
+                         |True  -> take (len &kept - 1) &kept
+                         |False -> ?absolute |True  -> kept
+                                             |False -> push kept ".."
+                                   end
+                        end
+             end
+  end
+
+;; `.` and `..` resolved lexically and repeated slashes folded: `a/./b/../c` is
+;; `a/c`. A `..` above the root stays at the root.
+normalize (p:&Str) : Str =
+  let abs = is_absolute p in
+  let body = Text.join "/" &(fold (\kept seg -> step abs kept &seg) empty &(segments p)) in
+  ?abs |True  -> concat "/" &body
+       |False -> ?(len &body==0)
+                  |True  -> "."
+                  |False -> body
+                 end
+  end

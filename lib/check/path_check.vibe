@@ -1,0 +1,18 @@
+mod PathCheck
+
+expect (name:&Str) (ok:Bool) : E! Unit =
+  ?ok |True  -> ()
+      |False -> warn (fmt "path_check: {} failed\n" name) ;
+                exit 1
+  end
+
+main : E! Unit =
+  expect "is_absolute" (Path.is_absolute "/a" && !(Path.is_absolute "a/b")) ;
+  expect "segments" (Path.segments "//a//b/"==["a", "b"]) ;
+  expect "join" (Path.join "a" "b"=="a/b" && Path.join "a/" "b"=="a/b" && Path.join "a" "/b"=="/b" && Path.join "" "b"=="b") ;
+  expect "basename" (Path.basename "/usr/lib/x.so"=="x.so" && Path.basename "a/b/"=="b" && Path.basename "/"=="/" && Path.basename ""=="") ;
+  expect "dirname" (Path.dirname "/usr/lib/x.so"=="/usr/lib" && Path.dirname "x"=="." && Path.dirname "/x"=="/" && Path.dirname "a/b"=="a") ;
+  expect "extension" (Path.extension "a/b.tar.gz"=="gz" && Path.extension ".bashrc"=="" && Path.extension ".config.json"=="json" && Path.extension "noext"=="" && Path.extension "a."=="") ;
+  expect "stem" (Path.stem "src/main.vibe"=="main" && Path.stem ".bashrc"==".bashrc" && Path.stem "a.b.c"=="a.b") ;
+  expect "normalize" (Path.normalize "a/./b/../c"=="a/c" && Path.normalize "/../x"=="/x" && Path.normalize "../a/.."==".." && Path.normalize ""=="." && Path.normalize "/"=="/" && Path.normalize "a//b/"=="a/b") ;
+  out "ok\n"
