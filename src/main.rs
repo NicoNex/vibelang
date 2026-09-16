@@ -4,6 +4,7 @@
 //! vibe build <file> [-o out] [--lib] [--emit-c] [--diag=...]
 //! vibe run   <file> [--diag=...] [-- args...]
 //! vibe view  <file> [--sig-only|--explicit|--flow]
+//! vibe fmt   <file> [--check]
 //! vibe deps  <file>
 //! vibe proof <file> [--prove]
 //! vibe patch <file> <path> [<hash> <new-node>]
@@ -36,9 +37,10 @@ const RT_C: &str = include_str!("../runtime/vibert.c");
 const RT_H: &str = include_str!("../runtime/vibert.h");
 
 const USAGE: &str = "\
-usage: vibe <check|build|run|view|deps|proof|patch> <file.vibe> [options]
+usage: vibe <check|build|run|view|fmt|deps|proof|patch> <file.vibe> [options]
   patch <file> <path>                 print the node's hash and current text
   patch <file> <path> <hash> <node>   replace it, if the hash still matches
+  --check                    report instead of rewriting, and fail (fmt)
   --diag=prose|struct|json   diagnostic rendering (default: prose)
   --prove                    discharge refinement obligations with z3 (§7.3)
   --prove-timeout=<secs>     solver budget per obligation (default 5)
@@ -91,6 +93,7 @@ struct Opts {
     emit_c: bool,
     lib: bool,
     prove: bool,
+    check: bool,
     view: view::Mode,
     prog_args: Vec<String>,
     /// positionals after the file: the `patch` path, hash and new node
@@ -106,6 +109,7 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
         emit_c: false,
         lib: false,
         prove: false,
+        check: false,
         view: view::Mode::Canon,
         prog_args: Vec::new(),
         rest: Vec::new(),
@@ -122,6 +126,7 @@ fn parse_args(argv: &[String]) -> Result<Opts, String> {
             "--emit-c" => o.emit_c = true,
             "--lib" => o.lib = true,
             "--prove" => o.prove = true,
+            "--check" => o.check = true,
             _ if a.starts_with("--prove-timeout=") => {
                 let v = &a["--prove-timeout=".len()..];
                 refine::set_budget(
@@ -167,7 +172,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     let o = parse_args(argv)?;
     if !matches!(
         o.cmd.as_str(),
-        "check" | "build" | "run" | "view" | "deps" | "proof" | "patch"
+        "check" | "build" | "run" | "view" | "fmt" | "deps" | "proof" | "patch"
     ) {
         return Err(Fail::Driver(USAGE.to_string()));
     }
@@ -179,6 +184,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         load::program(&o.file, &mut files).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
     let root = prog.root();
     let comments = root.comments.clone();
+    let src = root.src.clone();
     let root = root.module.clone();
     let module = prog.flat.clone();
     let checked = infer::check(&module).map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
@@ -192,6 +198,26 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
             _ => r,
         };
         print!("{r}");
+        return Ok(ExitCode::SUCCESS);
+    }
+    // `fmt` is `view` with the output going back to the file, so the canonical
+    // projection stays the single definition of the canonical form (§3.1): a
+    // formatter that could disagree with `view::canon` would let `vibe check`
+    // reject what `vibe fmt` just wrote.
+    // ponytail: only the file that was named is rewritten, though the loader
+    // read its imports too. Walk `prog.units` — each carries its own `src`,
+    // `comments` and file id — when formatting a whole project is wanted.
+    if o.cmd == "fmt" {
+        let canon = view::reattach(&view::render(&root, &checked, view::Mode::Canon), &comments);
+        if canon == src {
+            return Ok(ExitCode::SUCCESS);
+        }
+        if o.check {
+            println!("would format {}", o.file.display());
+            return Ok(ExitCode::FAILURE);
+        }
+        write(&o.file, &canon)?;
+        println!("formatted {}", o.file.display());
         return Ok(ExitCode::SUCCESS);
     }
     if o.cmd == "deps" {
