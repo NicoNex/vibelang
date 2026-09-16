@@ -410,4 +410,8 @@ fn a_string_is_bytes_and_bytes_are_reachable() {
     let (ok, out) = vibe(&["run", "tests/bytes.vibe"]);
     assert!(ok, "bytes.vibe failed to build or run:\n{out}");
     assert!(out.starts_with("106 A "), "{out}");
+    assert!(
+        out.contains(" 18446744073709551615"),
+        "wrapping arithmetic:\n{out}"
+    );
 }

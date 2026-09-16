@@ -10,4 +10,5 @@ sum_bytes (s:&Str) (n:Size, n==len s) (i:Size) (acc:U64) : U64 =
 all (s:&Str) : U64 = sum_bytes s (len s) 0 0
 
 main : E! Unit =
-  out (fmt "{} {} {}\n" (all "é") (byte_str 65) (byte_str 195))
+  out (fmt "{} {} {} {}\n"
+           (all "é") (byte_str 65) (byte_str 195) (wrap_add (wrap_mul 4294967296 4294967296) (wrap_sub 0 1)))
