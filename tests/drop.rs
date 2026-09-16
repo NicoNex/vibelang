@@ -160,3 +160,37 @@ fn a_loop_that_keeps_nothing_does_not_grow() {
     let rss = peak_rss(&bin);
     assert!(rss < 8 * 1024 * 1024, "the loop grew to {rss} bytes");
 }
+
+/// A closure handed to a prelude function is called and finished with during
+/// the call. `map (\x -> x+1) &v` in a loop allocates one per iteration, and
+/// applying it allocates another inside the runtime.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_closure_a_loop_builds_every_iteration_does_not_accumulate() {
+    let dir = std::env::temp_dir().join("vibe-drop-tests");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let src = dir.join("Clos.vibe");
+    std::fs::write(
+        &src,
+        "mod Clos\n\n\
+         step (k:U64) (acc:Size) : Size =\n  \
+           ?k |0 -> acc\n     \
+              |_ -> step (k - 1) (acc + len &(map (\\x -> x + 1) &(range 0 10)))\n  \
+           end\n  \
+           %k\n\n\
+         main : E! Unit =\n  \
+           out (show (step 200000 0))\n",
+    )
+    .expect("fixture");
+    let bin = dir.join("clos");
+    let o = Command::new(VIBE)
+        .args(["build"])
+        .arg(&src)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .expect("vibe runs");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let rss = peak_rss(&bin);
+    assert!(rss < 8 * 1024 * 1024, "the closures piled up: {rss} bytes");
+}

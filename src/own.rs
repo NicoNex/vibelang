@@ -582,10 +582,23 @@ impl State<'_> {
                     } else {
                         mode
                     };
-                    if keeps_closures && matches!(a.kind, Lambda(..)) {
-                        let mut captured = HashSet::new();
-                        names_in(a, &mut captured);
-                        self.shared.extend(captured);
+                    if matches!(a.kind, Lambda(..)) {
+                        if keeps_closures {
+                            let mut captured = HashSet::new();
+                            names_in(a, &mut captured);
+                            self.shared.extend(captured);
+                        } else {
+                            // A closure a prelude function is given is called
+                            // and finished with during the call, and no name
+                            // ever held it: `map (\x -> x+1) &v` inside a loop
+                            // allocates one per iteration.
+                            self.drops.push(DropSite {
+                                name: String::new(),
+                                at: a.span,
+                                path: self.path.clone(),
+                                when: DropWhen::Temp,
+                            });
+                        }
                     }
                     // `len &(range 0 n)` allocates a vector no name ever holds.
                     // The callee borrowed it, so it is dead when the call

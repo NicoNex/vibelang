@@ -151,7 +151,18 @@ VbVal vb_apply1(VbVal f, VbVal x) {
   n->args = vb_alloc(sizeof(VbVal) * (c->arity ? c->arity : 1));
   for (uint32_t i = 0; i < c->nargs; i++) n->args[i] = c->args[i];
   n->args[n->nargs++] = x;
-  if (n->nargs == n->arity) return n->fn(n->args);
+  if (n->nargs == n->arity) {
+    /* The saturated copy exists for the duration of the call and nothing can
+       have kept it: the body reads its arguments out of the array, and a
+       closure it builds allocates an array of its own.
+       ponytail: the intermediate copies of a partial application are not freed
+       here, because the last one is still live when this returns. They die with
+       the value that holds them, which is the caller's drop to place. */
+    VbVal r = n->fn(n->args);
+    vb_free(n->args);
+    vb_free(n);
+    return r;
+  }
   VbVal v; v.tag = VB_CLOS; v.v.p = n; return v;
 }
 
