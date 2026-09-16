@@ -16,6 +16,14 @@ walk (s:&Str) (i:Size) (acc:Str) : Str =
            end
   end
 
+;; `acc` goes to `fold`, which hands it to `grow`, even though the fold itself
+;; sits in a position `fmt` only reads.
+grow (acc:Str) (k:Size) : Str = concat &acc "+"
+
+folded (s:Str) : Str =
+  let acc = concat &s "" in
+  fmt "{}" (fold grow acc &(range 0 3))
+
 main : E! Unit =
   ?keep (Some (dup "kept")) "none" |Some v -> out &v |None -> out "lost" end ;
-  out (fmt " {}\n" (walk "a" 3 ""))
+  out (fmt " {} {}\n" (walk "a" 3 "") (folded "x"))

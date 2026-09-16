@@ -632,7 +632,10 @@ impl State<'_> {
                     // sits in: `out (id "ok")` is a borrow position for `out`,
                     // and says nothing about what `id` does with its argument.
                     let lent = reads_all || borrows.is_some_and(|b| *b.get(i).unwrap_or(&false));
-                    let m = if lent { Mode::Borrow } else { mode };
+                    // Nor does that position decide what the callee takes: in
+                    // `fmt "{}" (fold f acc v)` the fold is read, but `acc` is
+                    // still handed to it.
+                    let m = if lent { Mode::Borrow } else { Mode::Own };
                     if matches!(a.kind, Lambda(..)) {
                         if keeps_closures {
                             let mut captured = HashSet::new();

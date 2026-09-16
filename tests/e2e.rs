@@ -399,7 +399,7 @@ fn a_moved_payload_and_a_nested_back_edge_are_freed_once() {
     assert!(ok, "payload_move.vibe failed to build or run:\n{out}");
     assert_eq!(
         out.split_whitespace().collect::<Vec<_>>(),
-        ["kept", "a-a-a-"]
+        ["kept", "a-a-a-", "x+++"]
     );
 }
 
