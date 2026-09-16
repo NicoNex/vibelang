@@ -1,0 +1,24 @@
+mod Rand
+
+;; A seeded pseudo-random generator, splitmix64. Deterministic for a seed and
+;; not for secrets. The generator is a value: every draw hands back the next one.
+type Rng = { state:U64 }
+
+seed (n:U64) : Rng = {state=n}
+
+;; A 64-bit draw and the generator after it.
+next (r:Rng) : (U64, Rng) =
+  let s = wrap_add r.state 11400714819323198485 in
+  (Hash.mix s, {r with state=s})
+
+;; A draw in [0, bound). ponytail: the remainder of a plain division, so a bound
+;; far from a power of two is slightly biased; rejection sampling if that matters.
+below (r:Rng) (bound:U64, bound>0) : (U64, Rng) =
+  let s = wrap_add r.state 11400714819323198485 in
+  let x = Hash.mix s in
+  (x - x / bound * bound, {r with state=s})
+
+;; A draw in [0, 1) with 53 bits of precision.
+unit (r:Rng) : (F64, Rng) =
+  let s = wrap_add r.state 11400714819323198485 in
+  (f64 (shr (Hash.mix s) 11) / 9007199254740992.0, {r with state=s})

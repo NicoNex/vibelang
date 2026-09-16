@@ -1,0 +1,13 @@
+mod HashCheck
+
+expect (name:&Str) (ok:Bool) : E! Unit =
+  ?ok |True  -> ()
+      |False -> warn (fmt "hash_check: {} failed\n" name) ;
+                exit 1
+  end
+
+main : E! Unit =
+  expect "fnv1a" (Hash.fnv1a ""==14695981039346656037 && Hash.fnv1a "a"==12638187200555641996 && Hash.fnv1a "foobar"==9625390261332436968) ;
+  expect "mix" (Hash.mix 11400714819323198485==16294208416658607535) ;
+  expect "combine" (Hash.combine 1 2!=Hash.combine 2 1) ;
+  out "ok\n"

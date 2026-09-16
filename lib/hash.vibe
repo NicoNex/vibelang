@@ -1,0 +1,23 @@
+mod Hash
+
+;; Non-cryptographic hashes: fast, stable across runs and machines, and no
+;; defence against an adversary choosing the input.
+fnv_go (s:&Str) (n:Size, n==len s) (i:Size) (h:U64) : U64 =
+  ?(i<n)
+   |False -> h
+   |True  -> fnv_go s
+                    n (i + 1) (wrap_mul (bxor h (u64 (byte_at s i))) 1099511628211)
+  end
+  %(n - i)
+
+;; FNV-1a, 64-bit, over the bytes of `s`.
+fnv1a (s:&Str) : U64 = fnv_go s (len s) 0 14695981039346656037
+
+;; The splitmix64 finaliser: every bit of `x` moves every bit of the result.
+mix (x:U64) : U64 =
+  let a = wrap_mul (bxor x (shr x 30)) 13787848793156543929 in
+  let b = wrap_mul (bxor a (shr a 27)) 10723151780598845931 in
+  bxor b (shr b 31)
+
+;; `h` and `x` folded into one hash; the order matters.
+combine (h:U64) (x:U64) : U64 = mix (wrap_add (wrap_mul h 31) x)

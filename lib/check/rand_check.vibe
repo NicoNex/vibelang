@@ -1,0 +1,21 @@
+mod RandCheck
+
+expect (name:&Str) (ok:Bool) : E! Unit =
+  ?ok |True  -> ()
+      |False -> warn (fmt "rand_check: {} failed\n" name) ;
+                exit 1
+  end
+
+;; `k` draws below `bound`, each checked to be in range.
+in_range (r:Rand.Rng) (k:U64) (bound:U64, bound>0) : Bool =
+  ?k |0 -> True
+     |_ -> ?Rand.below r bound
+            |(x, next) -> x<bound && in_range next (k - 1) bound
+           end
+  end
+
+main : E! Unit =
+  ?Rand.next (Rand.seed 0) |(x, r) -> expect "splitmix64" (x==16294208416658607535) ; ?Rand.next r |(y, s) -> expect "advances" (y!=x) end end ;
+  expect "below" (in_range (Rand.seed 42) 1000 7) ;
+  ?Rand.unit (Rand.seed 7) |(u, r) -> expect "unit" (u>=0.0 && u<1.0) end ;
+  out "ok\n"
