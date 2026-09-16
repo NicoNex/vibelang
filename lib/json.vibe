@@ -1,0 +1,340 @@
+mod Json
+
+;; JSON values, a parser and a renderer. An object keeps its keys in source
+;; order, as a vector of pairs; a number is an F64.
+type Json = JNull | JBool Bool | JNum F64 | JStr Str | JArr (Vec Json) | JObj (Vec (Str, Json))
+
+;; The byte at `i` as a one-byte string, "" past the end.
+at (s:&Str) (i:Size) : Str =
+  ?(i<len s)
+   |False -> ""
+   |True  -> ?slice i (i + 1) s
+              |Some c -> c
+              |None   -> ""
+             end
+  end
+
+skip_ws (s:&Str) (n:Size, n==len s) (i:Size) : Size =
+  ?(i<n)
+   |False -> i
+   |True  -> let c = at s i in
+             ?(c==" " || c=="\n" || c=="\t" || c=="\r")
+              |True  -> skip_ws s n (i + 1)
+              |False -> i
+             end
+  end
+  %(n - i)
+
+;; Whether `word` occurs in `s` at `i`.
+word_at (s:&Str) (i:Size) (word:&Str) : Bool =
+  ?(i<=len s)
+   |False -> False
+   |True  -> ?(len word<=len s - i)
+              |False -> False
+              |True  -> slice i (i + len word) s==Some (dup word)
+             end
+  end
+
+hex_value (c:&Str) : Size =
+  ?index_of "0123456789abcdef" &(lower c)
+   |Some v -> v
+   |None   -> 16
+  end
+
+;; The four hex digits at `i`, or `None` when one of them is not a hex digit.
+hex4 (s:&Str) (i:Size, i<len s && 3<len s - i) : Opt Size =
+  let a = hex_value &(at s i) in
+  let b = hex_value &(at s (i + 1)) in
+  let c = hex_value &(at s (i + 2)) in
+  let d = hex_value &(at s (i + 3)) in
+  ?(a<16 && b<16 && c<16 && d<16)
+   |True  -> Some (((a * 16 + b) * 16 + c) * 16 + d)
+   |False -> None
+  end
+
+;; The character for a `\u` code the language can spell.
+;; ponytail: the prelude has no U32 -> Char, so a `\u` escape outside printable
+;; ASCII (and tab, newline, carriage return) is refused, as are `\b` and `\f`.
+;; Raw UTF-8 inside a string passes through untouched. Lift when a byte
+;; constructor lands in the prelude.
+unicode (code:Size) : Opt Str =
+  ?code |9  -> Some "\t"
+        |10 -> Some "\n"
+        |13 -> Some "\r"
+        |_  -> ?(code>=32 && code<127)
+                |True  -> slice (code - 32)
+                                (code - 31) " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+                |False -> None
+               end
+  end
+
+;; The escape `\e` as the text it stands for; `u` is handled by `str_go`.
+simple_escape (e:&Str) : Opt Str =
+  ?e |"\"" -> Some "\""
+     |"\\" -> Some "\\"
+     |"/"  -> Some "/"
+     |"n"  -> Some "\n"
+     |"t"  -> Some "\t"
+     |"r"  -> Some "\r"
+     |_    -> None
+  end
+
+;; The string body starting at `i`, just past the opening quote, and the
+;; position after the closing one.
+;; ponytail: grows `acc` a byte at a time, O(n²) on a long string.
+str_go (s:&Str) (n:Size, n==len s) (i:Size) (acc:Str) : Res Str (Str, Size) =
+  ?(i<n)
+   |False -> Er "unterminated string"
+   |True  -> let c = at s i in
+             ?c |"\"" -> Ok (acc, i + 1)
+                |"\\" -> ?(i + 1<n)
+                          |False -> Er "unterminated string"
+                          |True  -> let e = at s (i + 1) in
+                                    ?(e=="u")
+                                     |False -> ?simple_escape &e
+                                                |Some t -> str_go s
+                                                                  n (i + 2) (concat &acc &t)
+                                                |None   -> Er (fmt "bad escape at {}"
+                                                                   i)
+                                               end
+                                     |True  -> ?(5<n - i)
+                                                |False -> Er "unterminated string"
+                                                |True  -> ?hex4 s (i + 2)
+                                                           |None      -> Er (fmt "bad \\u escape at {}"
+                                                                                 i)
+                                                           |Some code -> ?unicode code
+                                                                          |Some t -> str_go s
+                                                                                            n (i + 6) (concat &acc &t)
+                                                                          |None   -> Er (fmt "unsupported \\u escape at {}"
+                                                                                             i)
+                                                                         end
+                                                          end
+                                               end
+                                    end
+                         end
+                |_    -> str_go s n (i + 1) (concat &acc &c)
+             end
+  end
+  %(n - i)
+
+is_num_byte (c:&Str) : Bool = len c==1 && contains "0123456789+-.eE" c
+
+num_end (s:&Str) (n:Size, n==len s) (i:Size) : Size =
+  ?(i<n)
+   |False -> i
+   |True  -> ?is_num_byte &(at s i)
+              |True  -> num_end s n (i + 1)
+              |False -> i
+             end
+  end
+  %(n - i)
+
+number (s:&Str) (i:Size) : Res Str (Json, Size) =
+  let k = num_end s (len s) i in
+  ?(i<k)
+   |False -> Er (fmt "unexpected `{}` at {}" (at s i) i)
+   |True  -> ?slice i k s
+              |None     -> Er (fmt "bad number at {}" i)
+              |Some txt -> ?parse_f64 &txt
+                            |Some n -> Ok (JNum n, k)
+                            |None   -> Er (fmt "bad number at {}" i)
+                           end
+             end
+  end
+
+;; `word` at `i` stands for `v`.
+keyword (s:&Str) (i:Size) (word:&Str) (v:Json) : Res Str (Json, Size) =
+  ?(word_at s i word && i<=len s && len word<=len s - i)
+   |True  -> Ok (v, i + len word)
+   |False -> Er (fmt "unexpected `{}` at {}" (at s i) i)
+  end
+
+;; `fuel` bounds the depth of the call chain, which is what makes the three
+;; mutually recursive parsers total; `parse` gives it more than any input needs.
+value (s:&Str) (i:Size) (fuel:U64) : Res Str (Json, Size) =
+  ?fuel |0 -> Er "input nests too deep"
+        |_ -> let j = skip_ws s (len s) i in
+              ?(j<len s)
+               |False -> Er "unexpected end of input"
+               |True  -> let c = at s j in
+                         ?c |"{"  -> obj s (j + 1) empty (fuel - 1)
+                            |"["  -> arr s (j + 1) empty (fuel - 1)
+                            |"\"" -> ?str_go s (len s) (j + 1) ""
+                                      |Ok (t, k) -> Ok (JStr (dup &t), k)
+                                      |Er e      -> Er e
+                                     end
+                            |"t"  -> keyword s j "true" (JBool True)
+                            |"f"  -> keyword s j "false" (JBool False)
+                            |"n"  -> keyword s j "null" JNull
+                            |_    -> number s j
+                         end
+              end
+  end
+  %fuel
+
+;; Past `[` or past a `,`: the next element, or `]` when there is none yet.
+arr (s:&Str) (i:Size) (acc:Vec Json) (fuel:U64) : Res Str (Json, Size) =
+  ?fuel |0 -> Er "input nests too deep"
+        |_ -> let j = skip_ws s (len s) i in
+              ?(j<len s && len &acc==0 && at s j=="]")
+               |True  -> Ok (JArr acc, j + 1)
+               |False -> ?value s j (fuel - 1)
+                          |Er e      -> Er e
+                          |Ok (v, k) -> let m = skip_ws s (len s) k in
+                                        let next = push acc (dup &v) in
+                                        ?(m<len s)
+                                         |False -> Er "unterminated array"
+                                         |True  -> ?at s m
+                                                    |"," -> arr s
+                                                                (m + 1) next (fuel - 1)
+                                                    |"]" -> Ok (JArr next, m + 1)
+                                                    |_   -> Er (fmt "expected `,` or `]` at {}"
+                                                                    m)
+                                                   end
+                                        end
+                         end
+              end
+  end
+  %fuel
+
+;; Past `{` or past a `,`: the next `"key": value`, or `}` when there is none yet.
+obj (s:&Str) (i:Size) (acc:Vec (Str, Json)) (fuel:U64) : Res Str (Json, Size) =
+  ?fuel |0 -> Er "input nests too deep"
+        |_ -> let j = skip_ws s (len s) i in
+              ?(j<len s)
+               |False -> Er "unterminated object"
+               |True  -> ?(len &acc==0 && at s j=="}")
+                          |True  -> Ok (JObj acc, j + 1)
+                          |False -> ?(at s j=="\"")
+                                     |False -> Er (fmt "expected a key at {}" j)
+                                     |True  -> ?str_go s (len s) (j + 1) ""
+                                                |Er e        -> Er e
+                                                |Ok (key, k) -> let c = skip_ws s (len s) k in
+                                                                ?(c<len s && at s c==":")
+                                                                 |False -> Er (fmt "expected `:` at {}"
+                                                                                   c)
+                                                                 |True  -> obj_value s
+                                                                                     (c + 1) acc (dup &key) (fuel - 1)
+                                                                end
+                                               end
+                                    end
+                         end
+              end
+  end
+  %fuel
+
+;; Past the `:` of `key`.
+obj_value (s:&Str) (i:Size) (acc:Vec (Str, Json)) (key:Str) (fuel:U64) : Res Str (Json, Size) =
+  ?fuel |0 -> Er "input nests too deep"
+        |_ -> ?value s i (fuel - 1)
+               |Er e      -> Er e
+               |Ok (v, k) -> let m = skip_ws s (len s) k in
+                             let next = push acc (key, dup &v) in
+                             ?(m<len s)
+                              |False -> Er "unterminated object"
+                              |True  -> ?at s m
+                                         |"," -> obj s (m + 1) next (fuel - 1)
+                                         |"}" -> Ok (JObj next, m + 1)
+                                         |_   -> Er (fmt "expected `,` or `}` at {}"
+                                                         m)
+                                        end
+                             end
+              end
+  end
+  %fuel
+
+;; The whole of `s` as one JSON value; anything but whitespace after it is an error.
+parse (s:&Str) : Res Str Json =
+  ?(len s<1000000000000)
+   |False -> Er "input too large"
+   |True  -> ?value s 0 (len s + len s + 2)
+              |Er e      -> Er e
+              |Ok (v, k) -> ?(skip_ws s (len s) k==len s)
+                             |True  -> Ok (dup &v)
+                             |False -> Er (fmt "trailing input at {}"
+                                               (skip_ws s (len s) k))
+                            end
+             end
+  end
+
+quote (s:&Str) : Str =
+  let a = replace s "\\" "\\\\" in
+  let b = replace &a "\"" "\\\"" in
+  let c = replace &b "\n" "\\n" in
+  let d = replace &c "\t" "\\t" in
+  fmt "\"{}\"" (replace &d "\r" "\\r")
+
+;; ponytail: control bytes other than tab, newline and carriage return are
+;; written raw, since nothing in the language can name them.
+render_go (j:&Json) (fuel:U64) : Str =
+  ?fuel |0 -> "null"
+        |_ -> ?j |JNull    -> "null"
+                 |JBool b  -> ?b |True  -> "true"
+                                 |False -> "false"
+                              end
+                 |JNum n   -> show_exact n
+                 |JStr t   -> quote t
+                 |JArr xs  -> let parts = map (\x -> render_go &x (fuel - 1)) xs in
+                              fmt "[{}]" (Text.join "," &parts)
+                 |JObj kvs -> let parts = map (\p -> render_pair &p (fuel - 1)) kvs in
+                              concat &(concat "{" &(Text.join "," &parts)) "}"
+              end
+  end
+  %fuel
+
+render_pair (p:&(Str, Json)) (fuel:U64) : Str =
+  ?fuel |0 -> "null"
+        |_ -> ?p |(k, v) -> fmt "{}:{}" (quote &k) (render_go &v (fuel - 1))
+                 |_      -> "null"
+              end
+  end
+  %fuel
+
+;; Compact JSON text. A number prints in the fewest digits that read back as
+;; the same F64; NaN and infinities have no JSON spelling and come out as C prints them.
+render (j:&Json) : Str = render_go j 1000000000000000000
+
+;; The value under `key` in an object; the first one when a key repeats.
+field (j:&Json) (key:&Str) : Opt Json =
+  ?j |JObj kvs -> fold (\found p -> pick_field found &p key) None kvs
+     |_        -> None
+  end
+
+pick_field (found:Opt Json) (p:&(Str, Json)) (key:&Str) : Opt Json =
+  ?found |Some x -> Some x
+         |None   -> ?p |(k, v) -> ?(k==key)
+                                   |True  -> Some (dup &v)
+                                   |False -> None
+                                  end
+                       |_      -> None
+                    end
+  end
+
+;; The element at `i` of an array.
+index (j:&Json) (i:Size) : Opt Json =
+  ?j |JArr xs -> ?(i<len xs)
+                  |True  -> Some (dup &(get xs i))
+                  |False -> None
+                 end
+     |_       -> None
+  end
+
+as_num (j:&Json) : Opt F64 =
+  ?j |JNum n -> Some n
+     |_      -> None
+  end
+
+as_str (j:&Json) : Opt Str =
+  ?j |JStr t -> Some (dup t)
+     |_      -> None
+  end
+
+as_bool (j:&Json) : Opt Bool =
+  ?j |JBool b -> Some b
+     |_       -> None
+  end
+
+is_null (j:&Json) : Bool =
+  ?j |JNull -> True
+     |_     -> False
+  end

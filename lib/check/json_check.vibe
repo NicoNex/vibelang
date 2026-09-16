@@ -1,0 +1,35 @@
+mod JsonCheck
+
+expect (name:&Str) (ok:Bool) : E! Unit =
+  ?ok |True  -> ()
+      |False -> warn (fmt "json_check: {} failed\n" name) ;
+                exit 1
+  end
+
+;; Parse then render, "ERR" on a parse error.
+round (s:&Str) : Str =
+  ?Json.parse s
+   |Ok j -> Json.render &j
+   |Er e -> "ERR"
+  end
+
+main : E! Unit =
+  expect "scalars" (round "null"=="null" && round " true "=="true" && round "false"=="false") ;
+  expect "numbers" (round "42"=="42" && round "-1.5e2"=="-150" && round "0.1"=="0.1" && round "6.916666666666667"=="6.916666666666667") ;
+  expect "string" (round "\"a\\\"b\\\\c\\n\""=="\"a\\\"b\\\\c\\n\"") ;
+  expect "unicode ascii" (round "\"\\u0041\\u007a\""=="\"Az\"") ;
+  expect "array" (round " [1, [2, []], {}] "=="[1,[2,[]],{}]") ;
+  expect "object" (round "{\"b\": 1, \"a\": [true, null]}"=="{\"b\":1,\"a\":[true,null]}") ;
+  expect "rejects" (round "[1,]"=="ERR" && round "{\"a\" 1}"=="ERR" && round "tru"=="ERR" && round "1 2"=="ERR" && round ""=="ERR" && round "\"abc"=="ERR" && round "{,}"=="ERR") ;
+  ?Json.parse "{\"name\": \"vibe\", \"tags\": [\"c\", \"z3\"], \"ok\": true, \"n\": 3}" |Er e -> expect &e False |Ok j -> expect "field str" (map_str (Json.field &j "name")==Some "vibe") ; expect "field missing" (Json.is_null &(or_null (Json.field &j "nope"))) ; expect "index" (map_str (Json.index &(or_null (Json.field &j "tags")) 1)==Some "z3") ; expect "as_bool" (Json.as_bool &(or_null (Json.field &j "ok"))==Some True) ; expect "as_num" (Json.as_num &(or_null (Json.field &j "n"))==Some 3.0) end ;
+  out "ok\n"
+
+or_null (o:Opt Json.Json) : Json.Json =
+  ?o |Some j -> j
+     |None   -> Json.JNull
+  end
+
+map_str (o:Opt Json.Json) : Opt Str =
+  ?o |Some j -> Json.as_str &j
+     |None   -> None
+  end
