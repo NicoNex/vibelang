@@ -1,0 +1,79 @@
+mod Opt
+
+;; Combinators for the prelude `Opt t = Some t | None`. Queries borrow; anything
+;; that hands back the payload consumes the option.
+is_some (o:&Opt a) : Bool =
+  ?o |Some x -> True
+     |None   -> False
+  end
+
+is_none (o:&Opt a) : Bool =
+  ?o |Some x -> False
+     |None   -> True
+  end
+
+unwrap_or (fallback:a) (o:Opt a) : a =
+  ?o |Some x -> x
+     |None   -> fallback
+  end
+
+map (f:a -> b) (o:Opt a) : Opt b =
+  ?o |Some x -> Some (f x)
+     |None   -> None
+  end
+
+and_then (f:a -> Opt b) (o:Opt a) : Opt b =
+  ?o |Some x -> f x
+     |None   -> None
+  end
+
+or_else (alt:Opt a) (o:Opt a) : Opt a =
+  ?o |Some x -> Some x
+     |None   -> alt
+  end
+
+filter (keep:&a -> Bool) (o:Opt a) : Opt a =
+  ?o |Some x -> ?keep &x
+                 |True  -> Some x
+                 |False -> None
+                end
+     |None   -> None
+  end
+
+to_res (err:e) (o:Opt a) : Res e a =
+  ?o |Some x -> Ok x
+     |None   -> Er err
+  end
+
+from_res (r:Res e a) : Opt a =
+  ?r |Ok x -> Some x
+     |Er e -> None
+  end
+
+from_bool (cond:Bool) (x:a) : Opt a =
+  ?cond |True  -> Some x
+        |False -> None
+  end
+
+zip (oa:Opt a) (ob:Opt b) : Opt (a, b) =
+  ?oa |Some x -> ?ob |Some y -> Some (x, y)
+                     |None   -> None
+                 end
+      |None   -> None
+  end
+
+flatten (o:Opt (Opt a)) : Opt a =
+  ?o |Some inner -> ?inner |Some x -> Some x
+                           |None   -> None
+                    end
+     |None       -> None
+  end
+
+;; ponytail: `values` takes the vector by value only because the borrow checker
+;; treats any `fold` result over a borrowed vector as escaping it, even through
+;; `dup`; the payloads are still copied, since moving them out double-frees.
+values (xs:Vec (Opt a)) : Vec a =
+  fold (\acc o -> ?o |Some x -> push acc (dup &x) |None -> acc end) [] &xs
+
+count_some (xs:&Vec (Opt a)) : Size =
+  fold (\n o -> ?o |Some x -> n + 1 |None -> n end) 0 xs
