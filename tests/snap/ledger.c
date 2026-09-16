@@ -158,7 +158,7 @@ static VbVal vbf_Ledger_top(VbVal *a) {
   vb_require(vb_as_bool(vb_bool(vb_cmp(vb_len(v_ts_32), vb_int(0)) > 0)), "Ledger.top.pre", "len ts > 0");
   VbVal vbret = vb_unit();
   for (;;) {
-    vbret = vb_max_by(vb_clos(vbf_Ledger_amt, "Ledger.amt", 1), v_ts_32, "Ledger.top.max_by");
+    vbret = vb_dup(vb_max_by(vb_clos(vbf_Ledger_amt, "Ledger.amt", 1), v_ts_32, "Ledger.top.max_by"));
     break;
   }
   return vbret;

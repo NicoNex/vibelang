@@ -46,6 +46,7 @@ fn examples_check() {
         "examples/hello.vibe",
         "examples/ledger.vibe",
         "examples/grep.vibe",
+        "examples/nested.vibe",
     ] {
         let (ok, out) = vibe(&["check", e]);
         assert!(ok, "{e} failed to check:\n{out}");
@@ -363,4 +364,15 @@ fn a_field_two_records_declare_resolves_to_the_right_one() {
     let (ok, out) = vibe(&["run", "tests/field_share.vibe"]);
     assert!(ok, "field_share.vibe failed to build or run:\n{out}");
     assert_eq!(out.trim(), "99 2");
+}
+
+/// A drop is deep, so a structure built and thrown away in a loop comes back
+/// whole. `examples/nested.vibe` splits a string into eight fresh ones every
+/// iteration and keeps none of them: 1.5 MB here, 52 MB when `vb_dispose` freed
+/// the spine and left the elements.
+#[test]
+fn a_nested_structure_is_freed_to_the_bottom() {
+    let (ok, out) = vibe(&["run", "examples/nested.vibe"]);
+    assert!(ok, "nested.vibe failed to build or run:\n{out}");
+    assert_eq!(out.trim(), "1600000");
 }

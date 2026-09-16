@@ -16,7 +16,7 @@ code is, so the first step is never a search.
 
 ## Where the compiler is today
 
-2026-09-16. `cargo test -- --test-threads=1`: 148 tests across 12 binaries,
+2026-09-16. `cargo test -- --test-threads=1`: 149 tests across 12 binaries,
 green. `cargo clippy --all-targets -- -D warnings`: clean.
 
 A `.vibe` file goes to a native executable through C. What stands between the
@@ -40,6 +40,18 @@ Shipped since this list was first written, each with the item it closed:
 - **Bit operations** — `band`, `bor`, `bxor`, `bnot`, `shl`, `shr`, `ord` — as
   prelude functions rather than operators, because `&` and `|` are taken and a
   call has no precedence to get wrong.
+- **A drop is deep.** `vb_dispose` recurses into a vector's elements and an
+  object's fields. `examples/nested.vibe` — 200,000 iterations, eight fresh
+  strings in each, nothing kept — is flat at 1.5 MB where the shallow drop grew
+  to 52 MB. Three things had to be true first: the `&Vec` operations copy each
+  element rather than its pointer, a function may no longer return a piece of a
+  borrowed parameter, and a value that may alias is not dropped at all.
+- **A borrow no longer escapes through a derivation.** `own.borrow_escapes`
+  asked whether the tail *was* a borrowed name; it asks now whether the result
+  is made of one, so `pick (r:&R) : Str = r.s` and `ts |> max_by amt` are
+  refused with `dup` as the fix. This is gap 1 of `aliasing-audit.md`, and
+  closing it is what the audit said it would be: not the code, but
+  `examples/ledger.vibe::top`, now `dup &(ts |> max_by amt)`.
 - **`dup` copies in depth, and copies anything** (`static-drop-roadmap.md`,
   Open decision 4, answered). `&a -> a`: the copy owns what it points at, so it
   survives the original and can be freed on its own. Spec §4.4 offers "return a
@@ -77,19 +89,26 @@ Shipped since this list was first written, each with the item it closed:
 
 ## Medium
 
-### 1. A drop is shallow, and what may be shared is not freed at all
+### 1. A closure's captures are not freed, and what may alias is not freed at all
 
-The bump allocator is gone and every value is freed where its owner dies
-([`static-drop-roadmap.md`](static-drop-roadmap.md), all nine tasks). What is
-left is the two deliberate retreats that made it safe.
+The first of the two retreats is gone: `vb_dispose` recurses into a vector's
+elements and an object's fields. `examples/nested.vibe` builds eight fresh
+strings an iteration and keeps none — 1.5 MB, where the shallow drop grew to
+52 MB.
 
-`vb_dispose` frees a vector's spine and not its elements, because the structural
-operations copy element pointers between vectors and a deep free would free one
-twice. And anything that *may* alias — a prelude result that points into an
-argument, a capture of a closure a callee may keep, a pointer given to C — is
-not freed at all; `vibe view --drops` counts those suppressions. Both give up
-memory to avoid a use-after-free, and both come back the same way: knowing,
-per value, that nothing else points at it.
+Two suppressions remain.
+
+A **closure** is still freed spine-only. Its captures belong to the frame that
+built it unless the closure escapes, and `own.rs::escapes` knows which while the
+runtime does not; freeing them in `vb_dispose` would free the frame's values
+under it. The fix is the escape bit reaching the runtime, or codegen emitting
+the deep free for the closures it already knows own their captures.
+
+Anything that **may alias** — a prelude result that points into an argument, a
+`map` given a lambda that returns a piece of its own element, a pointer handed
+to C — is not freed at all, and `vibe view --drops` counts those. That one comes
+back the same way it always would: knowing, per value, that nothing else points
+at it.
 
 ### 2. A type argument is kept one level deep
 
@@ -119,11 +138,13 @@ audited as a whole.
 
 ## Large, with plans already written
 
-### 5. Deep drops, and a value that may alias
+### 5. A value that may alias, and a closure's captures
 
-See item 1: the two retreats that made implicit drop safe are the work that is
-left, and both come back the same way — knowing, per value, that nothing else
-points at it.
+See item 1. Deep drops landed; what is left of that plan is the two suppressions
+above, and the general case of aliasing — knowing, per value, that nothing else
+points at it — which is region inference
+([`aliasing-audit.md`](aliasing-audit.md), "the part that really is bigger than
+the plan").
 
 ### 6. Cranelift backend → [`backend-roadmap.md`](backend-roadmap.md)
 

@@ -130,22 +130,29 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             .filter(|p| matches!(p.ty, Some(Ty::Ref(_))))
             .flat_map(|p| p.names.iter().map(|s| s.as_str()))
             .collect();
-        if !borrows.is_empty() && f.ret.as_ref().is_some_and(|t| !matches!(t, Ty::Ref(_))) {
+        // A scalar result is a copy and cannot point at anything, so only an
+        // affine return type can carry a piece of a borrow back out.
+        if !borrows.is_empty()
+            && f.ret
+                .as_ref()
+                .is_some_and(|t| !matches!(t, Ty::Ref(_)) && is_affine(t))
+        {
             let mut tails = Vec::new();
-            returned(&f.body, &mut tails);
-            for (n, span) in tails {
-                if borrows.contains(&n) {
-                    out.push(
-                        Diag::error(
-                            span,
-                            "own.borrow_escapes",
-                            &format!("`{}` is a borrow and is returned as owned", n),
-                        )
-                        .with_path(&crate::ast::path(&f.home, &f.name))
-                        .with_witness("a borrow lives only for the call that lent it")
-                        .with_fix(&format!("copy it with `dup {}`, or return an index", n)),
-                    );
-                }
+            borrow_out(&f.body, &borrows, &mut tails);
+            for (n, span, how) in tails {
+                out.push(
+                    Diag::error(
+                        span,
+                        "own.borrow_escapes",
+                        &format!("this result is {} `{}`, which is a borrow", how, n),
+                    )
+                    .with_path(&crate::ast::path(&f.home, &f.name))
+                    .with_witness("a borrow lives only for the call that lent it")
+                    .with_fix(&format!(
+                        "copy it with `dup &(...)`, or return an index into `{}`",
+                        n
+                    )),
+                );
             }
         }
         let mut escaping = HashSet::new();
@@ -255,12 +262,43 @@ fn sig_borrows(sig: &str) -> Vec<bool> {
 }
 
 /// Every name a body can yield as its result, with the span it sits at.
-fn returned<'a>(e: &'a Expr, out: &mut Vec<(&'a str, Span)>) {
+fn borrow_out<'a>(e: &'a Expr, borrows: &[&str], out: &mut Vec<(&'a str, Span, &'static str)>) {
     use ExprKind::*;
+    let go = |x: &'a Expr, out: &mut Vec<_>| borrow_out(x, borrows, out);
     match &e.kind {
-        Var(n) => out.push((n.as_str(), e.span)),
-        Let(_, _, b) | Bind(_, _, b) | Arena(_, b) => returned(b, out),
-        Match(_, arms) => arms.iter().for_each(|(_, a)| returned(a, out)),
+        Var(n) => {
+            if borrows.contains(&n.as_str()) {
+                out.push((n.as_str(), e.span, "the borrow"));
+            }
+        }
+        // `r.f` is a pointer into `r`; `&x` in a result position is `x`.
+        Field(b, _) | Borrow(b) => {
+            let mut inner = Vec::new();
+            borrow_out(b, borrows, &mut inner);
+            out.extend(inner.into_iter().map(|(n, _, _)| (n, e.span, "a part of")));
+        }
+        Let(_, _, b) | Bind(_, _, b) | Arena(_, b) => go(b, out),
+        Match(_, arms) => arms.iter().for_each(|(_, a)| go(a, out)),
+        Tuple(xs) | List(xs) => xs.iter().for_each(|x| go(x, out)),
+        Record(base, fields) => {
+            if let Some(b) = base {
+                go(b, out);
+            }
+            fields.iter().for_each(|(_, v)| go(v, out));
+        }
+        // A prelude function that hands out an element of what it was given
+        // passes the provenance through with it: `max_by amt ts` is one of
+        // `ts`, and `get ts i` is another. A module function does not, because
+        // this check is what makes that true.
+        App(h, xs) => {
+            if matches!(&h.kind, Var(n) if PRELUDE_SHARES.contains(&n.as_str())) {
+                let mut inner = Vec::new();
+                for x in xs {
+                    borrow_out(x, borrows, &mut inner);
+                }
+                out.extend(inner.into_iter().map(|(n, _, _)| (n, e.span, "a part of")));
+            }
+        }
         _ => {}
     }
 }
@@ -436,7 +474,18 @@ impl State<'_> {
                 base.as_ref().is_some_and(|b| self.maybe_shared(b))
                     || fields.iter().any(|(_, v)| self.maybe_shared(v))
             }
-            App(h, _) => matches!(&h.kind, Var(n) if PRELUDE_SHARES.contains(&n.as_str())),
+            // A prelude name that hands out an interior pointer, or a call
+            // given a lambda that returns a piece of its own argument. The
+            // second is `map (\x -> x) v` and `map (\x -> x.s) v`: the elements
+            // the caller gets back are the ones it lent. Rejecting the shape
+            // would need the lambda's result type, which inference does not
+            // record for a lambda; suppressing the drop needs nothing and is
+            // the trade this file makes everywhere else — a leak, never a
+            // use-after-free (docs/aliasing-audit.md, gap 7).
+            App(h, xs) => {
+                matches!(&h.kind, Var(n) if PRELUDE_SHARES.contains(&n.as_str()))
+                    || xs.iter().any(lambda_returns_its_argument)
+            }
             _ => false,
         }
     }
@@ -788,6 +837,20 @@ fn escapes(e: &Expr, out: &mut HashSet<(usize, usize, usize)>) {
         Record(_, fields) => fields.iter().for_each(|(_, v)| escapes(v, out)),
         _ => {}
     }
+}
+
+/// Whether this argument is a lambda whose result is its own parameter, or a
+/// piece of one. A lambda handed to `map`, `filter` or `sort_by` is called on
+/// the elements of a borrowed vector, so such a result is interior to a value
+/// the caller still owns.
+fn lambda_returns_its_argument(e: &Expr) -> bool {
+    let ExprKind::Lambda(ps, body) = &e.kind else {
+        return false;
+    };
+    let ps: Vec<&str> = ps.iter().map(|s| s.as_str()).collect();
+    let mut out = Vec::new();
+    borrow_out(body, &ps, &mut out);
+    !out.is_empty()
 }
 
 fn pat_names(p: &Pat) -> Vec<String> {

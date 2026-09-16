@@ -88,7 +88,24 @@ one, and this is the version that fits on one line.
 **Under exact drop:** double free. The caller drops the argument; the callee's
 caller drops the result; they are one object.
 
-**Since measured — closed for the name, open for everything derived from it.**
+**Since measured, then closed.** `own::borrow_out` asks what the result is made
+of rather than whether it is a borrowed name, so a field of a borrow, a
+`PRELUDE_SHARES` call over one, and anything built out of either are all
+`own.borrow_escapes`. It fires only on an affine return type, because a scalar
+result is a copy and cannot point anywhere. The cost was the one this document
+predicted: `examples/ledger.vibe::top` is now `dup &(ts |> max_by amt)`.
+
+Gap 7's first half went with it, and not as an error. A lambda whose body
+returns a piece of its own parameter — `map (\x -> x) v`, `map (\x -> x.s) v` —
+makes the call maybe-shared, so the result is not dropped. Rejecting it would
+need the lambda's result type, which inference does not record for a lambda;
+suppressing the drop needs nothing, and a leak rather than an unsoundness is the
+trade this document already recommends.
+
+What follows is the state before that, kept because the reasoning is what made
+the fix the right shape.
+
+**As measured — closed for the name, open for everything derived from it.**
 `own.borrow_escapes` rejects `launder` (`tests/launder.vibe`), because
 `returned` collects the *names* in tail position and asks whether each is a
 borrow. A value *derived* from the borrow is not a name and is not collected, so

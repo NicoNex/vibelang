@@ -68,16 +68,38 @@ VbVal vb_clos(VbFn fn, const char *name, uint32_t arity) {
    docs/static-drop-roadmap.md). A no-op under the bump allocator, where
    `vb_free` is itself a no-op, so the same generated C serves both.
 
-   ponytail: shallow. The spine goes, the elements do not: `vb_rev` and friends
-   copy element pointers into a new vector, so two vectors can hold the same
-   `Str` and freeing through both would free it twice (docs/aliasing-audit.md
-   gap 3). Upgrade path: a deep drop for values the frontend knows are unshared,
-   which is the same knowledge that would let it stop suppressing those drops. */
+   Deep for a vector and for an object, because nothing else points at what
+   they hold. Three things had to be true first, and now are: the operations
+   that take `&Vec` copy each element rather than its pointer (see `vb_push`
+   above); a function may no longer return a piece of a borrowed parameter
+   (`own.borrow_escapes`); and a value that may still alias one the caller owns
+   is not dropped at all, which `vibe view --drops` counts.
+
+   ponytail: a closure stays shallow. Its captures are owned by the frame that
+   built it unless the closure escapes, and `own.rs::escapes` knows which — the
+   runtime does not. Freeing them here would free the frame's values under it.
+   Upgrade path: the escape bit reaches the runtime, or codegen emits the deep
+   free for the closures it knows own their captures.
+
+   `VB_CSTR` and `VB_PTR` are C's and are not freed here at all, which is the
+   same line `vb_dup` draws. */
 void vb_dispose(VbVal v) {
   switch (v.tag) {
-    case VB_STR:  { VbStr  *s = v.v.p; vb_free(s->p);    vb_free(s); break; }
-    case VB_VEC:  { VbVec  *w = v.v.p; vb_free(w->a);    vb_free(w); break; }
-    case VB_OBJ:  { VbObj  *o = v.v.p; vb_free(o->f);    vb_free(o); break; }
+    case VB_STR: { VbStr *s = v.v.p; vb_free(s->p); vb_free(s); break; }
+    case VB_VEC: {
+      VbVec *w = v.v.p;
+      for (size_t i = 0; i < w->n; i++) vb_dispose(w->a[i]);
+      vb_free(w->a);
+      vb_free(w);
+      break;
+    }
+    case VB_OBJ: {
+      VbObj *o = v.v.p;
+      for (uint32_t i = 0; i < o->n; i++) vb_dispose(o->f[i]);
+      vb_free(o->f);
+      vb_free(o);
+      break;
+    }
     case VB_CLOS: { VbClos *c = v.v.p; vb_free(c->args); vb_free(c); break; }
     default: break;
   }
@@ -315,7 +337,20 @@ VbVal vb_vec_lit(uint32_t n, ...) {
 }
 
 /* Persistent-by-copy push: the bootstrap has no ownership analysis yet, so
- * in-place reuse (spec §4.3) is not safe to assume. */
+ * in-place reuse (spec §4.3) is not safe to assume.
+ *
+ * `push` and `set` take the vector by value, so the old spine is already the
+ * caller's to lose and its elements move rather than copy. The operations that
+ * take `&Vec` — `rev`, `filter`, `sort_by`, `take`, `drop`, `concat_vec` —
+ * cannot do that: the caller still owns the source and will free it, so each
+ * element is copied with `vb_dup` and no two vectors point at one value
+ * (docs/aliasing-audit.md, gap 3). That copy is what makes `vb_dispose` able to
+ * be deep.
+ *
+ * ponytail: the copy is unconditional. It is dead work when the source dies at
+ * the call, and the drop table already computes last use — eliding it there is
+ * Open decision 5 of docs/static-drop-roadmap.md, and it needs a measurement
+ * first. */
 VbVal vb_push(VbVal v, VbVal x) {
   VbVec *s = vb_as_vec(v);
   VbVec *w = vec_alloc(s->n + 1);
@@ -353,7 +388,7 @@ VbVal vb_filter(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
   VbVec *w = vec_alloc(s->n);
   for (size_t i = 0; i < s->n; i++)
-    if (vb_as_bool(vb_apply1(f, s->a[i]))) vec_push(w, s->a[i]);
+    if (vb_as_bool(vb_apply1(f, s->a[i]))) vec_push(w, vb_dup(s->a[i]));
   return wrap_vec(w);
 }
 VbVal vb_fold(VbVal f, VbVal z, VbVal v) {
@@ -396,7 +431,7 @@ VbVal vb_min_by(VbVal f, VbVal v, const char *path) {
 VbVal vb_sort_by(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
   VbVec *w = vec_alloc(s->n);
-  for (size_t i = 0; i < s->n; i++) vec_push(w, s->a[i]);
+  for (size_t i = 0; i < s->n; i++) vec_push(w, vb_dup(s->a[i]));
   /* Insertion sort: stable, tiny, and the bootstrap never sorts anything big.
    * vibec debt: swap for a merge sort if a program sorts more than ~10k items. */
   for (size_t i = 1; i < w->n; i++) {
@@ -410,14 +445,14 @@ VbVal vb_sort_by(VbVal f, VbVal v) {
 VbVal vb_rev(VbVal v) {
   VbVec *s = vb_as_vec(v);
   VbVec *w = vec_alloc(s->n);
-  for (size_t i = s->n; i > 0; i--) vec_push(w, s->a[i - 1]);
+  for (size_t i = s->n; i > 0; i--) vec_push(w, vb_dup(s->a[i - 1]));
   return wrap_vec(w);
 }
 VbVal vb_concat_vec(VbVal a, VbVal b) {
   VbVec *x = vb_as_vec(a), *y = vb_as_vec(b);
   VbVec *w = vec_alloc(x->n + y->n);
-  for (size_t i = 0; i < x->n; i++) vec_push(w, x->a[i]);
-  for (size_t i = 0; i < y->n; i++) vec_push(w, y->a[i]);
+  for (size_t i = 0; i < x->n; i++) vec_push(w, vb_dup(x->a[i]));
+  for (size_t i = 0; i < y->n; i++) vec_push(w, vb_dup(y->a[i]));
   return wrap_vec(w);
 }
 VbVal vb_take(VbVal n, VbVal v) {
@@ -425,7 +460,7 @@ VbVal vb_take(VbVal n, VbVal v) {
   uint64_t k = vb_as_uint(n);
   if (k > s->n) k = s->n;
   VbVec *w = vec_alloc((size_t)k);
-  for (size_t i = 0; i < (size_t)k; i++) vec_push(w, s->a[i]);
+  for (size_t i = 0; i < (size_t)k; i++) vec_push(w, vb_dup(s->a[i]));
   return wrap_vec(w);
 }
 VbVal vb_drop(VbVal n, VbVal v) {
@@ -433,7 +468,7 @@ VbVal vb_drop(VbVal n, VbVal v) {
   uint64_t k = vb_as_uint(n);
   if (k > s->n) k = s->n;
   VbVec *w = vec_alloc(s->n - (size_t)k);
-  for (size_t i = (size_t)k; i < s->n; i++) vec_push(w, s->a[i]);
+  for (size_t i = (size_t)k; i < s->n; i++) vec_push(w, vb_dup(s->a[i]));
   return wrap_vec(w);
 }
 VbVal vb_range(VbVal a, VbVal b) {

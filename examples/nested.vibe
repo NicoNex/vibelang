@@ -1,0 +1,18 @@
+mod Nested
+
+;; A loop that builds a structure and keeps nothing. `split` allocates a fresh
+;; `Str` for every field, and the vector holding them dies at the end of the
+;; iteration that built it. While a drop was shallow only the spine came back:
+;; eight strings an iteration stayed, and the figure grew without bound.
+row (k:U64) : Size =
+  let v = split ',' "alpha,bravo,charlie,delta,echo,foxtrot,golf,hotel" in
+  len &v
+
+spin (k:U64) (acc:Size) : Size =
+  ?k |0 -> acc
+     |_ -> spin (k - 1) (acc + row k)
+  end
+  %k
+
+main : E! Unit =
+  out (show (spin 200000 0))

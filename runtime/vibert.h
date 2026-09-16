@@ -62,7 +62,8 @@ void vb_init(void);
 void *vb_alloc(size_t n);
 /* Frees one object. */
 void vb_free(void *p);
-/* Frees one value where its owner dies. Shallow: see the note in vibert.c. */
+/* Frees one value where its owner dies. Deep for a vector and an object; see
+   the note in vibert.c for the two that are not. */
 void vb_dispose(VbVal v);
 
 /* --- constructors --- */
