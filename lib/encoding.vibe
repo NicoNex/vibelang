@@ -1,0 +1,137 @@
+mod Encoding
+
+;; Hex and base64 (RFC 4648, standard alphabet, padded) over the bytes of a Str.
+;; ponytail: output grows by `concat`, O(n²) on a long input; a byte buffer in
+;; the prelude is the upgrade.
+;; The character at `k` of `table`, "" past its end.
+char_of (table:&Str) (k:U64) : Str =
+  ?(k<len table)
+   |True  -> ?slice k (k + 1) table
+              |Some c -> c
+              |None   -> ""
+             end
+   |False -> ""
+  end
+
+;; A nibble's value, 16 when the byte is not a hex digit.
+nibble (b:U8) : U64 =
+  ?(b>=48 && b<=57)
+   |True  -> u64 b - 48
+   |False -> ?(b>=97 && b<=102)
+              |True  -> u64 b - 87
+              |False -> ?(b>=65 && b<=70)
+                         |True  -> u64 b - 55
+                         |False -> 16
+                        end
+             end
+  end
+
+hex_go (s:&Str) (n:Size, n==len s) (i:Size) (acc:Str) : Str =
+  ?(i<n)
+   |False -> acc
+   |True  -> let b = u64 (byte_at s i) in
+             let pair = concat &(char_of "0123456789abcdef" (shr b 4)) &(char_of "0123456789abcdef" (band b 15)) in
+             hex_go s n (i + 1) (concat &acc &pair)
+  end
+  %(n - i)
+
+;; Two lower-case hex digits per byte.
+hex (s:&Str) : Str = hex_go s (len s) 0 ""
+
+unhex_go (s:&Str) (n:Size, n==len s) (i:Size) (acc:Str) : Res Str Str =
+  ?(i<n && 1<n - i)
+   |False -> ?(i==n)
+              |True  -> Ok acc
+              |False -> Er "odd number of hex digits"
+             end
+   |True  -> let hi = nibble (byte_at s i) in
+             let lo = nibble (byte_at s (i + 1)) in
+             ?(hi<16 && lo<16)
+              |True  -> unhex_go s
+                                 n (i + 2) (concat &acc &(byte_str (u8 (hi * 16 + lo))))
+              |False -> Er (fmt "not a hex digit at {}" i)
+             end
+  end
+  %(n - i)
+
+;; The bytes two hex digits each stand for; either case is accepted.
+unhex (s:&Str) : Res Str Str = unhex_go s (len s) 0 ""
+
+;; The sextet of `v` that starts at bit `at`, as its base64 character.
+sextet (v:U64) (at:Size) : Str =
+  char_of "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" (band (shr v at) 63)
+
+base64_go (s:&Str) (n:Size, n==len s) (i:Size) (acc:Str) : Str =
+  ?(i<n)
+   |False -> acc
+   |True  -> let b0 = byte_at s i in
+             ?(2<n - i)
+              |True  -> let b1 = byte_at s (i + 1) in
+                        let b2 = byte_at s (i + 2) in
+                        let v = u64 b0 * 65536 + u64 b1 * 256 + u64 b2 in
+                        let four = concat &(concat &(sextet v 18) &(sextet v 12)) &(concat &(sextet v 6) &(sextet v 0)) in
+                        base64_go s n (i + 3) (concat &acc &four)
+              |False -> ?(1<n - i)
+                         |True  -> let b1 = byte_at s (i + 1) in
+                                   let v = u64 b0 * 65536 + u64 b1 * 256 in
+                                   concat &acc
+                                          &(concat &(concat &(sextet v 18) &(sextet v 12)) &(concat &(sextet v 6) "="))
+                         |False -> let v = u64 b0 * 65536 in
+                                   concat &acc
+                                          &(concat &(concat &(sextet v 18) &(sextet v 12)) "==")
+                        end
+             end
+  end
+  %(n - i)
+
+;; Base64 with `=` padding.
+base64 (s:&Str) : Str = base64_go s (len s) 0 ""
+
+;; A base64 character's value; 64 for `=`, 65 for anything else.
+value64 (b:U8) : U64 =
+  ?(b>=65 && b<=90)
+   |True  -> u64 b - 65
+   |False -> ?(b>=97 && b<=122)
+              |True  -> u64 b - 71
+              |False -> ?(b>=48 && b<=57)
+                         |True  -> u64 b + 4
+                         |False -> ?b |43 -> 62
+                                      |47 -> 63
+                                      |61 -> 64
+                                      |_  -> 65
+                                   end
+                        end
+             end
+  end
+
+unbase64_go (s:&Str) (n:Size, n==len s) (i:Size) (acc:Str) : Res Str Str =
+  ?(i<n && 3<n - i)
+   |False -> ?(i==n)
+              |True  -> Ok acc
+              |False -> Er "length is not a multiple of 4"
+             end
+   |True  -> let a = value64 (byte_at s i) in
+             let b = value64 (byte_at s (i + 1)) in
+             let c = value64 (byte_at s (i + 2)) in
+             let d = value64 (byte_at s (i + 3)) in
+             let last = 4==n - i in
+             ?(a<64 && b<64 && c<64 && d<64)
+              |True  -> let v = a * 262144 + b * 4096 + c * 64 + d in
+                        let three = concat &(concat &(byte_str (u8 (shr v 16))) &(byte_str (u8 (band (shr v 8) 255)))) &(byte_str (u8 (band v 255))) in
+                        unbase64_go s n (i + 4) (concat &acc &three)
+              |False -> ?(last && a<64 && b<64 && c<64 && d==64)
+                         |True  -> let v = a * 262144 + b * 4096 + c * 64 in
+                                   Ok (concat &acc
+                                              &(concat &(byte_str (u8 (shr v 16))) &(byte_str (u8 (band (shr v 8) 255)))))
+                         |False -> ?(last && a<64 && b<64 && c==64 && d==64)
+                                    |True  -> Ok (concat &acc
+                                                         &(byte_str (u8 (shr (a * 262144 + b * 4096) 16))))
+                                    |False -> Er (fmt "bad base64 at {}" i)
+                                   end
+                        end
+             end
+  end
+  %(n - i)
+
+;; The bytes of padded base64 text.
+unbase64 (s:&Str) : Res Str Str = unbase64_go s (len s) 0 ""

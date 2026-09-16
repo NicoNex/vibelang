@@ -1,0 +1,15 @@
+mod EncodingCheck
+
+expect (name:&Str) (ok:Bool) : E! Unit =
+  ?ok |True  -> ()
+      |False -> warn (fmt "encoding_check: {} failed\n" name) ;
+                exit 1
+  end
+
+main : E! Unit =
+  expect "hex" (Encoding.hex "hi\n"=="68690a" && Encoding.hex ""=="" && Encoding.hex "é"=="c3a9") ;
+  expect "unhex" (Encoding.unhex "68690A"==Ok "hi\n" && Encoding.unhex "c3a9"==Ok "é" && Encoding.unhex "abc"==Er "odd number of hex digits" && Encoding.unhex "zz"==Er "not a hex digit at 0") ;
+  expect "base64" (Encoding.base64 ""=="" && Encoding.base64 "f"=="Zg==" && Encoding.base64 "fo"=="Zm8=" && Encoding.base64 "foo"=="Zm9v" && Encoding.base64 "foobar"=="Zm9vYmFy" && Encoding.base64 "é€"=="w6nigqw=") ;
+  expect "unbase64" (Encoding.unbase64 "Zg=="==Ok "f" && Encoding.unbase64 "Zm8="==Ok "fo" && Encoding.unbase64 "Zm9vYmFy"==Ok "foobar" && Encoding.unbase64 "w6nigqw="==Ok "é€" && Encoding.unbase64 ""==Ok "") ;
+  expect "unbase64 rejects" (Encoding.unbase64 "Zg="==Er "length is not a multiple of 4" && Encoding.unbase64 "Z==="!=Ok "" && Encoding.unbase64 "Zg==Zg=="==Er "bad base64 at 0" && Encoding.unbase64 "Zm9!"==Er "bad base64 at 0") ;
+  out "ok\n"
