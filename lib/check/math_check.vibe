@@ -1,0 +1,94 @@
+mod MathCheck
+
+expect_u (name:Str) (got:U64) (want:U64) : E! Bool =
+  ?(got==want)
+   |True  -> True
+   |False -> warn (fmt "{}: got {}, want {}\n" name got want) ;
+             exit 1 ;
+             False
+  end
+
+expect_i (name:Str) (got:I64) (want:I64) : E! Bool =
+  ?(got==want)
+   |True  -> True
+   |False -> warn (fmt "{}: got {}, want {}\n" name got want) ;
+             exit 1 ;
+             False
+  end
+
+expect_f (name:Str) (got:F64) (want:F64) : E! Bool =
+  ?(got==want)
+   |True  -> True
+   |False -> warn (fmt "{}: got {}, want {}\n" name got want) ;
+             exit 1 ;
+             False
+  end
+
+expect_b (name:Str) (got:Bool) (want:Bool) : E! Bool =
+  ?(got==want)
+   |True  -> True
+   |False -> warn (fmt "{}: got {}, want {}\n" name got want) ;
+             exit 1 ;
+             False
+  end
+
+;; `Er` is encoded as the sentinel 0 with `ok` false, so one comparison covers both.
+expect_r (name:Str) (got:Res Fault U64) (want:U64) (ok:Bool) : E! Bool =
+  ?got |Ok v -> expect_b (dup &name) ok True ;
+                expect_u name v want
+       |Er f -> expect_b name ok False
+  end
+
+;; ponytail: the runtime holds every integer as a signed 64-bit value, so U64 values
+;; at or above 2^63 are not exercised here.
+main : E! Unit =
+  expect_u "imod" (Math.imod 17 5) 2 ;
+  expect_i "irem +/+" (Math.irem 17 5) 2 ;
+  expect_i "irem -/+" (Math.irem (0 - 17) 5) (0 - 2) ;
+  expect_i "irem +/-" (Math.irem 17 (0 - 5)) 2 ;
+  expect_i "irem -/-" (Math.irem (0 - 17) (0 - 5)) (0 - 2) ;
+  expect_b "even" (Math.even 4) True ;
+  expect_b "odd" (Math.odd 4) False ;
+  expect_u "clamp lo" (Math.clamp 3 9 1) 3 ;
+  expect_u "clamp hi" (Math.clamp 3 9 12) 9 ;
+  expect_u "clamp mid" (Math.clamp 3 9 5) 5 ;
+  expect_f "clamp_f64" (Math.clamp_f64 0.0 1.0 1.5) 1.0 ;
+  expect_i "sign neg" (Math.sign (0 - 7)) (0 - 1) ;
+  expect_i "sign zero" (Math.sign 0) 0 ;
+  expect_i "sign pos" (Math.sign 7) 1 ;
+  expect_f "sign_f64 neg" (Math.sign_f64 (0.0 - 2.5)) (0.0 - 1.0) ;
+  expect_f "sign_f64 zero" (Math.sign_f64 0.0) 0.0 ;
+  expect_f "sign_f64 pos" (Math.sign_f64 2.5) 1.0 ;
+  expect_u "abs_diff" (Math.abs_diff 3 10) 7 ;
+  expect_u "abs_diff rev" (Math.abs_diff 10 3) 7 ;
+  expect_u "ceil_div exact" (Math.ceil_div 10 5) 2 ;
+  expect_u "ceil_div up" (Math.ceil_div 11 5) 3 ;
+  expect_u "ceil_div zero" (Math.ceil_div 0 5) 0 ;
+  expect_u "ceil_div max" (Math.ceil_div 9223372036854775807 2) 4611686018427387904 ;
+  expect_u "gcd" (Math.gcd 48 18) 6 ;
+  expect_u "gcd zero" (Math.gcd 0 7) 7 ;
+  expect_u "gcd fib" (Math.gcd 7540113804746346429 4660046610375530309) 1 ;
+  expect_r "lcm" (Math.lcm 4 6) 12 True ;
+  expect_r "lcm zero" (Math.lcm 0 6) 0 True ;
+  expect_r "lcm overflow" (Math.lcm (shl 1 62) 3) 0 False ;
+  expect_u "digits 0" (Math.digits 0) 1 ;
+  expect_u "digits 9" (Math.digits 9) 1 ;
+  expect_u "digits 10" (Math.digits 10) 2 ;
+  expect_u "digits max" (Math.digits 9223372036854775807) 19 ;
+  expect_r "pow 3^4" (Math.pow_u64 3 4) 81 True ;
+  expect_r "pow x^0" (Math.pow_u64 7 0) 1 True ;
+  expect_r "pow 2^62" (Math.pow_u64 2 62) 4611686018427387904 True ;
+  expect_r "pow 2^64" (Math.pow_u64 2 64) 0 False ;
+  expect_r "pow 10^18" (Math.pow_u64 10 18) 1000000000000000000 True ;
+  expect_u "factorial 0" (Math.factorial 0) 1 ;
+  expect_u "factorial 5" (Math.factorial 5) 120 ;
+  expect_u "factorial 20" (Math.factorial 20) 2432902008176640000 ;
+  expect_f "lerp" (Math.lerp 2.0 4.0 0.5) 3.0 ;
+  expect_f "ceil" (Math.ceil 1.2) 2.0 ;
+  expect_f "ceil neg" (Math.ceil (0.0 - 1.2)) (0.0 - 1.0) ;
+  expect_f "round up" (Math.round 2.5) 3.0 ;
+  expect_f "round down" (Math.round 2.4) 2.0 ;
+  expect_f "round neg" (Math.round (0.0 - 2.5)) (0.0 - 3.0) ;
+  expect_f "trunc" (Math.trunc 2.7) 2.0 ;
+  expect_f "trunc neg" (Math.trunc (0.0 - 2.7)) (0.0 - 2.0) ;
+  out "ok"

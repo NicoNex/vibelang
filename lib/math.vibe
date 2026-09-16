@@ -1,0 +1,171 @@
+mod Math
+
+;; The language has no `%` operator: `%` starts a termination measure. This is it.
+imod (a:U64) (b:U64, b!=0) : U64 = a - a / b * b
+
+;; Truncating remainder, so the sign follows `a`, as it does in C.
+irem (a:I64, a>0 - 9223372036854775807) (b:I64, b>0 - 9223372036854775807, b!=0) : I64 =
+  ?(a<0)
+   |True  -> ?(b<0)
+              |True  -> rem_signed True (0 - a) (0 - b)
+              |False -> rem_signed True (0 - a) b
+             end
+   |False -> ?(b<0)
+              |True  -> rem_signed False a (0 - b)
+              |False -> rem_signed False a b
+             end
+  end
+
+;; The remainder of non-negative operands, negated when `neg`. The solver's division
+;; floors, so the signed form goes through here to stay provable.
+rem_signed (neg:Bool) (a:I64, a>=0) (b:I64, b>0) : I64 =
+  ?neg |True  -> 0 - (a - a / b * b)
+       |False -> a - a / b * b
+  end
+
+even (a:U64) : Bool = imod a 2==0
+
+odd (a:U64) : Bool = imod a 2!=0
+
+clamp (lo:U64) (hi:U64, lo<=hi) (x:U64) : U64 = min hi (max lo x)
+
+clamp_f64 (lo:F64) (hi:F64, lo<=hi) (x:F64) : F64 = min hi (max lo x)
+
+;; -1, 0 or 1.
+sign (x:I64) : I64 =
+  ?(x<0)
+   |True  -> 0 - 1
+   |False -> ?(x==0)
+              |True  -> 0
+              |False -> 1
+             end
+  end
+
+;; -1.0, 0.0 or 1.0; NaN gives 1.0.
+sign_f64 (x:F64) : F64 =
+  ?(x<0.0)
+   |True  -> 0.0 - 1.0
+   |False -> ?(x==0.0)
+              |True  -> 0.0
+              |False -> 1.0
+             end
+  end
+
+abs_diff (a:U64) (b:U64) : U64 =
+  ?(a>=b)
+   |True  -> a - b
+   |False -> b - a
+  end
+
+;; Rounds the quotient up instead of down.
+ceil_div (a:U64) (b:U64, b!=0) : U64 =
+  ?a |0 -> 0
+     |_ -> (a - 1) / b + 1
+  end
+
+gcd (a:U64) (b:U64) : U64 = gcd_fuel a b 100
+
+;; Euclid on U64 takes at most 93 steps, so 100 fuel never runs out. The fuel is
+;; there because the measure checker cannot learn `imod a b < b`.
+gcd_fuel (a:U64) (b:U64) (fuel:U64) : U64 =
+  ?fuel |0 -> a
+        |_ -> ?b |0 -> a
+                 |_ -> gcd_fuel b (imod a b) (fuel - 1)
+              end
+  end
+  %fuel
+
+;; `lcm 0 x` is 0; `Er Overflow` when the result does not fit.
+lcm (a:U64) (b:U64) : Res Fault U64 =
+  ?(a==0 || b==0)
+   |True  -> Ok 0
+   |False -> div_checked a (gcd a b) |> lcm_step b
+  end
+
+lcm_step (b:U64) (q:Res Fault U64) : Res Fault U64 =
+  ?q |Er f -> Er f
+     |Ok x -> mul_checked x b
+  end
+
+;; Base-10 digit count; `digits 0` is 1.
+digits (n:U64) : U64 = digits_fuel n 19 0
+
+;; A U64 has at most 20 digits, so the fuel never runs out; it stands in for the
+;; measure `n / 10 < n`, which the checker cannot see.
+digits_fuel (n:U64) (fuel:U64, fuel<=20) (acc:U64, acc + fuel<=20) : U64 =
+  ?fuel |0 -> acc + 1
+        |_ -> ?(n<10)
+               |True  -> acc + 1
+               |False -> digits_fuel (n / 10) (fuel - 1) (acc + 1)
+              end
+  end
+  %fuel
+
+;; `base` to the `power`, by squaring; `Er Overflow` when it does not fit.
+pow_u64 (base:U64) (power:U64) : Res Fault U64 = pow_fuel base power 64
+
+;; Halving a U64 reaches 0 within 64 steps, so the fuel never runs out.
+pow_fuel (base:U64) (power:U64) (fuel:U64) : Res Fault U64 =
+  ?fuel |0 -> Ok 1
+        |_ -> ?power |0 -> Ok 1
+                     |_ -> pow_fuel base (power / 2) (fuel - 1) |> pow_square base power
+              end
+  end
+  %fuel
+
+pow_square (base:U64) (power:U64) (half:Res Fault U64) : Res Fault U64 =
+  ?half |Er f -> Er f
+        |Ok h -> ?mul_checked h h
+                  |Er f  -> Er f
+                  |Ok sq -> ?odd power
+                             |True  -> mul_checked sq base
+                             |False -> Ok sq
+                            end
+                 end
+  end
+
+;; 20! is the largest factorial that fits in a U64. A table, because the solver
+;; cannot bound `n * factorial (n - 1)` through the recursive call.
+factorial (n:U64, n<=20) : U64 =
+  ?n |0  -> 1
+     |1  -> 1
+     |2  -> 2
+     |3  -> 6
+     |4  -> 24
+     |5  -> 120
+     |6  -> 720
+     |7  -> 5040
+     |8  -> 40320
+     |9  -> 362880
+     |10 -> 3628800
+     |11 -> 39916800
+     |12 -> 479001600
+     |13 -> 6227020800
+     |14 -> 87178291200
+     |15 -> 1307674368000
+     |16 -> 20922789888000
+     |17 -> 355687428096000
+     |18 -> 6402373705728000
+     |19 -> 121645100408832000
+     |_  -> 2432902008176640000
+  end
+
+lerp (a:F64) (b:F64) (t:F64) : F64 = a + (b - a) * t
+
+ceil (x:F64) : F64 = 0.0 - floor (0.0 - x)
+
+;; Half away from zero.
+round (x:F64) : F64 =
+  ?(x<0.0)
+   |True  -> 0.0 - floor (0.5 - x)
+   |False -> floor (x + 0.5)
+  end
+
+trunc (x:F64) : F64 =
+  ?(x<0.0)
+   |True  -> ceil x
+   |False -> floor x
+  end
+
+;; `lcm` and `pow_u64` return `Res`, which cannot cross the C boundary.
+exp c imod, irem, even, odd, clamp, clamp_f64, sign, sign_f64, abs_diff, ceil_div, gcd, digits, factorial, lerp, ceil, round, trunc
