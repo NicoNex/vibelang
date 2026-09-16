@@ -1,0 +1,33 @@
+mod TextCheck
+
+expect (name:&Str) (ok:Bool) : E! Unit =
+  ?ok |True  -> ()
+      |False -> warn (fmt "text_check: {} failed\n" name) ;
+                exit 1
+  end
+
+main : E! Unit =
+  expect "is_digit" (Text.is_digit '7' && !(Text.is_digit 'a')) ;
+  expect "is_upper" (Text.is_upper 'Q' && !(Text.is_upper 'q')) ;
+  expect "is_lower" (Text.is_lower 'q' && !(Text.is_lower 'Q')) ;
+  expect "is_alpha" (Text.is_alpha 'z' && Text.is_alpha 'A' && !(Text.is_alpha '1')) ;
+  expect "is_alnum" (Text.is_alnum '1' && Text.is_alnum 'b' && !(Text.is_alnum '-')) ;
+  expect "is_space" (Text.is_space ' ' && Text.is_space '\t' && Text.is_space '\n' && !(Text.is_space 'x')) ;
+  expect "digit_value" (Text.digit_value '7'==Some 7 && Text.digit_value 'x'==None) ;
+  expect "is_empty" (Text.is_empty "" && !(Text.is_empty "a")) ;
+  expect "ends_with" (Text.ends_with "hello.vibe" ".vibe" && !(Text.ends_with "vibe" "hello.vibe") && Text.ends_with "x" "") ;
+  expect "strip_prefix" (Text.strip_prefix "--help" "--"==Some "help" && Text.strip_prefix "help" "--"==None) ;
+  expect "strip_suffix" (Text.strip_suffix "main.vibe" ".vibe"==Some "main" && Text.strip_suffix "e" ".vibe"==None) ;
+  expect "join" (Text.join ", " &["a", "b", "c"]=="a, b, c" && Text.join ", " &["a"]=="a" && Text.join ", " &empty=="") ;
+  expect "unlines" (Text.unlines &["x", "y"]=="x\ny") ;
+  expect "unwords" (Text.unwords &["x", "y"]=="x y") ;
+  expect "repeat" (Text.repeat "ab" 3=="ababab" && Text.repeat "ab" 0=="") ;
+  expect "pad_left" (Text.pad_left "42" 5 '0'=="00042" && Text.pad_left "123456" 3 '0'=="123456") ;
+  expect "pad_right" (Text.pad_right "ab" 4 '.'=="ab.." && Text.pad_right "abcd" 2 '.'=="abcd") ;
+  expect "words" (Text.words "  one\ttwo\n three  "==["one", "two", "three"] && len (Text.words "   ")==0) ;
+  expect "count" (Text.count "banana" "an"==2 && Text.count "aaaa" "aa"==2 && Text.count "abc" ""==0) ;
+  expect "chars" (Text.chars "abc"==["a", "b", "c"] && len (Text.chars "")==0) ;
+  expect "reverse" (Text.reverse "hello"=="olleh" && Text.reverse ""=="") ;
+  expect "upper" (Text.upper "Hello, World 1"=="HELLO, WORLD 1") ;
+  expect "capitalize" (Text.capitalize "vibe"=="Vibe" && Text.capitalize ""=="") ;
+  out "ok"

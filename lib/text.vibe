@@ -1,0 +1,138 @@
+mod Text
+
+;; String and character utilities the prelude does not have. Strings are bytes:
+;; `len`, `slice` and everything here count bytes, so the classification is
+;; ASCII only. The haystack comes first, as it does in `contains` and `replace`.
+is_digit (c:Char) : Bool = ord c>=48 && ord c<=57
+
+is_upper (c:Char) : Bool = ord c>=65 && ord c<=90
+
+is_lower (c:Char) : Bool = ord c>=97 && ord c<=122
+
+is_alpha (c:Char) : Bool = is_upper c || is_lower c
+
+is_alnum (c:Char) : Bool = is_alpha c || is_digit c
+
+;; Space, tab, newline, vertical tab, form feed, carriage return.
+is_space (c:Char) : Bool = ord c==32 || ord c>=9 && ord c<=13
+
+;; `Some 7` for '7'; `None` for anything that is not a decimal digit.
+digit_value (c:Char) : Opt U32 =
+  ?is_digit c
+   |True  -> Some (ord c - 48)
+   |False -> None
+  end
+
+is_empty (s:&Str) : Bool = len s==0
+
+ends_with (s:&Str) (suffix:&Str) : Bool =
+  ?(len suffix<=len s)
+   |False -> False
+   |True  -> ?slice (len s - len suffix) (len s) s
+              |Some tail -> tail==suffix
+              |None      -> False
+             end
+  end
+
+strip_prefix (s:&Str) (prefix:&Str) : Opt Str =
+  ?starts_with s prefix
+   |False -> None
+   |True  -> slice (len prefix) (len s) s
+  end
+
+strip_suffix (s:&Str) (suffix:&Str) : Opt Str =
+  ?(len suffix<=len s)
+   |False -> None
+   |True  -> ?ends_with s suffix
+              |False -> None
+              |True  -> slice 0 (len s - len suffix) s
+             end
+  end
+
+;; `sep` between every two parts; `join ", " &[]` is "".
+join (sep:&Str) (parts:&Vec Str) : Str =
+  ?parts |[]  -> ""
+         |[p] -> dup p
+         |_   -> fold (\acc p -> concat &(concat &acc sep) &p)
+                      (dup &(get parts 0)) &(drop 1 parts)
+  end
+
+unlines (ls:&Vec Str) : Str = join "\n" ls
+
+unwords (ws:&Vec Str) : Str = join " " ws
+
+repeat (s:&Str) (n:Size) : Str =
+  ?n |0 -> ""
+     |_ -> concat s &(repeat s (n - 1))
+  end
+
+;; Pads with `fill` on the left up to `width` bytes; a longer string is unchanged.
+pad_left (s:&Str) (width:Size) (fill:Char) : Str =
+  ?(len s<width)
+   |True  -> concat &(repeat &(chr fill) (width - len s)) s
+   |False -> dup s
+  end
+
+pad_right (s:&Str) (width:Size) (fill:Char) : Str =
+  ?(len s<width)
+   |True  -> concat s &(repeat &(chr fill) (width - len s))
+   |False -> dup s
+  end
+
+;; Splits on runs of space, tab, newline and carriage return; no empty words.
+;; ponytail: no `\v`/`\f` — the lexer has no escape for them.
+words (s:&Str) : Vec Str =
+  let flat = replace &(replace &(replace s "\t" " ") "\n" " ") "\r" " " in
+  filter (\w -> len &w>0) &(split ' ' &flat)
+
+;; Non-overlapping occurrences of `needle`; an empty needle occurs 0 times.
+count (s:&Str) (needle:&Str) : Size =
+  ?(len needle==0)
+   |True  -> 0
+   |False -> let rest = replace s needle "" in
+             ?(len &rest<=len s)
+              |True  -> (len s - len &rest) / len needle
+              |False -> 0
+             end
+  end
+
+chars_go (s:&Str) (rest:Size, rest<=len s) (acc:Vec Str) : Vec Str =
+  ?rest |0 -> acc
+        |_ -> ?slice (len s - rest) (len s - (rest - 1)) s
+               |Some c -> chars_go s (rest - 1) (push acc c)
+               |None   -> acc
+              end
+  end
+  %rest
+
+;; One single-byte string per byte.
+chars (s:&Str) : Vec Str = chars_go s (len s) empty
+
+reverse (s:&Str) : Str = fold (\acc c -> concat &c &acc) "" &(chars s)
+
+;; `pair` is a lower-case byte followed by its upper-case form.
+upper_one (acc:Str) (pair:&Str) : Str =
+  ?slice 0 1 pair
+   |None    -> acc
+   |Some lo -> ?slice 1 2 pair
+                |None    -> acc
+                |Some up -> replace &acc &lo &up
+               end
+  end
+
+;; ASCII only, like `lower`.
+upper (s:&Str) : Str =
+  let pairs = split ',' "aA,bB,cC,dD,eE,fF,gG,hH,iI,jJ,kK,lL,mM,nN,oO,pP,qQ,rR,sS,tT,uU,vV,wW,xX,yY,zZ" in
+  fold upper_one (dup s) &pairs
+
+;; First byte upper-cased, the rest untouched.
+capitalize (s:&Str) : Str =
+  ?slice 0 1 s
+   |None      -> dup s
+   |Some head -> ?slice 1 (len s) s
+                  |Some tail -> concat &(upper &head) &tail
+                  |None      -> dup s
+                 end
+  end
+
+exp c is_digit, is_upper, is_lower, is_alpha, is_alnum, is_space, is_empty, ends_with, repeat, pad_left, pad_right, count, reverse, upper, capitalize
