@@ -177,6 +177,31 @@ Deep and generic: the copy owns everything it points at, so it survives the orig
 freed on its own. `CStr` and `Ptr` are the exception — they stay shallow, because C owns
 that memory, so a copy holding one still aliases.
 
+### Dict
+
+```
+dict         : Dict k v
+insert       : Dict k v -> k -> v -> Dict k v
+lookup       : &Dict k v -> &k -> Opt v
+remove       : Dict k v -> &k -> Dict k v
+keys         : &Dict k v -> Vec k
+```
+
+`dict` is the empty one; there is no literal syntax. `insert` on a key already present
+replaces it rather than growing. `len` works on a `Dict` as it does on a `Vec` and a `Str`.
+Keys compare with the language's own equality, so a key is anything you can write a value
+of. A set is a `Dict k Unit` — there are no separate names for one.
+
+`insert` and `remove` take the dictionary by value, so the name you gave them is moved and
+cannot be used again; `lookup` and `keys` borrow, and what they hand back is a copy.
+
+```
+tally (ws:&Vec Str) : Dict Str U32 =
+  fold (\d w -> insert d (dup w) 1) dict ws
+```
+
+ponytail: a lookup is a linear scan, so a large dictionary is O(n) per lookup.
+
 ### Vec
 
 ```
@@ -297,8 +322,6 @@ checked form there is the mistake a generator makes most often.
 
 ## What the prelude does not have
 
-- **No map, set or dictionary.** Nothing associates a key with a value. This needs a
-  runtime type, not a library written in Vibelang.
 - **No modulo**, and no other arithmetic beyond the table above.
 - **No record pattern.** The grammar lists one; the parser rejects it. Project with `.`.
 - **No postcondition syntax.** A fact established inside a function does not leave it,

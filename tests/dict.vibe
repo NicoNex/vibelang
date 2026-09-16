@@ -18,7 +18,12 @@ found (d:&Dict Str U32) (k:&Str) : U32 =
    |None   -> 0
   end
 
+;; `fold` is in PRELUDE_SHARES, but its result is an element of the vector only
+;; when the function it is given returns its own argument. This one builds a new
+;; dictionary out of every element, so it is not a borrow escaping.
+tally (ws:&Vec Str) : Dict Str U32 = fold (\d w -> insert d (dup w) 1) dict ws
+
 main : E! Unit =
   let d = count 20 in
-  out (fmt "{} {} {} {} {}\n"
-           (len &d) (found &d &"one") (found &d &"two") (found &d &"three") (len &(keys &d)))
+  out (fmt "{} {} {} {} {} {}\n"
+           (len &d) (found &d &"one") (found &d &"two") (found &d &"three") (len &(keys &d)) (len &(tally &["a", "b", "a"])))

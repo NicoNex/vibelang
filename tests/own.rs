@@ -207,3 +207,14 @@ fn borrowing_after_a_move_is_refused() {
         "the witness must name the move:\n{out}"
     );
 }
+
+/// `fold` is in `PRELUDE_SHARES`, but its result is an element of the vector
+/// only when the function it was given returns its own argument. Treating every
+/// `fold` over a borrow as an escape refused `fold insert dict ws`, which is the
+/// way a dictionary gets built; treating none of them as one lets this through.
+#[test]
+fn a_fold_escapes_only_through_the_function_it_was_given() {
+    let (ok, out) = vibe(&["check", "tests/fold_escape.vibe", "--diag=struct"]);
+    assert!(!ok, "the accumulator is one of `v`'s elements:\n{out}");
+    assert!(out.contains("own.borrow_escapes"), "{out}");
+}

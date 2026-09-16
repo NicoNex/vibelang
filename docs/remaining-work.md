@@ -16,7 +16,7 @@ code is, so the first step is never a search.
 
 ## Where the compiler is today
 
-2026-09-16. `cargo test -- --test-threads=1`: 150 tests across 12 binaries,
+2026-09-16. `cargo test -- --test-threads=1`: 151 tests across 12 binaries,
 green. `cargo clippy --all-targets -- -D warnings`: clean.
 
 A `.vibe` file goes to a native executable through C. What stands between the

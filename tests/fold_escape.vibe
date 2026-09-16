@@ -1,0 +1,6 @@
+mod FoldEscape
+
+;; The other side of the `fold` rule in `own::borrow_out`: this lambda returns
+;; its own argument, so the accumulator ends up being one of `v`'s elements and
+;; the caller gets back a piece of what it lent.
+last (v:&Vec Str) : Str = fold (\a x -> x) "z" v

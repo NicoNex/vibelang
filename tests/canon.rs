@@ -130,6 +130,7 @@ fn the_whole_corpus_checks() {
                 "total_arena.vibe",
                 "diverge.vibe",
                 "ffi_bad.vibe",
+                "fold_escape.vibe",
             ]
             .contains(&name.as_str())
             {

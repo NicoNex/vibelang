@@ -290,8 +290,19 @@ fn borrow_out<'a>(e: &'a Expr, borrows: &[&str], out: &mut Vec<(&'a str, Span, &
         // passes the provenance through with it: `max_by amt ts` is one of
         // `ts`, and `get ts i` is another. A module function does not, because
         // this check is what makes that true.
+        //
+        // `fold` is in `PRELUDE_SHARES` and is not one of these. Its result is
+        // the accumulator, which is an element of the vector only when the
+        // function it was given returns its own argument — `fold (\a x -> x) z
+        // v`. So the question goes to the function, and `fold insert dict ws`,
+        // which builds something new out of every element, is not an escape.
         App(h, xs) => {
-            if matches!(&h.kind, Var(n) if PRELUDE_SHARES.contains(&n.as_str())) {
+            let shares = match &h.kind {
+                Var(n) if n == "fold" => xs.iter().any(lambda_returns_its_argument),
+                Var(n) => PRELUDE_SHARES.contains(&n.as_str()),
+                _ => false,
+            };
+            if shares {
                 let mut inner = Vec::new();
                 for x in xs {
                     borrow_out(x, borrows, &mut inner);
