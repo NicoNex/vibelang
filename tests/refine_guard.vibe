@@ -18,3 +18,11 @@ after_call (s:&Str) (i:Size) : Size =
 
 ;; The right side of `&&` runs only when the left one held.
 short_circuit (s:&Str) (i:Size) : Bool = i<=len s && len s - i>2
+
+;; A `let` of a prelude call carries its result's range: a byte is below 256.
+widen (s:&Str) (i:Size) : U64 =
+  ?(i<len s)
+   |True  -> let b = byte_at s i in
+             u64 b * 65536
+   |False -> 0
+  end

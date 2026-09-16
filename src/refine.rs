@@ -744,7 +744,20 @@ impl<'a> Gen<'a> {
                         return Some(t.into());
                     }
                 }
-                self.ret_ty(&name, args.len()).and_then(|t| base_name(&t))
+                if let Some(t) = self.ret_ty(&name, args.len()).and_then(|t| base_name(&t)) {
+                    return Some(t);
+                }
+                // A saturated prelude call with a scalar result: `byte_at s i`
+                // is a U8, and a `let` of it carries that range.
+                let (_, sig) = crate::types::PRELUDE_SIGS
+                    .iter()
+                    .find(|(p, _)| *p == name)?;
+                let parts: Vec<&str> = sig.split(" -> ").collect();
+                let ret = parts.last()?;
+                (parts.len() == args.len() + 1
+                    && ret.chars().all(|c| c.is_ascii_alphanumeric())
+                    && ret.starts_with(|c: char| c.is_ascii_uppercase()))
+                .then(|| ret.to_string())
             }
             _ => None,
         }
