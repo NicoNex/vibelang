@@ -1,0 +1,53 @@
+mod IoCheck
+
+expect (name:&Str) (ok:Bool) : E! Unit =
+  ?ok |True  -> out ""
+      |False -> warn (fmt "io_check: {} failed\n" name) ;
+                exit 1
+  end
+
+get_opt (xs:&Vec Str) (i:Size) : Opt Str =
+  ?(i<len xs)
+   |True  -> Some (get xs i)
+   |False -> None
+  end
+
+main : E! Unit =
+  let path = "/tmp/claude-1000/iot/io_check.txt" in
+  Io.print "print " ;
+  Io.print "same line\n" ;
+  Io.print_all &["print_all 1", "print_all 2"] ;
+  Io.write_lines &path &["a", "b"] ;
+  whole <- read &path ;
+  expect "write_lines" (whole=="a\nb\n") ;
+  got <- Io.read_lines &path ;
+  expect "read_lines" (got==["a", "b"]) ;
+  Io.append &path "c\n" ;
+  more <- Io.read_lines &path ;
+  expect "append existing" (more==["a", "b", "c"]) ;
+  there <- Io.file_exists &path ;
+  expect "file_exists yes" there ;
+  gone <- Io.file_exists "/tmp/claude-1000/iot/no_such_file" ;
+  expect "file_exists no" (gone==False) ;
+  let fresh = "/tmp/claude-1000/iot/io_check_fresh.txt" in
+  Io.write_lines &fresh empty ;
+  Io.append &fresh "x" ;
+  one <- read &fresh ;
+  expect "append fresh" (one=="x") ;
+  all <- argv ;
+  xs <- Io.args () ;
+  expect "args" (&xs==&(drop 1 &all)) ;
+  first <- Io.arg_at 0 ;
+  expect "arg_at in" (first==get_opt &xs 0) ;
+  past <- Io.arg_at (len &xs) ;
+  expect "arg_at out" (past==None) ;
+  path_var <- Io.getenv_opt "PATH" ;
+  expect "getenv_opt set" (path_var!=None) ;
+  unset <- Io.getenv_opt "IO_CHECK_SURELY_UNSET" ;
+  expect "getenv_opt unset" (unset==None) ;
+  out "ok" ;
+  ;; `die` ends the process, so it runs only when asked: `-- die`.
+  ?(&xs==&["die"])
+   |True  -> Io.die "io_check: die called"
+   |False -> ()
+  end

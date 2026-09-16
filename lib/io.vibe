@@ -1,0 +1,79 @@
+mod Io
+
+;; `out` and `warn` already end the line, so there is no println / eprintln
+;; here: they would be `out` and `warn` under another name.
+ext c "stdio.h"
+  printf : &CStr -> &CStr -> E! I32
+end
+
+;; `access` answers 0 when the path exists; `F_OK` is 0.
+ext c "unistd.h"
+  access : &CStr -> I32 -> E! I32
+end
+
+;; `getenv` may hand back NULL and a CStr cannot be compared with anything, so
+;; `mblen` stands in as the NULL test: it answers 0 for NULL and for "".
+ext c "stdlib.h"
+  getenv : &CStr -> E! CStr
+  mblen  : CStr -> Size -> E! I32
+end
+
+;; Stdout without the newline `out` adds. Stops at a NUL byte.
+print (s:&Str) : E! Unit =
+  n <- printf (to_cstr "%s") (to_cstr s) ;
+  ()
+
+;; ponytail: no eprint — `stderr` is a C macro, not a function, and `dprintf` is hidden under -std=c99.
+;; One line each.
+print_all (xs:&Vec Str) : E! Unit = each out xs
+
+;; A trailing newline does not make an empty last line.
+read_lines (path:&Str) : E! Vec Str =
+  txt <- read path ;
+  lines &txt
+
+;; Every line is terminated, the last one included.
+join_lines (xs:&Vec Str) : Str = fold (\acc x -> acc ++ &(concat x "\n")) "" xs
+
+write_lines (path:&Str) (xs:&Vec Str) : E! Unit = write path (join_lines xs)
+
+file_exists (path:&Str) : E! Bool =
+  r <- access (to_cstr path) 0 ;
+  r==0
+
+;; Creates the file when it is missing.
+append (path:&Str) (s:&Str) : E! Unit =
+  there <- file_exists path ;
+  ?there |True  -> old <- read path ;
+                   write path (old ++ s)
+         |False -> write path (dup s)
+  end
+
+;; `argv` without the program name. The `Unit` parameter is there because a
+;; nullary declaration other than `main` compiles to an unapplied closure.
+args (u:Unit) : E! Vec Str =
+  all <- argv ;
+  drop 1 &all
+
+arg_at (i:Size) : E! Opt Str =
+  xs <- args () ;
+  ?(i<len &xs)
+   |True  -> Some (dup &(get &xs i)) ;; ponytail: `dup` because a bare `get` aliases an element that the drop of `xs` then frees (segfault).
+   |False -> None
+  end
+
+;; The message and a newline on stderr, then exit status 1.
+die (msg:&Str) : E! Unit =
+  warn msg ;
+  exit 1
+
+;; An unset variable and one set to "" both read as None.
+getenv_opt (name:&Str) : E! Opt Str =
+  p <- getenv (to_cstr name) ;
+  n <- mblen p 1 ;
+  ?(n==0)
+   |True  -> None
+   |False -> Some (from_cstr p)
+  end
+
+exp c print, file_exists, append, die
