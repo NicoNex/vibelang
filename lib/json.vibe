@@ -52,19 +52,52 @@ hex4 (s:&Str) (i:Size, i<len s && 3<len s - i) : Opt Size =
    |False -> None
   end
 
-;; The character for a `\u` code the language can spell.
-;; ponytail: the prelude has no U32 -> Char, so a `\u` escape outside printable
-;; ASCII (and tab, newline, carriage return) is refused, as are `\b` and `\f`.
-;; Raw UTF-8 inside a string passes through untouched. Lift when a byte
-;; constructor lands in the prelude.
-unicode (code:Size) : Opt Str =
-  ?code |9  -> Some "\t"
-        |10 -> Some "\n"
-        |13 -> Some "\r"
-        |_  -> ?(code>=32 && code<127)
-                |True  -> slice (code - 32)
-                                (code - 31) " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
-                |False -> None
+;; A continuation byte: the six bits of `cp` from bit `at`.
+cont (cp:Size) (at:Size) : Str = byte_str (u8 (bor 128 (band (shr cp at) 63)))
+
+;; The UTF-8 encoding of a code point below 0x110000.
+utf8 (cp:Size) : Str =
+  ?(cp<128)
+   |True  -> byte_str (u8 cp)
+   |False -> ?(cp<2048)
+              |True  -> concat &(byte_str (u8 (bor 192 (shr cp 6))))
+                               &(cont cp 0)
+              |False -> ?(cp<65536)
+                         |True  -> concat &(byte_str (u8 (bor 224 (shr cp 12))))
+                                          &(concat &(cont cp 6) &(cont cp 0))
+                         |False -> concat &(byte_str (u8 (bor 240 (shr cp 18))))
+                                          &(concat &(cont cp 12) &(concat &(cont cp 6) &(cont cp 0)))
+                        end
+             end
+  end
+
+;; The `\uXXXX` at `i` that is not half of a surrogate pair.
+single_escape (s:&Str) (i:Size, i<len s && 5<len s - i) : Res Str Str =
+  ?hex4 s (i + 2)
+   |None    -> Er (fmt "bad \\u escape at {}" i)
+   |Some cp -> ?(cp>=55296 && cp<57344)
+                |True  -> Er (fmt "lone surrogate at {}" i)
+                |False -> Ok (utf8 cp)
+               end
+  end
+
+;; Whether the `\uXXXX` at `i` is a high surrogate, the first half of a pair.
+high_at (s:&Str) (i:Size, i<len s && 5<len s - i) : Bool =
+  ?hex4 s (i + 2)
+   |Some hi -> hi>=55296 && hi<56320
+   |None    -> False
+  end
+
+;; The surrogate pair `\uD8xx\uDCxx` at `i`.
+pair_escape (s:&Str) (i:Size, i<len s && 11<len s - i) : Res Str Str =
+  ?hex4 s (i + 2)
+   |None    -> Er (fmt "bad \\u escape at {}" i)
+   |Some hi -> ?hex4 s (i + 8)
+                |None    -> Er (fmt "bad \\u escape at {}" i)
+                |Some lo -> ?(hi>=55296 && hi<56320 && lo>=56320 && lo<57344)
+                             |True  -> Ok (utf8 (65536 + (hi - 55296) * 1024 + (lo - 56320)))
+                             |False -> Er (fmt "lone surrogate at {}" i)
+                            end
                end
   end
 
@@ -76,6 +109,8 @@ simple_escape (e:&Str) : Opt Str =
      |"n"  -> Some "\n"
      |"t"  -> Some "\t"
      |"r"  -> Some "\r"
+     |"b"  -> Some (byte_str 8)
+     |"f"  -> Some (byte_str 12)
      |_    -> None
   end
 
@@ -99,15 +134,17 @@ str_go (s:&Str) (n:Size, n==len s) (i:Size) (acc:Str) : Res Str (Str, Size) =
                                                end
                                      |True  -> ?(5<n - i)
                                                 |False -> Er "unterminated string"
-                                                |True  -> ?hex4 s (i + 2)
-                                                           |None      -> Er (fmt "bad \\u escape at {}"
-                                                                                 i)
-                                                           |Some code -> ?unicode code
-                                                                          |Some t -> str_go s
-                                                                                            n (i + 6) (concat &acc &t)
-                                                                          |None   -> Er (fmt "unsupported \\u escape at {}"
-                                                                                             i)
-                                                                         end
+                                                |True  -> ?(11<n - i && at s (i + 6)=="\\" && at s (i + 7)=="u" && high_at s i)
+                                                           |True  -> ?pair_escape s i
+                                                                      |Ok t -> str_go s
+                                                                                      n (i + 12) (concat &acc &t)
+                                                                      |Er e -> Er e
+                                                                     end
+                                                           |False -> ?single_escape s i
+                                                                      |Ok t -> str_go s
+                                                                                      n (i + 6) (concat &acc &t)
+                                                                      |Er e -> Er e
+                                                                     end
                                                           end
                                                end
                                     end
@@ -262,10 +299,23 @@ quote (s:&Str) : Str =
   let b = replace &a "\"" "\\\"" in
   let c = replace &b "\n" "\\n" in
   let d = replace &c "\t" "\\t" in
-  fmt "\"{}\"" (replace &d "\r" "\\r")
+  let e = replace &d "\r" "\\r" in
+  fmt "\"{}\"" (fold escape_control e &(range 0 32))
 
-;; ponytail: control bytes other than tab, newline and carriage return are
-;; written raw, since nothing in the language can name them.
+hex_digit (d:Size) : Str =
+  ?(d<16)
+   |True  -> ?slice d (d + 1) "0123456789abcdef"
+              |Some h -> h
+              |None   -> "0"
+             end
+   |False -> "0"
+  end
+
+;; ponytail: one pass over the string per control byte; a byte loop if a long
+;; string ever makes 32 passes show.
+escape_control (acc:Str) (k:Size) : Str =
+  replace &acc &(byte_str (u8 k)) &(fmt "\\u00{}{}" (hex_digit (shr k 4)) (hex_digit (band k 15)))
+
 render_go (j:&Json) (fuel:U64) : Str =
   ?fuel |0 -> "null"
         |_ -> ?j |JNull    -> "null"

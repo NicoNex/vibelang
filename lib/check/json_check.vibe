@@ -18,6 +18,9 @@ main : E! Unit =
   expect "numbers" (round "42"=="42" && round "-1.5e2"=="-150" && round "0.1"=="0.1" && round "6.916666666666667"=="6.916666666666667") ;
   expect "string" (round "\"a\\\"b\\\\c\\n\""=="\"a\\\"b\\\\c\\n\"") ;
   expect "unicode ascii" (round "\"\\u0041\\u007a\""=="\"Az\"") ;
+  expect "unicode utf8" (round "\"\\u00e9\\u20ac\""=="\"é€\"" && round "\"é\""=="\"é\"") ;
+  expect "surrogate pair" (round "\"\\ud83d\\ude00\""=="\"😀\"" && round "\"\\ud83d\""=="ERR" && round "\"\\ude00x\""=="ERR") ;
+  expect "controls" (round "\"\\b\\f\\u0001\""=="\"\\u0008\\u000c\\u0001\"") ;
   expect "array" (round " [1, [2, []], {}] "=="[1,[2,[]],{}]") ;
   expect "object" (round "{\"b\": 1, \"a\": [true, null]}"=="{\"b\":1,\"a\":[true,null]}") ;
   expect "rejects" (round "[1,]"=="ERR" && round "{\"a\" 1}"=="ERR" && round "tru"=="ERR" && round "1 2"=="ERR" && round ""=="ERR" && round "\"abc"=="ERR" && round "{,}"=="ERR") ;
