@@ -1,0 +1,10 @@
+mod DropPass
+
+;; `keep` takes its argument owned and hands the same value back, so `"ok"` is
+;; not freed when `keep` returns — `out` is about to read it. Only the value
+;; `out` itself borrowed is freed, once: the position a call sits in says
+;; nothing about what the callee does with its arguments.
+keep (s:Str) : Str = s
+
+main : E! Unit =
+  out (keep "ok")

@@ -577,11 +577,11 @@ impl State<'_> {
                 let keeps_closures = !matches!(&h.kind, Var(n)
                     if PRELUDE_SIGS.iter().any(|(p, _)| p == n));
                 for (i, a) in args.iter().enumerate() {
-                    let m = if reads_all || borrows.is_some_and(|b| *b.get(i).unwrap_or(&false)) {
-                        Mode::Borrow
-                    } else {
-                        mode
-                    };
+                    // The callee's own signature, not the position this call
+                    // sits in: `out (id "ok")` is a borrow position for `out`,
+                    // and says nothing about what `id` does with its argument.
+                    let lent = reads_all || borrows.is_some_and(|b| *b.get(i).unwrap_or(&false));
+                    let m = if lent { Mode::Borrow } else { mode };
                     if matches!(a.kind, Lambda(..)) {
                         if keeps_closures {
                             let mut captured = HashSet::new();
@@ -616,7 +616,7 @@ impl State<'_> {
                         names_in(a, &mut given);
                         self.shared.extend(given);
                     }
-                    if m == Mode::Borrow && !lends_onward {
+                    if lent && !lends_onward {
                         let inner = match &a.kind {
                             Borrow(x) => x,
                             _ => a,

@@ -194,3 +194,18 @@ fn a_closure_a_loop_builds_every_iteration_does_not_accumulate() {
     let rss = peak_rss(&bin);
     assert!(rss < 8 * 1024 * 1024, "the closures piled up: {rss} bytes");
 }
+
+/// The temporary rule reads the callee's signature, not the position the call
+/// sits in. `out (keep "ok")` is a borrow position for `out`; `keep` takes its
+/// argument owned and hands it back.
+#[test]
+fn a_call_inside_a_borrow_position_does_not_make_its_arguments_borrows() {
+    let d = drops("tests/drop_pass.vibe");
+    assert_eq!(
+        d.lines()
+            .filter(|l| l.contains("borrowed temporary"))
+            .count(),
+        1,
+        "only what `out` borrowed is freed, and `\"ok\"` is not freed twice:\n{d}"
+    );
+}
