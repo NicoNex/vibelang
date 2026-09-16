@@ -16,17 +16,19 @@ code is, so the first step is never a search.
 
 ## Medium
 
-### 1. A tail-recursive loop still accumulates
+### 1. A drop is shallow, and what may be shared is not freed at all
 
-Per-frame release (`src/escape.rs`) marks once at function entry and releases once
-on return, but a self-tail-call compiles to a `for (;;)` with the release
-*after* the loop (`src/codegen.rs::function`). So iterations pile up until the
-function returns, and a function that never returns — now legal, since divergence
-is an effect — never releases at all. `arena a in ...` is the manual override.
+Done: the bump allocator is gone and every value is freed where its owner dies
+([`static-drop-roadmap.md`](static-drop-roadmap.md), all nine tasks). What is
+left is the two deliberate retreats that made it safe.
 
-A mark per iteration needs to know which values cross the back edge. This is the
-same analysis [`static-drop-roadmap.md`](static-drop-roadmap.md) needs; do it
-there rather than twice.
+`vb_dispose` frees a vector's spine and not its elements, because the structural
+operations copy element pointers between vectors and a deep free would free one
+twice. And anything that *may* alias — a prelude result that points into an
+argument, a capture of a closure a callee may keep, a pointer given to C — is
+not freed at all; `vibe view --drops` counts those suppressions. Both give up
+memory to avoid a use-after-free, and both come back the same way: knowing,
+per value, that nothing else points at it.
 
 ### 2. A type argument is kept one level deep
 
@@ -56,12 +58,13 @@ audited as a whole.
 
 ## Large, with plans already written
 
-### 5. Implicit drop → [`static-drop-roadmap.md`](static-drop-roadmap.md)
+### 5. Implicit drop — done
 
-Delete the bump allocator; deallocate at the point the owner dies. The ownership
-checker already computes that point and discards it. Read the plan's preconditions
-before starting: two properties the current design is safe to get wrong become
-use-after-free and double-free once drops are real.
+[`static-drop-roadmap.md`](static-drop-roadmap.md) is executed end to end. The
+numbers it was written for: `examples/loop.vibe` — two million iterations, an
+allocation in each, nothing kept — is flat at 1.4 MB where the bump allocator
+grew to 197 MB, and `examples/churn.vibe` is unchanged at 1.5 MB. Every example
+runs clean under `-fsanitize=address,undefined`.
 
 ### 6. Cranelift backend → [`backend-roadmap.md`](backend-roadmap.md)
 
@@ -78,8 +81,10 @@ is an open question in the plan, not a decision.
 
 The ownership half of §4.6 is enforced — an escaping closure owns its captures
 (`src/own.rs::escapes`). The allocation half is not: every closure is
-heap-allocated. §4.6 asks for zero cost when the closure does not escape, and the
-analysis that decides it already exists.
+heap-allocated, and now that allocation is `malloc` rather than a bump pointer,
+`map (\x -> ...)` costs a `malloc`/`free` pair per call plus one per element
+inside `vb_apply1`. It is no longer a leak — that was fixed — it is a cost, and
+§4.6 asks for it to be zero.
 
 ---
 
@@ -117,8 +122,12 @@ Carried from §16, with what has changed since:
   codegen. `runtime/vibert.h` says so in its own header comment. Several of the
   items above would be cheaper afterwards, and any performance claim made before
   it is a claim about a boxed interpreter.
-- Mutual tail calls are not guaranteed. Spec §11.2 asks for `[[gnu::musttail]]`
-  so an unrealisable one fails visibly; neither backend does this.
+- Mutual tail calls are not guaranteed, and `[[gnu::musttail]]` (spec §11.2)
+  cannot be emitted as the calling convention stands: a function takes
+  `VbVal *a`, and the array it would point at lives in the caller's frame, which
+  a musttail call replaces. The attribute needs the argument block to live
+  somewhere the callee can still reach — a decision about the convention, not a
+  line of codegen.
 - `src/codegen.rs` reaches into `own::inplace_updates` and `escape::releasable`
   from inside `generate()`. Harmless today, a layering violation the moment there
   is a second backend — [`backend-roadmap.md`](backend-roadmap.md) turns it into
@@ -144,3 +153,41 @@ Carried from §16, with what has changed since:
 - An `ext c` refinement cannot name a parameter, because an `ext` signature is a
   type and has no parameter names. `README.md` and spec §10.1 both say so now;
   the spec draft's `(n:Size, n>0) -> E! I32` was never valid syntax.
+
+
+---
+
+## Before a standard library can be written
+
+Not a list of missing functions. These are the three things that make a library
+of more than one module impossible to write today, each confirmed against the
+compiler rather than read off the spec.
+
+1. **A module has to be a sibling file.** `Json.parse` resolves to `Json.vibe`
+   next to the file that names it (`src/load.rs`): no search path, no
+   directories, no place for a shipped library to live. `error[mod.missing]`
+   is what a `lib/` subdirectory gets.
+2. **One flat namespace, so two modules cannot both declare `parse`.**
+   `error[mod.duplicate]`, and the fix it prints is "rename one of them". A
+   library of ten modules has to make every name in it globally unique, and a
+   type still cannot be written `Json.Value` because flattening keeps only
+   `Value`. Spec §16.3 predicted exactly this.
+3. **The prelude owns its names outright.** A module declaring `take`, `get` or
+   `map` gets `error[name.duplicate]` — the names a collections library most
+   wants are the ones it cannot have.
+
+Three and two are the same fix: per-module name resolution in `src/infer.rs`,
+after which `load.rs` keeps the loading and drops the renaming, and the prelude
+becomes one more module rather than a reserved word list. One is small and
+independent: a search path, defaulting to a directory shipped with the compiler.
+
+Worth knowing before starting, none of them blocking:
+
+- Recursive helpers need a measure unless one parameter shrinks syntactically at
+  every self-call; a mutually recursive pair needs the lexicographic tuple
+  written out (`%(n, k)`).
+- `dup` is `&Str -> Str` and nothing else. Copying an aggregate has no answer
+  yet — deep copy, shared immutable value, or a diagnostic that stops offering
+  it (`static-drop-roadmap.md`, Open decisions 4).
+- A library that builds nested structures leaks the inner ones: drops are
+  shallow (item 1 above).
