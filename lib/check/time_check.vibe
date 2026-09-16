@@ -1,0 +1,61 @@
+mod TimeCheck
+
+expect (name:&Str) (got:I64) (want:I64) : E! Unit =
+  ?(got==want)
+   |True  -> ()
+   |False -> warn (fmt "{}: got {} want {}\n" name got want) ;
+             exit 1
+  end
+
+expect_b (name:&Str) (got:Bool) (want:Bool) : E! Unit =
+  ?(got==want)
+   |True  -> ()
+   |False -> warn (fmt "{}: got {} want {}\n" name got want) ;
+             exit 1
+  end
+
+expect_s (name:&Str) (got:&Str) (want:&Str) : E! Unit =
+  ?(got==want)
+   |True  -> ()
+   |False -> warn (fmt "{}: got {} want {}\n" name got want) ;
+             exit 1
+  end
+
+expect_date (name:&Str) (d:&Time.Date) (y:I64) (m:I64) (day:I64) : E! Unit =
+  expect_b name (d.year==y && d.month==m && d.day==day) True
+
+main : E! Unit =
+  expect_b "leap 2000" (Time.is_leap_year 2000) True ;
+  expect_b "leap 1900" (Time.is_leap_year 1900) False ;
+  expect_b "leap 2024" (Time.is_leap_year 2024) True ;
+  expect_b "leap 2023" (Time.is_leap_year 2023) False ;
+  expect "dim feb 2000" (Time.days_in_month 2000 2) 29 ;
+  expect "dim feb 1900" (Time.days_in_month 1900 2) 28 ;
+  expect "dim apr" (Time.days_in_month 2021 4) 30 ;
+  expect "dim dec" (Time.days_in_month 2021 12) 31 ;
+  expect "dfc epoch" (Time.days_from_civil &{year=1970, month=1, day=1}) 0 ;
+  expect "dfc 2000-02-29" (Time.days_from_civil &{year=2000, month=2, day=29}) 11016 ;
+  expect "dfc 0001-01-01" (Time.days_from_civil &{year=1, month=1, day=1}) (0 - 719162) ;
+  expect "dfc 9999-12-31" (Time.days_from_civil &{year=9999, month=12, day=31}) 2932896 ;
+  expect_date "cfd 0" &(Time.civil_from_days 0) 1970 1 1 ;
+  expect_date "cfd 11016" &(Time.civil_from_days 11016) 2000 2 29 ;
+  expect_date "cfd -1" &(Time.civil_from_days (0 - 1)) 1969 12 31 ;
+  expect_date "cfd min" &(Time.civil_from_days (0 - 719162)) 1 1 1 ;
+  expect_date "cfd max" &(Time.civil_from_days 2932896) 9999 12 31 ;
+  expect "weekday epoch thu" (Time.weekday 0) 4 ;
+  expect "weekday 2000-02-29 tue" (Time.weekday 11016) 2 ;
+  expect "weekday 0001-01-01 mon" (Time.weekday (0 - 719162)) 1 ;
+  expect "dfu 0" (Time.days_from_unix 0) 0 ;
+  expect "dfu -1" (Time.days_from_unix (0 - 1)) (0 - 1) ;
+  expect "dfu 951782400" (Time.days_from_unix 951782400) 11016 ;
+  expect_s "iso 0" &(Time.to_iso8601 0) "1970-01-01T00:00:00Z" ;
+  expect_s "iso 951782400" &(Time.to_iso8601 951782400) "2000-02-29T00:00:00Z" ;
+  expect_s "iso 1234567890" &(Time.to_iso8601 1234567890) "2009-02-13T23:31:30Z" ;
+  expect_s "iso -1" &(Time.to_iso8601 (0 - 1)) "1969-12-31T23:59:59Z" ;
+  expect_s "iso min" &(Time.to_iso8601 (0 - 62135596800)) "0001-01-01T00:00:00Z" ;
+  expect_s "iso max" &(Time.to_iso8601 253402300799) "9999-12-31T23:59:59Z" ;
+  now <- Time.now_unix () ;
+  expect_b "now after 2020" (now>1577836800) True ;
+  left <- Time.sleep_s 0 ;
+  expect "sleep_s 0" (i64 left) 0 ;
+  out "ok"

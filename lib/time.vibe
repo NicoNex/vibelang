@@ -1,0 +1,119 @@
+mod Time
+
+;; A calendar date, proleptic Gregorian. Years 1..9999 are the supported range:
+;; it keeps every intermediate of the day arithmetic non-negative (so C's
+;; truncating division agrees with the solver's flooring one) and in range.
+type Date = { year:I64, month:I64, day:I64, year>=1, year<=9999, month>=1, month<=12, day>=1, day<=31 }
+
+;; `time` accepts a pointer it writes the result through. There is no NULL
+;; `Ptr` in the language, so a scratch cell is allocated and freed.
+ext c "time.h"
+  time : Ptr U64 -> E! I64
+end
+
+ext c "stdlib.h"
+  malloc : Size -> E! Ptr U64
+  free   : Ptr U64 -> E! Unit
+end
+
+;; ponytail: no monotonic clock; a nullary `ext c` (`clock`) is a closure, never called, and `Unit` cannot cross the boundary.
+;; ponytail: no `sleep_ms`; `usleep` is hidden under -std=c11 and `nanosleep` needs a struct.
+ext c "unistd.h"
+  sleep : U32 -> E! U32
+end
+
+;; Seconds since 1970-01-01T00:00:00Z.
+now_unix (u:Unit) : E! I64 =
+  cell <- malloc 8 ;
+  secs <- time cell ;
+  free cell ;
+  secs
+
+;; Sleeps whole seconds; answers the seconds left if a signal cut it short.
+sleep_s (secs:U32) : E! U32 = sleep secs
+
+is_leap_year (year:I64, year>=1, year<=9999) : Bool =
+  year - year / 4 * 4==0 && year - year / 100 * 100!=0 || year - year / 400 * 400==0
+
+days_in_month (year:I64, year>=1, year<=9999) (month:I64, month>=1, month<=12) : I64 =
+  ?month |2  -> ?is_leap_year year
+                 |True  -> 29
+                 |False -> 28
+                end
+         |4  -> 30
+         |6  -> 30
+         |9  -> 30
+         |11 -> 30
+         |_  -> 31
+  end
+
+;; Days since 1970-01-01 (negative before it). Hinnant's `days_from_civil`.
+days_from_civil (d:&Date) : I64 =
+  ?(d.month<=2)
+   |True  -> civil_days (d.year - 1) (d.month + 9) d.day
+   |False -> civil_days d.year (d.month - 3) d.day
+  end
+
+;; The core of `days_from_civil`, on a year that starts in March: `mp` 0 is March.
+civil_days (y:I64, y>=0, y<=9999) (mp:I64, mp>=0, mp<=11) (day:I64, day>=1, day<=31) : I64 =
+  let era = y / 400 in
+  let yoe = y - era * 400 in
+  let doy = (153 * mp + 2) / 5 + day - 1 in
+  let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy in
+  era * 146097 + doe - 719468
+
+;; The date `days` after 1970-01-01. Hinnant's `civil_from_days`; the bounds are
+;; 0001-01-01 and 9999-12-31.
+civil_from_days (days:I64, days>=0 - 719162, days<=2932896) : Date =
+  let z = days + 719468 in
+  let era = z / 146097 in
+  let doe = z - era * 146097 in
+  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365 in
+  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100) in
+  let mp = (5 * doy + 2) / 153 in
+  let day = doy - (153 * mp + 2) / 5 + 1 in
+  ?(mp<10)
+   |True  -> {year=yoe + era * 400, month=mp + 3, day=day}
+   |False -> {year=yoe + era * 400 + 1, month=mp - 9, day=day}
+  end
+
+;; 0 = Sunday … 6 = Saturday, for a day count as `days_from_civil` gives.
+weekday (days:I64, days>=0 - 719162, days<=2932896) : I64 =
+  let n = days + 719163 in
+  n - n / 7 * 7
+
+;; Whole days since the epoch, rounded towards the past, of a Unix timestamp.
+days_from_unix (secs:I64, secs>=0 - 62135596800, secs<=253402300799) : I64 =
+  (secs + 62135596800) / 86400 - 719162
+
+pad2 (n:I64) : Str =
+  ?(n<10)
+   |True  -> fmt "0{}" n
+   |False -> show n
+  end
+
+pad4 (n:I64) : Str =
+  ?(n<10)
+   |True  -> fmt "000{}" n
+   |False -> ?(n<100)
+              |True  -> fmt "00{}" n
+              |False -> ?(n<1000)
+                         |True  -> fmt "0{}" n
+                         |False -> show n
+                        end
+             end
+  end
+
+;; "YYYY-MM-DDTHH:MM:SSZ" for a Unix timestamp in years 1..9999.
+to_iso8601 (secs:I64, secs>=0 - 62135596800, secs<=253402300799) : Str =
+  let shifted = secs + 62135596800 in
+  let rest = shifted - shifted / 86400 * 86400 in
+  let d = civil_from_days (shifted / 86400 - 719162) in
+  let date = fmt "{}-{}-{}" (pad4 d.year) (pad2 d.month) (pad2 d.day) in
+  let hh = pad2 (rest / 3600) in
+  let mm = pad2 (rest / 60 - rest / 3600 * 60) in
+  let ss = pad2 (rest - rest / 60 * 60) in
+  fmt "{}T{}:{}:{}Z" date hh mm ss
+
+;; ponytail: `now_unix` is not exported; a `Unit` parameter emits an invalid C prototype.
+exp c is_leap_year, days_in_month, weekday, days_from_unix, to_iso8601, sleep_s
