@@ -86,6 +86,15 @@ Two honest gaps, because the map is not literally the drop table:
 ## 3. Before this work can start
 
 - `cargo test` green on `master`, and the `examples/churn.vibe` figure reproduced locally. It is the before-picture, and the after-picture has to be compared against a number measured on the same machine.
+- **§4.6 answered, conservatively rather than as an error.** A closure handed to
+  a prelude function is consumed by the call; one handed to a module function may
+  be stored and returned, and that is the case §4.6 says the analysis cannot
+  decide. Nothing it captured is freed by the frame that built it, which is the
+  same trade the may-alias family gets: a leak instead of a use-after-free. The
+  spec's `move` — an error rather than a suppression — is still the stricter
+  answer and still unbuilt; it buys back the leak, not the soundness. Original
+  wording of this precondition follows.
+
 - **§4.6 implemented as an error, not as a guess.** `src/own.rs` says outright that a lambda stored in a structure that a callee then returns is missed, and that deciding conservatively costs no soundness "because the direction it errs in is *read*, and reads are already checked." That sentence stops being true the moment drops are emitted: under-approximating escape then means freeing something that escaped. §4.6 already asks for an error demanding an explicit `move` when the analysis cannot decide. That error must exist and fire before Task 8, and it is the gate on the whole second half of this plan.
 - **A decision about aliasing.** The README states that there is no full borrow checker: affine use is checked, the aliasing rules beyond it are not. Under a bump allocator an unsound alias costs nothing. Under exact drop it is a double free. Either the aliasing rules get checked, or Task 8 is not safe to enable by default. This is not scheduled below; it is a precondition, and it may be larger than this plan.
 

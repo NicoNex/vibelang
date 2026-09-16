@@ -542,12 +542,28 @@ impl State<'_> {
                     Var(n) => (is_special(n), sigs.get(n.as_str())),
                     _ => (false, None),
                 };
+                // A closure handed to a prelude function is consumed by the
+                // call — `map`, `filter`, `fold`, `each`, `sort_by` all call it
+                // and drop it. A closure handed to a module function may be
+                // stored and returned, and §4.6 says outright that the analysis
+                // cannot decide that case. The spec's answer is an error
+                // demanding an explicit `move`; the answer here is the same one
+                // the may-alias family gets, because the direction that matters
+                // is the same: what the closure captured may outlive this
+                // frame, so this frame does not free it.
+                let keeps_closures = !matches!(&h.kind, Var(n)
+                    if PRELUDE_SIGS.iter().any(|(p, _)| p == n));
                 for (i, a) in args.iter().enumerate() {
                     let m = if reads_all || borrows.is_some_and(|b| *b.get(i).unwrap_or(&false)) {
                         Mode::Borrow
                     } else {
                         mode
                     };
+                    if keeps_closures && matches!(a.kind, Lambda(..)) {
+                        let mut captured = HashSet::new();
+                        names_in(a, &mut captured);
+                        self.shared.extend(captured);
+                    }
                     self.walk(a, m, owned);
                 }
                 if back_edge {
