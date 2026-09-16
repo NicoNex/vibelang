@@ -161,7 +161,7 @@ The full list, with a file and a line for every item, is [`docs/remaining-work.m
 
 ## Read more
 
-- [`vibelang-spec.md`](vibelang-spec.md) — the normative specification. Also in [Italian](vibelang-spec.it.md).
+- [`vibelang-spec.md`](vibelang-spec.md) — the normative specification.
 - [`docs/remaining-work.md`](docs/remaining-work.md) — what is not done, ordered by value over cost.
 - [`docs/static-drop-roadmap.md`](docs/static-drop-roadmap.md) — how the garbage collector never happened.
 - [`examples/`](examples) — the reference program, a grep, a loop, a C binding.

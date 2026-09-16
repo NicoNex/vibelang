@@ -1,6 +1,5 @@
 # Vibelang — Language Specification
 
-<sub>Italiano: [vibelang-spec.it.md](vibelang-spec.it.md)</sub>
 
 > File extension: `.vibe` — command: `vibe`
 > Document version: 0.1 — design draft, not normative
