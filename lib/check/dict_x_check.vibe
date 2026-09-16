@@ -1,0 +1,33 @@
+mod DictXCheck
+
+fail (what:Str) : E! Unit =
+  warn (concat &what "\n") ;
+  exit 1
+
+expect (ok:Bool) (what:Str) : E! Unit =
+  ?ok |True  -> out ""
+      |False -> fail what
+  end
+
+sample (n:U64) : Dict Str U64 = insert (insert (insert dict "a" 1) "b" n) "c" 3
+
+main : E! Unit =
+  let d = sample 2 in
+  expect (DictX.get_or &d &"b" 0==2) "get_or present" ;
+  expect (DictX.get_or &d &"z" 9==9) "get_or absent" ;
+  expect (DictX.has_key &d &"c") "has_key present" ;
+  expect (DictX.has_key &d &"z"==False) "has_key absent" ;
+  expect (DictX.get_or &(DictX.update_with (\x -> x * 10) (sample 2) "b" 0) &"b" 0==20) "update_with present" ;
+  expect (DictX.get_or &(DictX.update_with (\x -> x * 10) (sample 2) "q" 4) &"q" 0==40) "update_with absent" ;
+  expect (DictX.get_or &(DictX.from_pairs &[("x", 1), ("y", 2), ("x", 5)]) &"x" 0==5) "from_pairs" ;
+  expect (len &(DictX.from_pairs &[("x", 1), ("y", 2), ("x", 5)])==2) "from_pairs len" ;
+  expect (len &(DictX.to_pairs &d)==3) "to_pairs" ;
+  expect (DictX.get_or &(DictX.from_pairs &(DictX.to_pairs &d)) &"c" 0==3) "to_pairs roundtrip" ;
+  expect (sum &(DictX.values &d)==6) "values" ;
+  expect (sum &(DictX.values &(DictX.map_values (\x -> x * 2) &d))==12) "map_values" ;
+  expect (DictX.get_or &(DictX.merge (sample 2) &(insert dict "b" 7)) &"b" 0==7) "merge overwrite" ;
+  expect (len &(DictX.merge (sample 2) &(insert dict "e" 7))==4) "merge new" ;
+  expect (DictX.get_or &(DictX.bump (sample 2) "a") &"a" 0==2) "bump" ;
+  expect (DictX.get_or &(DictX.tally &["a", "b", "a", "a"]) &"a" 0==3) "tally" ;
+  expect (DictX.get_or &(DictX.count_by (\s -> len &s) &["ab", "cd", "e"]) &2 0==2) "count_by" ;
+  out "ok\n"

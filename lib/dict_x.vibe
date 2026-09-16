@@ -1,0 +1,83 @@
+mod DictX
+
+;; Helpers over the prelude's `Dict k v`. A lookup is a linear scan.
+get_or (d:&Dict k v) (key:&k) (fallback:v) : v =
+  ?lookup d key
+   |Some x -> x
+   |None   -> fallback
+  end
+
+has_key (d:&Dict k v) (key:&k) : Bool =
+  ?lookup d key
+   |Some x -> True
+   |None   -> False
+  end
+
+;; Applies `f` to the value at `key`, or to `fallback` when the key is absent.
+update_with (f:v -> v) (d:Dict k v) (key:k) (fallback:v) : Dict k v =
+  let cur = get_or &d &key fallback in
+  insert d key (f cur)
+
+;; ponytail: a lone tuple pattern is not seen as exhaustive, hence the dead `_` arm;
+;; and a tuple pattern does not move its fields out (the caller's drop frees them), hence the dups.
+insert_pair (d:Dict k v) (p:&(k, v)) : Dict k v =
+  ?p |(a, b) -> insert d (dup &a) (dup &b)
+     |_      -> d
+  end
+
+;; A later pair replaces an earlier one with the same key.
+from_pairs (ps:&Vec (k, v)) : Dict k v = fold (\d p -> insert_pair d &p) dict ps
+
+;; One step of `to_pairs`: the pair for `key`, if it is still there.
+push_pair (d:&Dict k v) (acc:Vec (k, v)) (key:&k) : Vec (k, v) =
+  ?lookup d key
+   |Some x -> push acc (dup key, x)
+   |None   -> acc
+  end
+
+to_pairs (d:&Dict k v) : Vec (k, v) =
+  fold (\acc key -> push_pair d acc &key) empty &(keys d)
+
+push_value (d:&Dict k v) (acc:Vec v) (key:&k) : Vec v =
+  ?lookup d key
+   |Some x -> push acc x
+   |None   -> acc
+  end
+
+values (d:&Dict k v) : Vec v =
+  fold (\acc key -> push_value d acc &key) empty &(keys d)
+
+;; Copies the entry at `key` from `src` into `acc`, overwriting.
+copy_entry (src:&Dict k v) (acc:Dict k v) (key:&k) : Dict k v =
+  ?lookup src key
+   |Some x -> insert acc (dup key) x
+   |None   -> acc
+  end
+
+map_entry (f:v -> w) (src:&Dict k v) (acc:Dict k w) (key:&k) : Dict k w =
+  ?lookup src key
+   |Some x -> insert acc (dup key) (f x)
+   |None   -> acc
+  end
+
+map_values (f:v -> w) (d:&Dict k v) : Dict k w =
+  fold (\acc key -> map_entry f d acc &key) dict &(keys d)
+
+;; Right-biased: on a shared key the value from `b` wins.
+merge (a:Dict k v) (b:&Dict k v) : Dict k v =
+  fold (\acc key -> copy_entry b acc &key) a &(keys b)
+
+;; Saturates at the U64 maximum rather than overflowing.
+bump (d:Dict k U64) (key:k) : Dict k U64 =
+  let c = get_or &d &key 0 in
+  ?add_checked c 1
+   |Ok n -> insert d key n
+   |Er e -> d
+  end
+
+;; How many elements map to each key under `f`.
+count_by (f:a -> k) (xs:&Vec a) : Dict k U64 =
+  fold (\d x -> bump d (f (dup x))) dict xs
+
+;; How many times each element occurs.
+tally (xs:&Vec k) : Dict k U64 = fold (\d x -> bump d (dup x)) dict xs
