@@ -534,7 +534,7 @@ git commit -m "codegen: carry the drop table without acting on it"
 
 The allocator itself is **undecided**. `malloc`/`free` is the honest first move: it is in libc, it adds no dependency, and it makes the plan measurable. A size-classed free list is the obvious follow-up if measurement asks for it, and a measurement that does not ask for it is the reason not to write one. Decide with `examples/churn.vibe` in hand, not before.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Correctness first; the memory assertion is Task 8's. In `tests/e2e.rs`, beside the existing example tests:
 
@@ -549,21 +549,33 @@ fn churn_still_computes_the_same_answer_without_the_bump_allocator() {
 
 `build_with` runs `vibe build` with the extra flags and returns the path of the produced binary; write it next to the existing build helper in that file. The flag sets `-DVB_EXACT_DROP` on the `cc` invocation.
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cargo test --test e2e`
 Expected: FAIL — the flag does not exist.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Header-level selection (`#ifdef VB_EXACT_DROP`) keeps both paths in one file and lets the C compiler delete the one not chosen. Under `VB_EXACT_DROP`, `vb_alloc` is `calloc` — the bump path `memset`s to zero and code downstream relies on it — and `vb_free` is `free`. Every runtime constructor (`vb_str`, `vb_obj`, `vb_clos`, `vb_vec_new`, …) allocates through `vb_alloc` already, so no call site changes.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `cargo test`
 Expected: PASS. Programs leak everything under the new flag; that is expected until Task 8.
 
-- [ ] **Step 5: Commit**
+Measured on the machine that will measure the after-picture, `examples/churn.vibe`:
+
+```console
+$ /usr/bin/time -l ./churn            # bump
+        1556480  maximum resident set size
+$ /usr/bin/time -l ./churn-exact      # --alloc=exact, no drops emitted yet
+      330498048  maximum resident set size
+```
+
+330 MB is the whole working set of the program with nothing freed, and it is
+what Task 8 has to bring back down to the flat figure.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add runtime/vibert.c runtime/vibert.h tests/e2e.rs

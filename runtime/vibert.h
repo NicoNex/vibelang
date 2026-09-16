@@ -59,6 +59,8 @@ typedef struct { VbFn fn; const char *name; uint32_t arity, nargs; VbVal *args; 
 /* --- lifecycle --- */
 void vb_init(void);
 void *vb_alloc(size_t n);
+/* Frees one object under -DVB_EXACT_DROP; a no-op under the bump allocator. */
+void vb_free(void *p);
 
 /* --- constructors --- */
 VbVal vb_unit(void);

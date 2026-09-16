@@ -283,3 +283,23 @@ fn a_module_named_after_a_libc_header_still_builds() {
     assert!(ok, "a module may be named `Stdio`:\n{out}");
     assert!(out.contains("ok"), "{out}");
 }
+
+/// Task 7 of docs/static-drop-roadmap.md: the same program, compiled against an
+/// allocator that can free one object. It leaks everything until Task 8 emits
+/// the drops; what this asserts is that the answer does not change.
+#[test]
+fn churn_still_computes_the_same_answer_without_the_bump_allocator() {
+    let dir = std::env::temp_dir().join("vibe-alloc-test");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let bin = dir.join("churn-exact");
+    let (ok, out) = vibe(&[
+        "build",
+        "--alloc=exact",
+        "examples/churn.vibe",
+        "-o",
+        bin.to_str().expect("utf-8"),
+    ]);
+    assert!(ok, "building with --alloc=exact failed:\n{out}");
+    let o = Command::new(&bin).output().expect("the program runs");
+    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "10000000");
+}

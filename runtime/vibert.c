@@ -7,11 +7,42 @@
 #include <string.h>
 
 /* ------------------------------------------------------------ allocator
- * Bump allocator. Chunks are released only in bulk, at the end of an `arena`
- * block (spec 4.5); outside an arena nothing is freed before exit.
+ * Two paths, selected at compile time.
+ *
+ * Default: a bump allocator. Chunks are released only in bulk, at the end of an
+ * `arena` block (spec 4.5); outside an arena nothing is freed before exit.
  * ponytail: release is skipped when the block's result is heap-allocated,
  * because that value outlives the arena. Making that case an error needs the
- * escape analysis of spec 4.6. */
+ * escape analysis of spec 4.6.
+ *
+ * -DVB_EXACT_DROP (vibe build --alloc=exact): calloc/free, so one object can be
+ * freed on its own. That is the allocator Static Drop needs and nothing else
+ * changes: every constructor already allocates through vb_alloc, and vb_mark /
+ * vb_release become nothing, because with exact drops there is no region to
+ * rewind. Until the drops are emitted, a program built this way leaks
+ * everything (docs/static-drop-roadmap.md, Task 7).
+ *
+ * malloc is the honest first move: it is in libc, it adds no dependency, and it
+ * makes the plan measurable. A size-classed free list is what a measurement
+ * asks for, or does not. */
+
+#ifdef VB_EXACT_DROP
+
+void vb_init(void) {}
+
+void *vb_alloc(size_t n) {
+  void *p = calloc(1, n ? n : 1);
+  if (!p) { fputs("vibe: out of memory\n", stderr); exit(70); }
+  return p;
+}
+
+void vb_free(void *p) { free(p); }
+
+/* No region to mark, and nothing to rewind to. */
+VbMark vb_mark(void) { VbMark m; m.chunk = NULL; m.used = 0; return m; }
+void vb_release(VbMark m, VbVal result) { (void)m; (void)result; }
+
+#else
 
 typedef struct VbChunk { struct VbChunk *next; size_t used, cap; char data[]; } VbChunk;
 static VbChunk *g_chunk = NULL;
@@ -65,6 +96,12 @@ void vb_release(VbMark m, VbVal result) {
   }
   if (g_chunk) g_chunk->used = m.used;
 }
+
+/* The bump allocator cannot free one object: the whole point of the exact path.
+   Freeing nothing is correct here, only wasteful. */
+void vb_free(void *p) { (void)p; }
+
+#endif
 
 /* ---------------------------------------------------------- constructors */
 
