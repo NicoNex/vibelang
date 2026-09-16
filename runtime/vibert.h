@@ -192,6 +192,7 @@ VbVal vb_max(VbVal a, VbVal b);
 VbVal vb_sqrt(VbVal a);
 VbVal vb_pow(VbVal a, VbVal b);
 VbVal vb_floor(VbVal a);
+VbVal vb_show_exact(VbVal a);
 
 /* --- IO --- */
 VbVal vb_read(VbVal path);

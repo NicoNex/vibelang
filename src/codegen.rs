@@ -106,6 +106,7 @@ fn builtin(name: &str) -> Option<(usize, String)> {
         "sqrt" => t(1, "vb_sqrt($0)"),
         "pow" => t(2, "vb_pow($0, $1)"),
         "floor" => t(1, "vb_floor($0)"),
+        "show_exact" => t(1, "vb_show_exact($0)"),
         "read" => t(1, "vb_read($0)"),
         "write" => t(2, "vb_write($0, $1)"),
         "out" => t(1, "vb_out($0)"),

@@ -232,6 +232,7 @@ pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     ("sqrt", "F64 -> F64"),
     ("pow", "F64 -> F64 -> F64"),
     ("floor", "F64 -> F64"),
+    ("show_exact", "F64 -> Str"),
     // IO (all effectful)
     ("read", "&Str -> E! Str"),
     ("write", "&Str -> &Str -> E! Unit"),

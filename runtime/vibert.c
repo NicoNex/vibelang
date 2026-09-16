@@ -917,6 +917,14 @@ VbVal vb_max(VbVal a, VbVal b) { return vb_cmp(a, b) >= 0 ? a : b; }
 VbVal vb_sqrt(VbVal a) { return vb_float(sqrt(vb_as_float(a))); }
 VbVal vb_pow(VbVal a, VbVal b) { return vb_float(pow(vb_as_float(a), vb_as_float(b))); }
 VbVal vb_floor(VbVal a) { return vb_float(floor(vb_as_float(a))); }
+/* The shortest of 15 or 17 significant digits that reads back as the same double. */
+VbVal vb_show_exact(VbVal a) {
+  double d = vb_as_float(a);
+  char buf[32];
+  int n = snprintf(buf, sizeof buf, "%.15g", d);
+  if (strtod(buf, NULL) != d) n = snprintf(buf, sizeof buf, "%.17g", d);
+  return vb_str(buf, (size_t)n);
+}
 
 /* ------------------------------------------------------------------ IO */
 
