@@ -63,3 +63,42 @@ fn a_parameter_replaced_on_the_back_edge_is_dropped_each_iteration() {
         "the old `s` dies on the edge, not when the frame finally returns:\n{d}"
     );
 }
+
+/// Runs `vibe build --emit-c` into a temp directory and reads the `.c` back —
+/// the helper at the top of `tests/escape.rs`, which asserts on the same output.
+fn emit_c(file: &str, stem: &str) -> String {
+    let dir = std::env::temp_dir().join("vibe-drop-tests");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let out = dir.join(stem);
+    let o = Command::new(VIBE)
+        .args(["build", "--emit-c", file, "-o"])
+        .arg(&out)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("vibe runs");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    std::fs::read_to_string(out.with_extension("c")).expect("the emitted C")
+}
+
+fn snapshot(stem: &str) -> String {
+    let p = format!("{}/tests/snap/{stem}.c", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&p).unwrap_or_else(|_| panic!("no snapshot at {p}"))
+}
+
+/// The frontend knows where every value dies and the backend still does not act
+/// on it. Update these snapshots in Task 8 of docs/static-drop-roadmap.md,
+/// deliberately, and never to make a test pass.
+#[test]
+fn drop_points_change_no_emitted_c_yet() {
+    for (file, stem) in [
+        ("examples/churn.vibe", "churn"),
+        ("examples/ledger.vibe", "ledger"),
+        ("examples/hello.vibe", "hello"),
+    ] {
+        assert_eq!(
+            emit_c(file, stem),
+            snapshot(stem),
+            "codegen must not move yet: {file}"
+        );
+    }
+}

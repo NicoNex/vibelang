@@ -28,6 +28,11 @@ pub struct Gen<'a> {
     /// `{r with ...}` sites where `r` is uniquely owned (spec §4.3).
     inplace: HashSet<(usize, usize, usize)>,
     releasable: HashSet<String>,
+    /// Where each owned value dies, keyed by the span the free attaches to
+    /// (docs/static-drop-roadmap.md). Carried, not acted on: the bump allocator
+    /// cannot free one object, so Task 7 comes first.
+    #[allow(dead_code)]
+    drops: HashMap<(usize, usize, usize), Vec<crate::own::DropSite>>,
 }
 
 /// name -> (arity, C call template). `$0`..`$n` are the arguments, `$P` the
@@ -155,6 +160,15 @@ pub fn generate(m: &Module, ck: &Checked, file: &str) -> Result<String, Vec<Diag
         cur_path: String::new(),
         inplace: crate::own::inplace_updates(m, ck),
         releasable: crate::escape::releasable(m, ck),
+        drops: crate::own::drop_points(m, ck).into_iter().fold(
+            HashMap::new(),
+            |mut acc: HashMap<_, Vec<_>>, d| {
+                acc.entry((d.at.file, d.at.line, d.at.col))
+                    .or_default()
+                    .push(d);
+                acc
+            },
+        ),
     };
     for (rn, r) in &ck.data.records {
         for (i, (fname, _)) in r.fields.iter().enumerate() {
@@ -212,8 +226,12 @@ impl<'a> Gen<'a> {
         }
         o.push_str("\nstatic const VbInfo vb_info_tuple = {\"tuple\", 0, 0};\n");
 
-        // Static descriptors for records and variants.
-        for (rn, r) in &self.ck.data.records {
+        // Static descriptors for records and variants. Both tables are hash
+        // maps, so they are emitted in name order: the same source must produce
+        // the same C, byte for byte, on every run.
+        let mut records: Vec<_> = self.ck.data.records.iter().collect();
+        records.sort_by(|a, b| a.0.cmp(b.0));
+        for (rn, r) in records {
             let names: Vec<String> = r.fields.iter().map(|(n, _)| cstring(n)).collect();
             o.push_str(&format!(
                 "static const char *const vbfl_{}[] = {{{}}};\n",
@@ -232,7 +250,9 @@ impl<'a> Gen<'a> {
                 cname(rn)
             ));
         }
-        for (cn, ci) in &self.ck.data.ctors {
+        let mut ctors: Vec<_> = self.ck.data.ctors.iter().collect();
+        ctors.sort_by(|a, b| a.0.cmp(b.0));
+        for (cn, ci) in ctors {
             o.push_str(&format!(
                 "static const VbInfo vbi_{} = {{{}, {}, 0}};\n",
                 cname(cn),

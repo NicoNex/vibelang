@@ -458,7 +458,7 @@ The point of this task is a commit where the entire frontend analysis is in the 
 
 **Interfaces:** `Gen` gains `drops: HashMap<(usize, usize, usize), Vec<DropSite>>`, populated in the constructor beside `inplace: crate::own::inplace_updates(m, ck)` and `releasable: crate::escape::releasable(m, ck)`. Keying by `(file, line, col)` matches the existing convention for `inplace`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 /// Copied from the helper at the top of `tests/escape.rs`: runs
@@ -494,21 +494,26 @@ fn drop_points_change_no_emitted_c_yet() {
 }
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cargo test --test drop`
 Expected: FAIL — no snapshots exist yet.
 
-- [ ] **Step 3: Generate the snapshots from `master`'s output, then thread the table through**
+- [x] **Step 3: Generate the snapshots from `master`'s output, then thread the table through**
 
 `Gen` holds the drop table and does nothing with it. `#[allow(dead_code)]` on the field is acceptable here and should be removed in Task 8.
 
-- [ ] **Step 4: Run the tests**
+Generating the snapshots found a defect this task exists to catch: the record
+and constructor descriptors were emitted in `HashMap` order, so the same source
+produced different C on different runs. Both tables are sorted by name now, and
+the snapshots are what makes that stay true.
+
+- [x] **Step 4: Run the tests**
 
 Run: `cargo test`
 Expected: PASS, including the byte-identical C.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/codegen.rs tests/drop.rs tests/snap
