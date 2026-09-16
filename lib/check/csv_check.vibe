@@ -1,0 +1,25 @@
+mod CsvCheck
+
+expect (name:&Str) (ok:Bool) : E! Unit =
+  ?ok |True  -> ()
+      |False -> warn (fmt "csv_check: {} failed\n" name) ;
+                exit 1
+  end
+
+;; Parse then render, "ERR" on a parse error.
+round (s:&Str) : Str =
+  ?Csv.parse s
+   |Ok rows -> Csv.render &rows
+   |Er e    -> "ERR"
+  end
+
+main : E! Unit =
+  expect "empty" (round ""=="") ;
+  expect "plain" (round "a,b\n1,2\n"=="a,b\n1,2\n" && round "a,b\n1,2"=="a,b\n1,2\n") ;
+  expect "crlf" (round "a,b\r\n1,2\r\n"=="a,b\n1,2\n") ;
+  expect "empty fields" (round ",\n"==",\n" && round "\n"=="\n" && round "a,,b"=="a,,b\n") ;
+  expect "quoted" (round "\"x,y\",\"say \"\"hi\"\"\",\"l1\nl2\"\n"=="\"x,y\",\"say \"\"hi\"\"\",\"l1\nl2\"\n") ;
+  expect "unquotes" (round "\"plain\""=="plain\n") ;
+  expect "rejects" (round "\"open"=="ERR" && round "\"a\"b"=="ERR") ;
+  ?Csv.parse "name,qty\nbolt,3\n" |Er e -> expect &e False |Ok rows -> expect "shape" (len &rows==2 && get &rows 1==["bolt", "3"]) end ;
+  out "ok\n"

@@ -1,0 +1,113 @@
+mod Csv
+
+;; RFC 4180 CSV: fields separated by `,`, records by `\n` or `\r\n`, a field in
+;; double quotes may hold any of those and writes a quote as `""`. Every record
+;; is a `Vec Str`; nothing checks that they are the same width.
+;; The index just past an unquoted field: the next `,`, `\n`, `\r`, or the end.
+field_end (s:&Str) (n:Size, n==len s) (i:Size) : Size =
+  ?(i<n)
+   |False -> i
+   |True  -> let b = byte_at s i in
+             ?(b==44 || b==10 || b==13)
+              |True  -> i
+              |False -> field_end s n (i + 1)
+             end
+  end
+  %(n - i)
+
+;; Inside a quoted field at `i`: the index of the closing quote, if there is one.
+quote_end (s:&Str) (n:Size, n==len s) (i:Size) : Opt Size =
+  ?(i<n)
+   |False -> None
+   |True  -> ?(byte_at s i==34)
+              |False -> quote_end s n (i + 1)
+              |True  -> ?(i + 1<n)
+                         |False -> Some i
+                         |True  -> ?(byte_at s (i + 1)==34)
+                                    |True  -> quote_end s n (i + 2)
+                                    |False -> Some i
+                                   end
+                        end
+             end
+  end
+  %(n - i)
+
+;; The text of `s` in [a, b), "" when the range is empty.
+cut (s:&Str) (a:Size) (b:Size) : Str =
+  ?slice a b s
+   |Some t -> t
+   |None   -> ""
+  end
+
+;; What follows a field ending at `k`: another field, a new record, or the end.
+next (s:&Str) (n:Size, n==len s) (i:Size) (k:Size) (field:Str) (row:Vec Str) (rows:Vec (Vec Str)) (fuel:U64) : Res Str (Vec (Vec Str)) =
+  ?fuel |0 -> Er "input too long"
+        |_ -> let full = push row field in
+              ?(k>=i && k<n)
+               |False -> Ok (push rows full)
+               |True  -> let b = byte_at s k in
+                         ?(b==44)
+                          |True  -> go s n (k + 1) full rows (fuel - 1)
+                          |False -> ?(b==13 && k + 1<n && byte_at s (k + 1)==10)
+                                     |True  -> record s
+                                                      n (k + 2) (push rows full) (fuel - 1)
+                                     |False -> ?(b==10 || b==13)
+                                                |True  -> record s
+                                                                 n (k + 1) (push rows full) (fuel - 1)
+                                                |False -> Er (fmt "expected `,` or a line end at {}"
+                                                                  k)
+                                               end
+                                    end
+                         end
+              end
+  end
+  %fuel
+
+;; A new record at `i`; a line end as the last byte starts none.
+record (s:&Str) (n:Size, n==len s) (i:Size) (rows:Vec (Vec Str)) (fuel:U64) : Res Str (Vec (Vec Str)) =
+  ?fuel |0 -> Er "input too long"
+        |_ -> ?(i<n)
+               |False -> Ok rows
+               |True  -> go s n i empty rows (fuel - 1)
+              end
+  end
+  %fuel
+
+;; The field starting at `i` of the record `row`.
+go (s:&Str) (n:Size, n==len s) (i:Size) (row:Vec Str) (rows:Vec (Vec Str)) (fuel:U64) : Res Str (Vec (Vec Str)) =
+  ?fuel |0 -> Er "input too long"
+        |_ -> ?(i<n && byte_at s i==34)
+               |False -> next s
+                              n i (field_end s n i) (cut s i (field_end s n i)) row rows (fuel - 1)
+               |True  -> ?quote_end s n (i + 1)
+                          |None   -> Er (fmt "unterminated quote at {}" i)
+                          |Some q -> ?(q>=i && q<n)
+                                      |True  -> next s
+                                                     n i (q + 1) (replace &(cut s (i + 1) q) "\"\"" "\"") row rows (fuel - 1)
+                                      |False -> Er (fmt "unterminated quote at {}"
+                                                        i)
+                                     end
+                         end
+              end
+  end
+  %fuel
+
+;; Every record of `s`. An empty input has none.
+parse (s:&Str) : Res Str (Vec (Vec Str)) =
+  ?(len s<1000000000000)
+   |True  -> record s (len s) 0 empty (len s + len s + len s + 3)
+   |False -> Er "input too long"
+  end
+
+;; A field in quotes when it holds a comma, a quote or a line end.
+field (f:&Str) : Str =
+  ?(contains f "," || contains f "\"" || contains f "\n" || contains f "\r")
+   |True  -> fmt "\"{}\"" (replace f "\"" "\"\"")
+   |False -> dup f
+  end
+
+row (r:&Vec Str) : Str = Text.join "," &(map (\f -> field &f) r)
+
+;; Records joined by `\n`, each one ended by it.
+render (rows:&Vec (Vec Str)) : Str =
+  fold (\acc r -> concat &acc &(concat &(row &r) "\n")) "" rows
