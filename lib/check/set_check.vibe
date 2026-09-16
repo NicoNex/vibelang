@@ -1,0 +1,30 @@
+mod SetCheck
+
+fail (what:Str) : E! Unit =
+  warn (concat &what "\n") ;
+  exit 1
+
+expect (ok:Bool) (what:Str) : E! Unit =
+  ?ok |True  -> out ""
+      |False -> fail what
+  end
+
+main : E! Unit =
+  let a = Set.from_vec &[1, 2, 3, 2] in
+  let b = Set.from_vec &[2, 3, 4] in
+  expect (Set.size &a==3) "from_vec dedups" ;
+  expect (Set.member &a &2) "member present" ;
+  expect (Set.member &a &9==False) "member absent" ;
+  expect (Set.size &(Set.add (Set.from_vec &[1, 2]) 5)==3) "add new" ;
+  expect (Set.size &(Set.add (Set.from_vec &[1, 2]) 2)==2) "add existing" ;
+  expect (Set.member &(Set.delete (Set.from_vec &[1, 2]) &1) &1==False) "delete" ;
+  expect (Set.size &(Set.delete (Set.from_vec &[1, 2]) &7)==2) "delete absent" ;
+  expect (sum &(Set.to_vec &a)==6) "to_vec" ;
+  expect (Set.size &(Set.union (Set.from_vec &[1, 2, 3]) &b)==4) "union" ;
+  expect (sum &(Set.to_vec &(Set.intersect &a &b))==5) "intersect" ;
+  expect (sum &(Set.to_vec &(Set.difference &a &b))==1) "difference" ;
+  expect (Set.is_subset &(Set.from_vec &[2, 3]) &a) "is_subset yes" ;
+  expect (Set.is_subset &a &b==False) "is_subset no" ;
+  expect (Set.is_subset &(Set.from_vec &empty) &b) "is_subset empty" ;
+  expect (Set.member &(Set.from_vec &["x", "y"]) &"y") "Str member" ;
+  out "ok\n"

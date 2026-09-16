@@ -1,0 +1,31 @@
+mod Set
+
+;; A set is a `Dict k Unit`, the prelude's own convention: the keys are the
+;; elements and the value carries nothing. Lookups are linear scans.
+from_vec (xs:&Vec k) : Dict k Unit = fold (\s x -> insert s (dup x) ()) dict xs
+
+member (s:&Dict k Unit) (x:&k) : Bool =
+  ?lookup s x
+   |Some u -> True
+   |None   -> False
+  end
+
+add (s:Dict k Unit) (x:k) : Dict k Unit = insert s x ()
+
+delete (s:Dict k Unit) (x:&k) : Dict k Unit = remove s x
+
+to_vec (s:&Dict k Unit) : Vec k = keys s
+
+size (s:&Dict k Unit) : Size = len s
+
+union (a:Dict k Unit) (b:&Dict k Unit) : Dict k Unit =
+  fold (\s x -> insert s (dup x) ()) a &(keys b)
+
+intersect (a:&Dict k Unit) (b:&Dict k Unit) : Dict k Unit =
+  from_vec &(filter (\x -> member b &x) &(keys a))
+
+difference (a:&Dict k Unit) (b:&Dict k Unit) : Dict k Unit =
+  from_vec &(filter (\x -> member b &x==False) &(keys a))
+
+is_subset (a:&Dict k Unit) (b:&Dict k Unit) : Bool =
+  len &(filter (\x -> member b &x==False) &(keys a))==0
