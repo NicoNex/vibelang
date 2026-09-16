@@ -299,6 +299,13 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
             .args(&o.prog_args)
             .status()
             .map_err(|e| format!("cannot run {}: {e}", exe.display()))?;
+        // A signal leaves no exit code; say which one, as a shell would, rather
+        // than exiting 1 in silence: a double free is SIGABRT and nothing else.
+        #[cfg(unix)]
+        if let Some(sig) = std::os::unix::process::ExitStatusExt::signal(&st) {
+            eprintln!("error[run.signal]: the program was killed by signal {sig}");
+            return Ok(ExitCode::from((128 + sig).clamp(0, 255) as u8));
+        }
         return Ok(ExitCode::from(st.code().unwrap_or(1).clamp(0, 255) as u8));
     }
     Ok(ExitCode::SUCCESS)

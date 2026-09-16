@@ -1,0 +1,9 @@
+mod Signal
+
+ext c "signal.h"
+  raise : I32 -> E! I32
+end
+
+main : E! Unit =
+  r <- raise 6 ;
+  ()

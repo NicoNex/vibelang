@@ -425,3 +425,12 @@ fn a_tuple_pattern_a_helper_call_and_a_u64_literal_are_accepted() {
     assert!(ok, "tuple_total.vibe failed to build or run:\n{out}");
     assert_eq!(out.trim(), "18446744073709551613");
 }
+
+/// A program killed by a signal used to leave `vibe run` exiting 1 with nothing
+/// said, which is how a double free looked from outside.
+#[test]
+fn a_signal_is_reported() {
+    let (ok, out) = vibe(&["run", "tests/signal.vibe"]);
+    assert!(!ok);
+    assert!(out.contains("run.signal"), "{out}");
+}
