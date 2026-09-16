@@ -434,3 +434,19 @@ fn a_signal_is_reported() {
     assert!(!ok);
     assert!(out.contains("run.signal"), "{out}");
 }
+
+/// A constructor is covered only by an arm that takes every payload: `|Some 3`
+/// with `|None` used to check and then fail at run time on `Some 4`.
+#[test]
+fn a_refutable_payload_does_not_cover_its_constructor() {
+    let dir = std::env::temp_dir().join("vibe-exhaustive-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("ex.vibe");
+    std::fs::write(
+        &f,
+        "mod Ex\n\nf (o:Opt U64) : U64 =\n  ?o |Some 3 -> 1\n     |None   -> 0\n  end\n",
+    )
+    .unwrap();
+    let (ok, out) = vibe(&["check", f.to_str().unwrap()]);
+    assert!(!ok && out.contains("match.nonexhaustive"), "{out}");
+}

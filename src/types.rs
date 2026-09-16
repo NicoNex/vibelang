@@ -603,10 +603,12 @@ impl Checker {
                 T::Con(n, _) if self.data.variants.contains_key(n) => {
                     let all = self.data.variants[n].clone();
                     all.into_iter()
+                        // A constructor is covered by an arm that takes every
+                        // payload: `|Some 3` leaves `Some 4` to nobody.
                         .filter(|c| {
-                            !pats
-                                .iter()
-                                .any(|p| matches!(p, Pat::Ctor(pc, _) if pc == c))
+                            !pats.iter().any(
+                                |p| matches!(p, Pat::Ctor(pc, subs) if pc == c && subs.iter().all(irrefutable)),
+                            )
                         })
                         .collect()
                 }
