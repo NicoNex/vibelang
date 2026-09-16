@@ -1,0 +1,16 @@
+mod ArgsCheck
+
+expect (name:&Str) (ok:Bool) : E! Unit =
+  ?ok |True  -> ()
+      |False -> warn (fmt "args_check: {} failed\n" name) ;
+                exit 1
+  end
+
+main : E! Unit =
+  let p = Args.parse &["-v", "--out=a.txt", "in.csv", "--dry-run", "--out=b.txt", "-", "--", "--not-a-flag", "x=y"] in
+  expect "flags" (p.flags==["-v", "--dry-run"]) ;
+  expect "has_flag" (Args.has_flag &p "--dry-run" && !(Args.has_flag &p "--out")) ;
+  expect "option" (Args.option &p "out"==Some "b.txt" && Args.option &p "missing"==None) ;
+  expect "positional" (p.positional==["in.csv", "-", "--not-a-flag", "x=y"]) ;
+  expect "empty value" (Args.option &(Args.parse &["--k="]) "k"==Some "") ;
+  out "ok\n"

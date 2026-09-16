@@ -1,0 +1,49 @@
+mod Args
+
+;; Command-line arguments split by shape, with no declared schema: `--name=value`
+;; is an option, `--name` and `-x` are flags, anything else is positional, and
+;; everything after `--` is positional. Pass `drop 1 argv` to skip the program.
+;; ponytail: no `--name value` form, which needs a schema to tell the value from a
+;; positional; add one when a program wants it.
+type Parsed = { flags:Vec Str, options:Vec (Str, Str), positional:Vec Str, rest:Bool }
+
+;; One argument folded into what the ones before it produced.
+take_arg (p:Parsed) (a:&Str) : Parsed =
+  ?(p.rest || a=="-" || !(starts_with a "-"))
+   |True  -> {p with positional=push p.positional (dup a)}
+   |False -> ?(a=="--")
+              |True  -> {p with rest=True}
+              |False -> ?Text.strip_prefix a "--"
+                         |None      -> {p with flags=push p.flags (dup a)}
+                         |Some body -> ?index_of &body "="
+                                        |None    -> {p with flags=push p.flags (dup a)}
+                                        |Some at -> {p with options=push p.options (option_pair &body at)}
+                                       end
+                        end
+             end
+  end
+
+;; `name=value` split at the `=` found at `at`.
+option_pair (body:&Str) (at:Size) : (Str, Str) =
+  ?(at<len body)
+   |True  -> (Opt.unwrap_or "" &(slice 0 at body), Opt.unwrap_or "" &(slice (at + 1) (len body) body))
+   |False -> (dup body, "")
+  end
+
+parse (args:&Vec Str) : Parsed =
+  fold take_arg {flags=empty, options=empty, positional=empty, rest=False} args
+
+;; `--name` or `-name` given as a flag; `has_flag p "--verbose"`.
+has_flag (p:&Parsed) (name:&Str) : Bool =
+  len &(filter (\f -> f==name) &p.flags)>0
+
+;; The value of the last `--name=value`; `option p "out"`.
+option (p:&Parsed) (name:&Str) : Opt Str =
+  fold (\found kv -> pick found &kv name) None &p.options
+
+pick (found:Opt Str) (kv:&(Str, Str)) (name:&Str) : Opt Str =
+  ?kv |(k, v) -> ?(k==name)
+                  |True  -> Some (dup &v)
+                  |False -> found
+                 end
+  end
