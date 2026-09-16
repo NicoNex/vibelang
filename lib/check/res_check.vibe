@@ -1,0 +1,70 @@
+mod ResCheck
+
+;; Typed constructors, so every literal below has a concrete `Res Str Str`.
+good (s:Str) : Res Str Str = Ok s
+
+bad (s:Str) : Res Str Str = Er s
+
+shout (s:Str) : Str = concat &s "!"
+
+size_of (s:Str) : Size = len &s
+
+;; Fails on the empty string.
+nonempty (s:Str) : Res Str Str =
+  ?(len &s==0)
+   |True  -> Er "empty"
+   |False -> Ok s
+  end
+
+recover (s:Str) : Res Size Str = Ok (concat "was " &s)
+
+note (name:Str) (pass:Bool) (fails:Vec Str) : Vec Str =
+  ?pass |True  -> fails
+        |False -> push fails (fmt "res_check: {} failed" name)
+  end
+
+tests (u:Unit) : Vec Str =
+  let g = good "yes" in
+  let b = bad "boom" in
+  let mixed = [good "a", bad "x", good "b", bad "y", good "c"] in
+  let f0 = empty in
+  let f1 = note "is_ok good" (Res.is_ok &g) f0 in
+  let f2 = note "is_ok bad" (Res.is_ok &b==False) f1 in
+  let f3 = note "is_er bad" (Res.is_er &b) f2 in
+  let f4 = note "is_er good" (Res.is_er &g==False) f3 in
+  let f5 = note "unwrap_or ok" (Res.unwrap_or "no" &g=="yes") f4 in
+  let f6 = note "unwrap_or er" (Res.unwrap_or "no" &b=="no") f5 in
+  let f7 = note "unwrap_or_else" (Res.unwrap_or_else shout &b=="boom!") f6 in
+  let f8 = note "map ok" (Res.map shout &g==good "yes!") f7 in
+  let f9 = note "map er" (Res.map shout &b==bad "boom") f8 in
+  let f10 = note "map_err ok" (Res.map_err size_of &g==Ok "yes") f9 in
+  let f11 = note "map_err er" (Res.map_err size_of &b==Er 4) f10 in
+  let f12 = note "and_then ok" (Res.and_then nonempty &g==good "yes") f11 in
+  let f13 = note "and_then fails" (Res.and_then nonempty &(good "")==bad "empty") f12 in
+  let f14 = note "and_then er" (Res.and_then nonempty &b==bad "boom") f13 in
+  let f15 = note "or_else er" (Res.or_else recover &b==Ok "was boom") f14 in
+  let f16 = note "or_else ok" (Res.or_else recover &g==Ok "yes") f15 in
+  let f17 = note "to_opt ok" (Res.to_opt &g==Some "yes") f16 in
+  let f18 = note "to_opt er" (Res.is_ok &(Res.from_opt "none" &(Res.to_opt &b))==False) f17 in
+  let f19 = note "err_opt er" (Res.err_opt &b==Some "boom") f18 in
+  let f20 = note "err_opt ok" (Res.to_opt &(Res.from_opt "none" &(Res.err_opt &g))==None) f19 in
+  let f21 = note "from_opt some" (Res.from_opt "none" &(Some "v")==good "v") f20 in
+  let f22 = note "from_opt none" (Res.from_opt "none" &(Res.to_opt &b)==bad "none") f21 in
+  let f23 = note "oks" (Res.oks &mixed==["a", "b", "c"]) f22 in
+  let f24 = note "ers" (Res.ers &mixed==["x", "y"]) f23 in
+  let f25 = note "count_ok" (Res.count_ok &mixed==3) f24 in
+  let f26 = note "fault_name DivZero" (Res.fault_name &DivZero=="DivZero") f25 in
+  let f27 = note "fault_name Overflow" (Res.fault_name &Overflow=="Overflow") f26 in
+  let f28 = note "fault_name OutOfBounds" (Res.fault_name &OutOfBounds=="OutOfBounds") f27 in
+  let f29 = note "fault_name BadParse" (Res.fault_name &BadParse=="BadParse") f28 in
+  let f30 = note "originals intact" (g==good "yes") f29 in
+  let fault = Res.unwrap_or Overflow &(Res.from_opt BadParse &(Res.err_opt &(div_checked (u64 1) (u64 0)))) in
+  note "fault from checked" (Res.fault_name &fault=="DivZero") f30
+
+main : E! Unit =
+  let fails = tests () in
+  ?(len &fails==0)
+   |True  -> out "ok"
+   |False -> each warn &fails ;
+             exit 1
+  end

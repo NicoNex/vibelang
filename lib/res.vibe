@@ -1,0 +1,97 @@
+mod Res
+
+;; Combinators for the prelude `Res e t = Ok t | Er e`.
+;;
+;; Every function borrows its `Res` (or `Opt`) and copies the payload it hands
+;; on with `dup`. ponytail: the natural signatures consume the result, but the
+;; compiler drops a matched owned scrutinee deeply after its payload has been
+;; moved out of an arm (`?r |Ok v -> v` frees `v` under the caller: a
+;; use-after-free). Upgrade path: once a moved-out payload suppresses the
+;; scrutinee's drop, take `Res e t` by value and remove the `dup`s.
+is_ok (r:&Res e t) : Bool =
+  ?r |Ok _ -> True
+     |Er _ -> False
+  end
+
+is_er (r:&Res e t) : Bool =
+  ?r |Ok _ -> False
+     |Er _ -> True
+  end
+
+;; The `Ok` payload, or `fallback`.
+unwrap_or (fallback:t) (r:&Res e t) : t =
+  ?r |Ok v -> dup &v
+     |Er _ -> fallback
+  end
+
+;; The `Ok` payload, or `handle` applied to the error.
+unwrap_or_else (handle:e -> t) (r:&Res e t) : t =
+  ?r |Ok v -> dup &v
+     |Er x -> handle (dup &x)
+  end
+
+map (f:t -> u) (r:&Res e t) : Res e u =
+  ?r |Ok v -> Ok (f (dup &v))
+     |Er x -> Er (dup &x)
+  end
+
+map_err (f:e -> d) (r:&Res e t) : Res d t =
+  ?r |Ok v -> Ok (dup &v)
+     |Er x -> Er (f (dup &x))
+  end
+
+;; Chain a step that can itself fail; the first error wins.
+and_then (f:t -> Res e u) (r:&Res e t) : Res e u =
+  ?r |Ok v -> f (dup &v)
+     |Er x -> Er (dup &x)
+  end
+
+;; Recover from an error with a step that can itself fail.
+or_else (f:e -> Res d t) (r:&Res e t) : Res d t =
+  ?r |Ok v -> Ok (dup &v)
+     |Er x -> f (dup &x)
+  end
+
+to_opt (r:&Res e t) : Opt t =
+  ?r |Ok v -> Some (dup &v)
+     |Er _ -> None
+  end
+
+err_opt (r:&Res e t) : Opt e =
+  ?r |Ok _ -> None
+     |Er x -> Some (dup &x)
+  end
+
+;; `Some v` is `Ok v`; `None` is `Er err`.
+from_opt (err:e) (o:&Opt t) : Res e t =
+  ?o |Some v -> Ok (dup &v)
+     |None   -> Er err
+  end
+
+;; Fold steps for `oks` / `ers`. Named, not lambdas: the escape check reads a
+;; lambda whose tail is its accumulator as handing out an element of the vector.
+push_ok (acc:Vec t) (r:&Res e t) : Vec t =
+  ?r |Ok v -> push acc (dup &v)
+     |Er _ -> acc
+  end
+
+push_er (acc:Vec e) (r:&Res e t) : Vec e =
+  ?r |Ok _ -> acc
+     |Er x -> push acc (dup &x)
+  end
+
+;; The `Ok` payloads, in order.
+oks (rs:&Vec (Res e t)) : Vec t = fold push_ok empty rs
+
+;; The `Er` payloads, in order.
+ers (rs:&Vec (Res e t)) : Vec e = fold push_er empty rs
+
+;; How many results are `Ok`.
+count_ok (rs:&Vec (Res e t)) : Size = len (filter is_ok rs)
+
+fault_name (f:&Fault) : Str =
+  ?f |Overflow    -> "Overflow"
+     |DivZero     -> "DivZero"
+     |OutOfBounds -> "OutOfBounds"
+     |BadParse    -> "BadParse"
+  end
