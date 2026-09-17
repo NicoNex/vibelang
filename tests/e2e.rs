@@ -394,15 +394,16 @@ fn a_dictionary_associates_a_key_with_a_value() {
 /// function that consumes its parameter is handed a copy of each element by
 /// `map`; a constructor used as a function wraps a copy; `push`, `set` and
 /// `insert` on a collection that is part of another one copy rather than free
-/// or move its pieces; `get_checked` returns a copy. Each used to free memory
-/// the caller went on to read.
+/// or move its pieces; `get_checked` returns a copy; a partial application
+/// walked over a vector copies what it captured for each call. Each used to
+/// free memory the caller went on to read.
 #[test]
 fn a_lent_value_is_never_freed_by_the_callee() {
     let (ok, out) = vibe(&["run", "tests/lent.vibe"]);
     assert!(ok, "lent.vibe failed to build or run:\n{out}");
     assert_eq!(
         out.trim(),
-        "[2, 3] [Lent.Box aa, Lent.Box bbb] [a, b] [z] 2 Ok bbb [aa, bbb] [[a]] 1"
+        "[2, 3] [Lent.Box aa, Lent.Box bbb] [a, b] [z] 2 Ok bbb [4, 5] 11 [aa, bbb] [[a]] 1"
     );
 }
 

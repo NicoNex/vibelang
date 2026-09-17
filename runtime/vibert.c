@@ -232,15 +232,33 @@ VbVal vb_apply1(VbVal f, VbVal x) {
   return box(VB_CLOS, n);
 }
 
+static bool owns_param(const VbClos *c, uint32_t i) { return i >= 64 || (c->owns >> i & 1); }
+
 /* Apply `f` to a value the caller was only lent — an element of the `&Vec` that
    `map`, `filter`, `fold`, `each`, `max_by`, `min_by` and `sort_by` walk. A
    function that consumes that parameter frees it, which would free the
-   caller's element under it, so it is given a copy to consume instead. */
-static VbVal apply_lent(VbVal f, VbVal x) {
+   caller's element under it, so it is given a copy to consume instead.
+
+   The first `lent` arguments `f` already holds are lent as well: the walk calls
+   the same closure again for the next element, so `map (f s) &v` must not hand
+   `f` the one `s` to free on every call. `fold` applies a fresh closure to its
+   accumulator each time and lends only what came before it, so the
+   accumulator itself is still moved, not copied. */
+#define ALL_LENT UINT32_MAX
+static VbVal apply_lent(VbVal f, VbVal x, uint32_t lent) {
   if (f.tag != VB_CLOS) vb_fail("<runtime>", "this value is not a function");
   VbClos *c = (VbClos *)f.v.p;
-  bool owns = c->nargs >= 64 || (c->owns >> c->nargs & 1);
-  return vb_apply1(f, owns ? vb_dup(x) : x);
+  if (lent && c->nargs + 1 == c->arity) {
+    VbVal local[8];
+    VbVal *args = c->arity <= 8 ? local : vb_alloc(vals_size(c->arity));
+    for (uint32_t i = 0; i < c->nargs; i++)
+      args[i] = i < lent && owns_param(c, i) ? vb_dup(c->args[i]) : c->args[i];
+    args[c->nargs] = owns_param(c, c->nargs) ? vb_dup(x) : x;
+    VbVal r = c->fn(args);
+    if (args != local) vb_free(args);
+    return r;
+  }
+  return vb_apply1(f, owns_param(c, c->nargs) ? vb_dup(x) : x);
 }
 
 /* ------------------------------------------------------------ arithmetic
@@ -482,30 +500,32 @@ VbVal vb_len(VbVal v) {
 VbVal vb_map(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
   VbVec *w = vec_alloc(s->n);
-  for (size_t i = 0; i < s->n; i++) vec_push(w, apply_lent(f, s->a[i]));
+  for (size_t i = 0; i < s->n; i++) vec_push(w, apply_lent(f, s->a[i], ALL_LENT));
   return wrap_vec(w);
 }
 VbVal vb_filter(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
   VbVec *w = vec_alloc(s->n);
   for (size_t i = 0; i < s->n; i++)
-    if (vb_as_bool(apply_lent(f, s->a[i]))) vec_push(w, vb_dup(s->a[i]));
+    if (vb_as_bool(apply_lent(f, s->a[i], ALL_LENT))) vec_push(w, vb_dup(s->a[i]));
   return wrap_vec(w);
 }
 VbVal vb_fold(VbVal f, VbVal z, VbVal v) {
   VbVec *s = vb_as_vec(v);
+  if (f.tag != VB_CLOS) vb_fail("<runtime>", "this value is not a function");
+  uint32_t held = ((VbClos *)f.v.p)->nargs;
   for (size_t i = 0; i < s->n; i++) {
     /* The partial application holding `z` is this loop's alone. Its drop is
        shallow, so `z` itself goes on to the call. */
     VbVal g = vb_apply1(f, z);
-    z = apply_lent(g, s->a[i]);
+    z = apply_lent(g, s->a[i], held);
     vb_dispose(g);
   }
   return z;
 }
 VbVal vb_each(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
-  for (size_t i = 0; i < s->n; i++) apply_lent(f, s->a[i]);
+  for (size_t i = 0; i < s->n; i++) apply_lent(f, s->a[i], ALL_LENT);
   return vb_unit();
 }
 VbVal vb_sum(VbVal v) {
@@ -525,9 +545,9 @@ VbVal vb_sum(VbVal v) {
 static VbVal extreme_by(VbVal f, VbVal v, const char *path, int sign) {
   VbVec *s = vb_as_vec(v);
   vb_require(s->n > 0, path, "len xs > 0");
-  size_t best = 0; VbVal bk = apply_lent(f, s->a[0]);
+  size_t best = 0; VbVal bk = apply_lent(f, s->a[0], ALL_LENT);
   for (size_t i = 1; i < s->n; i++) {
-    VbVal k = apply_lent(f, s->a[i]);
+    VbVal k = apply_lent(f, s->a[i], ALL_LENT);
     if (vb_cmp(k, bk) * sign > 0) { best = i; bk = k; }
   }
   return s->a[best];
@@ -553,7 +573,7 @@ VbVal vb_sort_by(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
   KeyVal *kv = vb_alloc(2 * vals_size(s->n));
   KeyVal *tmp = vb_alloc(2 * vals_size(s->n));
-  for (size_t i = 0; i < s->n; i++) { kv[i].val = s->a[i]; kv[i].key = apply_lent(f, s->a[i]); }
+  for (size_t i = 0; i < s->n; i++) { kv[i].val = s->a[i]; kv[i].key = apply_lent(f, s->a[i], ALL_LENT); }
   merge_sort(kv, tmp, s->n);
   VbVec *w = vec_alloc(s->n);
   for (size_t i = 0; i < s->n; i++) vec_push(w, vb_dup(kv[i].val));

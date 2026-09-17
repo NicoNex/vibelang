@@ -332,8 +332,8 @@ Carried from §16, with what has changed since:
 
 ## Found reviewing the runtime, still open
 
-Fixed in the same review: callbacks freeing lent elements (`vb_fn`'s `owns`
-bits), `push`/`set`/`insert`/`remove` on a shared collection, `get_checked`,
+Fixed in the same review: callbacks freeing lent elements and a partial
+application's captures (`vb_fn`'s `owns` bits), `push`/`set`/`insert`/`remove` on a shared collection, `get_checked`,
 leaks in `fold`/`sum`/`seq`, signed overflow and float casts, NaN equality,
 `<` on tuples, strict `parse_*`, `read` on a pipe, `write` errors, UTF-8 `Char`.
 What the runtime cannot fix alone:
@@ -349,10 +349,6 @@ What the runtime cannot fix alone:
   `{r with}` overwrite, and `{r with}`'s result (codegen never frees it). Each
   may be a value a live name still reads — a key function can return its
   argument, `get` shares — so freeing needs the may-alias bit, not a guess.
-- **A partial application consumes its captured arguments on every call.**
-  `map (f s) &v` with `f (s:Str) (x:&T)` frees `s` on the first element and
-  reads it freed on the second. `owns` covers the argument a walk lends, not
-  what the closure already holds.
 - **A lambda frees no parameter it owns**, so `fold (\acc x -> ...)` over
   strings leaks each accumulator it replaces unless the body updates it in
   place, and a named function's parameter given a copy by `apply_lent` is freed
