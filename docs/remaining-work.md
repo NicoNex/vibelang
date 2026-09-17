@@ -330,6 +330,38 @@ Carried from §16, with what has changed since:
 
 ---
 
+## Found reviewing the runtime, still open
+
+Fixed in the same review: callbacks freeing lent elements (`vb_fn`'s `owns`
+bits), `push`/`set`/`insert`/`remove` on a shared collection, `get_checked`,
+leaks in `fold`/`sum`/`seq`, signed overflow and float casts, NaN equality,
+`<` on tuples, strict `parse_*`, `read` on a pipe, `write` errors, UTF-8 `Char`.
+What the runtime cannot fix alone:
+
+- **Integer width is not a runtime fact.** Every integer is 64 bits underneath,
+  so `bnot (u8 0)` is 2^64-1 typed `U8`, `shl (i32 1) 31` is 2^31 typed `I32`,
+  and `add_checked` on two `I32` never reports `Overflow` at 32 bits. The width
+  has to reach `vb_bnot`, `vb_shl` and the `_checked` forms from codegen.
+- **`sum` of an empty vector is `vb_int(0)`** whatever the element type: the
+  wrong tag for `U64`/`F64`, and a crash for `Vec Str`.
+- **Keys and losers are leaked, not freed**: the keys `sort_by`, `max_by` and
+  `min_by` compute, the argument `min`/`max` drop, the slot `set_owned` and
+  `{r with}` overwrite, and `{r with}`'s result (codegen never frees it). Each
+  may be a value a live name still reads — a key function can return its
+  argument, `get` shares — so freeing needs the may-alias bit, not a guess.
+- **A partial application consumes its captured arguments on every call.**
+  `map (f s) &v` with `f (s:Str) (x:&T)` frees `s` on the first element and
+  reads it freed on the second. `owns` covers the argument a walk lends, not
+  what the closure already holds.
+- **A lambda frees no parameter it owns**, so `fold (\acc x -> ...)` over
+  strings leaks each accumulator it replaces unless the body updates it in
+  place, and a named function's parameter given a copy by `apply_lent` is freed
+  where a lambda's would not be.
+- **`show` on a float is `%g`**: `1234567.0` prints `1.23457e+06`. `show_exact`
+  exists; whether `show` should be it is a decision, not a bug fix.
+
+---
+
 ## Before a standard library can be written
 
 Not a list of missing functions. What is left after the module system landed
