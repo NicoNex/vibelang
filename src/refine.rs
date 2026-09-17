@@ -547,12 +547,36 @@ fn is_unsigned(ty: &str) -> bool {
 }
 
 /// Conversions are the identity on the value, only the sort changes.
+/// The type a conversion function produces.
 fn conv(name: &str) -> Option<&'static str> {
-    match name {
-        "f32" | "f64" => Some("F64"),
-        "i8" | "i16" | "i32" | "i64" => Some("I64"),
-        "u8" | "u16" | "u32" | "u64" | "size" => Some("U64"),
-        _ => None,
+    Some(match name {
+        "f32" => "F32",
+        "f64" => "F64",
+        "i8" => "I8",
+        "i16" => "I16",
+        "i32" => "I32",
+        "i64" => "I64",
+        "u8" => "U8",
+        "u16" => "U16",
+        "u32" => "U32",
+        "u64" => "U64",
+        "size" => "Size",
+        _ => return None,
+    })
+}
+
+/// Whether every value of `from` is a value of `to`, so converting keeps it.
+fn widens(from: &str, to: &str) -> bool {
+    match (range(from), range(to)) {
+        (Some((flo, fhi)), Some((tlo, thi))) => {
+            flo >= tlo
+                && match (fhi, thi) {
+                    (_, None) => true,
+                    (Some(f), Some(t)) => f <= t,
+                    (None, Some(_)) => false,
+                }
+        }
+        _ => false,
     }
 }
 
@@ -708,7 +732,20 @@ impl<'a> Gen<'a> {
                 if let (Some(to), 1) = (conv(&name), args.len()) {
                     let (t, k) = self.term(args[0])?;
                     let want = sort_of(to);
-                    return Some((cast(t, k, want), want));
+                    // A conversion is the identity only where it keeps the
+                    // value: `u8 300` is 44, and saying 300 while the result's
+                    // range says below 256 would let the solver prove anything.
+                    // A float truncates toward zero, which `to_int` does not.
+                    let keeps = match (k, want) {
+                        (Sort::Int, Sort::Int) => match &strip(args[0]).kind {
+                            ExprKind::Int(n) => range(to)
+                                .is_some_and(|(lo, hi)| *n >= lo && hi.is_none_or(|h| *n <= h)),
+                            _ => self.ty_of(args[0]).is_some_and(|from| widens(&from, to)),
+                        },
+                        (Sort::Real, Sort::Int) => false,
+                        _ => true,
+                    };
+                    return keeps.then(|| (cast(t, k, want), want));
                 }
                 None
             }

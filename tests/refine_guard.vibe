@@ -26,3 +26,6 @@ widen (s:&Str) (i:Size) : U64 =
              u64 b * 65536
    |False -> 0
   end
+
+;; A widening conversion keeps the value, and so its range.
+widen_byte (x:U8) : U64 = u64 x * 65536

@@ -347,3 +347,22 @@ fn set_and_max_by_carry_their_run_time_checks() {
     assert!(out.contains("index is inside `v`"), "{out}");
     assert!(!out.contains("min_by"), "h has the precondition:\n{out}");
 }
+
+/// `u8 300` is 44. The prover used to read a narrowing conversion as the
+/// identity, so it "proved" `10 / (u64 b - 44)` safe for `b = u8 300`.
+#[test]
+fn a_narrowing_conversion_does_not_keep_its_value() {
+    if !have_z3() {
+        return;
+    }
+    let dir = std::env::temp_dir().join("vibe-refine-narrow");
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("nar.vibe");
+    std::fs::write(
+        &f,
+        "mod Nar\n\nk (x:U64, x==300) : U64 =\n  let b = u8 x in\n  ?(b>=44)\n   |True  -> 10 / (u64 b - 44)\n   |False -> 0\n  end\n",
+    )
+    .unwrap();
+    let (ok, out) = vibe(&["check", "--prove", f.to_str().unwrap()]);
+    assert!(!ok && out.contains("div0"), "{out}");
+}
