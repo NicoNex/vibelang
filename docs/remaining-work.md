@@ -113,6 +113,18 @@ Shipped since this list was first written, each with the item it closed:
     was killed by a signal.
   New prelude names: `byte_at`, `byte_str`, `wrap_add`, `wrap_sub`, `wrap_mul`,
   `show_exact`.
+- **The runtime reviewed** (`runtime/vibert.c`), by a simplifier and a bug
+  reviewer, every finding reproduced before it was fixed: a function that
+  consumes its parameter no longer frees the elements `map`, `fold`, `each` and
+  the rest lend it (a closure carries which parameters it consumes), nor a
+  partial application its captures; `push`/`set`/`insert`/`remove` on a shared
+  collection copy; signed overflow wraps and `INT64_MIN / -1` no longer traps;
+  NaN equals nothing; `parse_*` refuse leading space, `+` and out-of-range values; `read` works
+  on a pipe and `write` reports a full disk. Clean under ASan and UBSan.
+- **`push_str : Str -> &Str -> Str`** grows an owned string in place, so a
+  string built a piece at a time is linear rather than O(n²).
+- **A hash map behind `Dict`**: insertion order kept, `insert` and `lookup`
+  O(1) — a 20,000-key tally went from 0.52 s to under 10 ms.
 - **Regular expressions**, `lib/regex.vibe` (`docs/regex-design.md`): Go's RE2
   syntax and leftmost-first semantics on a Pike VM, linear in the subject for
   every pattern, passing `--prove`. It agrees with Go's `regexp` on 25,000
