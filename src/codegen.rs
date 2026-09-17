@@ -442,14 +442,6 @@ impl<'a> Gen<'a> {
     /// decided it from the base's type and wrote it down per span; the bare
     /// name is the fallback for the sites it did not reach, and it is only ever
     /// right when one record declares the field (`Data::field_ambiguous`).
-    fn field_owner_at(&self, span: Span, f: &str) -> Option<String> {
-        self.ck
-            .field_of
-            .get(&(span.file, span.line, span.col))
-            .or_else(|| self.ck.data.field_owner.get(f))
-            .cloned()
-    }
-
     /// Free everything the enclosing scopes are about to lose, innermost first.
     /// `settle` is what makes the caller's claim to have read it already true.
     fn flush(&self, out: &mut String) {
@@ -837,7 +829,7 @@ impl<'a> Gen<'a> {
             ExprKind::Binop(op, a, b) => self.binop(op, a, b, e.span, out),
             ExprKind::Field(base, f) => {
                 let b = self.ex(base, out);
-                let owner = self.field_owner_at(e.span, f);
+                let owner = self.ck.field_owner_at(e.span, f).cloned();
                 match owner.and_then(|o| self.field_index.get(&format!("{}#{}", o, f)).copied()) {
                     Some(i) => format!("vb_field({}, {})", b, i),
                     None => {
@@ -972,7 +964,11 @@ impl<'a> Gen<'a> {
         span: Span,
         out: &mut String,
     ) -> String {
-        let owner = match self.field_owner_at(span, fields.first().map_or("", |(f, _)| f)) {
+        let owner = match self
+            .ck
+            .field_owner_at(span, fields.first().map_or("", |(f, _)| f))
+            .cloned()
+        {
             Some(o) => o,
             None => {
                 self.errors.push(Diag::error(

@@ -275,6 +275,9 @@ pub struct Checker {
     /// keyed by the span of that expression. See `Checked::field_of`.
     pub field_of: HashMap<(usize, usize, usize), String>,
     pending_matches: Vec<(Span, T, Vec<Pat>, String)>,
+    /// The record the function being checked declares it returns, which is
+    /// what a literal whose fields several records share most likely builds.
+    pub result_record: Option<String>,
 }
 
 type R<X> = Result<X, Diag>;
@@ -291,6 +294,7 @@ impl Checker {
             binds: Vec::new(),
             field_of: HashMap::new(),
             pending_matches: Vec::new(),
+            result_record: None,
         }
     }
 
@@ -658,7 +662,9 @@ pub fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a String>) -> 
     let mut best: Option<(usize, String)> = None;
     for c in candidates {
         let d = edit_distance(name, c);
-        if d <= 2.max(name.len() / 3) && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+        // Ties go to the smaller name: the candidates often come out of a
+        // HashMap, and the suggestion must not change from one run to the next.
+        if d <= 2.max(name.len() / 3) && best.as_ref().is_none_or(|(bd, bn)| (d, c) < (*bd, bn)) {
             best = Some((d, c.clone()));
         }
     }

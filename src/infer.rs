@@ -34,6 +34,23 @@ pub struct Checked {
     pub field_of: HashMap<(usize, usize, usize), String>,
 }
 
+impl Checked {
+    /// The record the `.f` read or record literal at `span` belongs to: what
+    /// inference decided there, or, where it never pinned the base down, the
+    /// first record to declare `f`.
+    pub fn field_owner_at(&self, span: Span, f: &str) -> Option<&String> {
+        self.field_of
+            .get(&(span.file, span.line, span.col))
+            .or_else(|| self.data.field_owner.get(f))
+    }
+
+    /// The declared type of field `f` of the record at `span`.
+    pub fn field_ty_at(&self, span: Span, f: &str) -> Option<&Ty> {
+        let r = self.data.records.get(self.field_owner_at(span, f)?)?;
+        r.fields.iter().find(|(n, _)| n == f).map(|(_, t)| t)
+    }
+}
+
 pub fn parse_type(src: &str) -> Ty {
     let toks = lexer::lex(src, usize::MAX).expect("prelude type lexes");
     let mut p = Parser {
@@ -171,7 +188,8 @@ pub fn check(m: &Module) -> Result<Checked, Vec<Diag>> {
     }
 
     // 7. Record invariants type-check as Bool in the scope of their own fields.
-    let recs: Vec<RecordInfo> = c.data.records.values().cloned().collect();
+    let mut recs: Vec<RecordInfo> = c.data.records.values().cloned().collect();
+    recs.sort_by(|a, b| a.name.cmp(&b.name));
     for r in recs {
         if r.refines.is_empty() {
             continue;
@@ -348,7 +366,13 @@ fn check_fun(c: &mut Checker, f: &FunDecl, path: &str) -> R<()> {
     }
 
     let declared = cur;
-    let body_ty = infer(c, &f.body, path)?;
+    c.result_record = match c.resolve(&declared) {
+        T::Con(n, _) if c.data.records.contains_key(&n) => Some(n),
+        _ => None,
+    };
+    let body_ty = infer(c, &f.body, path);
+    c.result_record = None;
+    let body_ty = body_ty?;
     let bt = c.resolve(&body_ty);
     match (&declared, &bt) {
         (T::Eff(want), T::Eff(_)) => {
@@ -800,18 +824,40 @@ pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
                     }
                 }
                 None => {
-                    let mut found = None;
-                    for (name, r) in &c.data.records {
-                        let mut want: Vec<String> =
-                            r.fields.iter().map(|(n, _)| n.clone()).collect();
-                        let mut have = given.clone();
-                        want.sort();
-                        have.sort();
-                        if want == have {
-                            found = Some(name.clone());
-                            break;
-                        }
-                    }
+                    // Every record with exactly these fields, in name order: a
+                    // HashMap's order would make the choice differ run to run.
+                    let mut have = given.clone();
+                    have.sort();
+                    let mut candidates: Vec<&String> = c
+                        .data
+                        .records
+                        .iter()
+                        .filter(|(_, r)| {
+                            let mut want: Vec<&String> = r.fields.iter().map(|(n, _)| n).collect();
+                            want.sort();
+                            want.into_iter().eq(have.iter())
+                        })
+                        .map(|(n, _)| n)
+                        .collect();
+                    candidates.sort();
+                    let found = match candidates.as_slice() {
+                        [] => None,
+                        [one] => Some((*one).clone()),
+                        several => match &c.result_record {
+                            Some(r) if several.contains(&r) => Some(r.clone()),
+                            _ => {
+                                let names: Vec<&str> = several.iter().map(|s| s.as_str()).collect();
+                                return Err(Diag::error(
+                                    e.span,
+                                    "record.ambiguous",
+                                    "more than one record has exactly these fields",
+                                )
+                                .with_witness(&format!("declared by {}", names.join(", ")))
+                                .with_fix("build it where a function's result type names the record, or give the records different field names")
+                                .at_path(path));
+                            }
+                        },
+                    };
                     match found {
                         Some(n) => n,
                         None => {

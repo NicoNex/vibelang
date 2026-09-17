@@ -1,0 +1,9 @@
+mod FieldRefine
+
+type A = { qty:U64, qty>10 }
+
+type B = { qty:U8 }
+
+mk (n:U8) : B = {qty=n}
+
+bump (b:&B) : U64 = u64 b.qty + 1

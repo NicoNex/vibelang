@@ -681,16 +681,20 @@ impl<'a> Gen<'a> {
             ExprKind::Borrow(i) => self.term(i),
             ExprKind::Field(b, f) => {
                 let base = as_name(b)?;
-                let ty = self
-                    .ck
-                    .data
-                    .field_owner
-                    .get(f)
-                    .and_then(|r| self.ck.data.records.get(r))
-                    .and_then(|r| r.fields.iter().find(|(n, _)| n == f))
-                    .and_then(|(_, t)| base_name(t));
+                let ty = self.ck.field_ty_at(e.span, f).and_then(base_name);
                 let k = ty.as_deref().map(sort_of).unwrap_or(Sort::Int);
-                Some(self.sym(format!("{base}_{f}"), k))
+                let sym = self.sym(format!("{base}_{f}"), k);
+                // A field is a value of its declared type, and carries its range.
+                if let Some((lo, hi)) = ty.as_deref().and_then(range) {
+                    let floor = format!("(>= {} {lo})", sym.0);
+                    if !self.hyps.contains(&floor) {
+                        self.hyps.push(floor);
+                        if let Some(hi) = hi {
+                            self.hyps.push(format!("(<= {} {hi})", sym.0));
+                        }
+                    }
+                }
+                Some(sym)
             }
             ExprKind::Neg(i) => {
                 let (t, k) = self.term(i)?;
@@ -759,14 +763,7 @@ impl<'a> Gen<'a> {
         match &e.kind {
             ExprKind::Var(n) => self.tys.get(&self.var(n)).cloned(),
             ExprKind::Borrow(i) | ExprKind::Neg(i) => self.ty_of(i),
-            ExprKind::Field(_, f) => self
-                .ck
-                .data
-                .field_owner
-                .get(f)
-                .and_then(|r| self.ck.data.records.get(r))
-                .and_then(|r| r.fields.iter().find(|(n, _)| n == f))
-                .and_then(|(_, t)| base_name(t)),
+            ExprKind::Field(_, f) => self.ck.field_ty_at(e.span, f).and_then(base_name),
             ExprKind::Binop(op, a, b) if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%") => {
                 self.ty_of(a).or_else(|| self.ty_of(b))
             }
@@ -1313,15 +1310,14 @@ impl<'a> Gen<'a> {
         let Some((f0, _)) = fields.first() else {
             return;
         };
-        let Some(rec) = self.ck.data.field_owner.get(f0).cloned() else {
+        let Some(rec) = self.ck.field_owner_at(e.span, f0).cloned() else {
             return;
         };
-        let Some(info) = self.ck.data.records.get(&rec).cloned() else {
-            return;
-        };
-        if info.refines.is_empty() {
-            return;
+        match self.ck.data.records.get(&rec) {
+            Some(info) if !info.refines.is_empty() => {}
+            _ => return,
         }
+        let info = self.ck.data.records[&rec].clone();
         let mut sub: HashMap<String, (String, Sort)> = HashMap::new();
         for (n, v) in fields {
             if let Some(t) = self.term(v) {

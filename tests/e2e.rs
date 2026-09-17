@@ -466,3 +466,15 @@ fn a_refutable_payload_does_not_cover_its_constructor() {
     let (ok, out) = vibe(&["check", f.to_str().unwrap()]);
     assert!(!ok && out.contains("type.mismatch"), "{out}");
 }
+
+/// Two records with the same fields: a literal used to take whichever one a
+/// HashMap yielded first, so the same file checked on one run and not the next.
+/// It now builds the record the function returns, every time, and the field it
+/// reads carries that record's type into the prover.
+#[test]
+fn a_literal_two_records_could_build_resolves_the_same_way_every_run() {
+    for _ in 0..8 {
+        let (ok, out) = vibe(&["check", "--prove", "tests/field_refine.vibe"]);
+        assert!(ok, "{out}");
+    }
+}
