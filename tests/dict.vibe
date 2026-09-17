@@ -25,5 +25,7 @@ tally (ws:&Vec Str) : Dict Str U32 = fold (\d w -> insert d (dup w) 1) dict ws
 
 main : E! Unit =
   let d = count 20 in
-  out (fmt "{} {} {} {} {} {}\n"
-           (len &d) (found &d &"one") (found &d &"two") (found &d &"three") (len &(keys &d)) (len &(tally &["a", "b", "a"])))
+  ;; `keys` lists entries in the order they were first inserted: re-inserting
+  ;; "two" replaced its value where it stood
+  out (fmt "{} {} {} {} {} {} {}\n"
+           (len &d) (found &d &"one") (found &d &"two") (found &d &"three") (len &(keys &d)) (len &(tally &["a", "b", "a"])) (keys &d))

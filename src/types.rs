@@ -180,8 +180,8 @@ pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     ("drop", "Size -> &Vec a -> Vec a"),
     // Dict. An association from a key to a value, and the one prelude type
     // with no literal syntax: `dict` is the empty one and `insert` grows it.
-    // `len` and `show` work on it because they work on anything, and a
-    // dictionary is a vector of pairs underneath (runtime/vibert.c).
+    // `len` and `show` work on it; underneath it is a hash map that keeps
+    // insertion order (runtime/vibert.c).
     // A set is a `Dict k Unit`; it does not need names of its own.
     ("dict", "Dict k v"),
     ("insert", "Dict k v -> k -> v -> Dict k v"),

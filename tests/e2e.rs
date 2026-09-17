@@ -387,7 +387,7 @@ fn a_nested_structure_is_freed_to_the_bottom() {
 fn a_dictionary_associates_a_key_with_a_value() {
     let (ok, out) = vibe(&["run", "tests/dict.vibe"]);
     assert!(ok, "dict.vibe failed to build or run:\n{out}");
-    assert_eq!(out.trim(), "2 1 20 0 2 2");
+    assert_eq!(out.trim(), "2 1 20 0 2 2 [one, two]");
 }
 
 /// A value a prelude function was only lent stays the caller's. A named

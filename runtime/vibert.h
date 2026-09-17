@@ -27,7 +27,8 @@ typedef enum {
   VB_VEC,
   VB_OBJ,
   VB_CLOS,
-  VB_PTR
+  VB_PTR,
+  VB_DICT
 } VbTag;
 
 typedef struct VbVal {
@@ -118,7 +119,7 @@ uint32_t vb_tag(VbVal o);
 VbVal vb_set_fields(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals);
 VbVal vb_with(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals);
 
-/* --- Dict: an association vector, see the note in vibert.c --- */
+/* --- Dict: a compact hash map, see the note in vibert.c --- */
 VbVal vb_dict(void);
 VbVal vb_insert(VbVal d, VbVal k, VbVal v);
 VbVal vb_lookup(VbVal d, VbVal k);

@@ -1,7 +1,7 @@
 mod Set
 
 ;; A set is a `Dict k Unit`, the prelude's own convention: the keys are the
-;; elements and the value carries nothing. Lookups are linear scans.
+;; elements and the value carries nothing. Lookups are O(1).
 from_vec (xs:&Vec k) : Dict k Unit = fold (\s x -> insert s (dup x) ()) dict xs
 
 member (s:&Dict k Unit) (x:&k) : Bool =

@@ -1,6 +1,6 @@
 mod DictX
 
-;; Helpers over the prelude's `Dict k v`. A lookup is a linear scan.
+;; Helpers over the prelude's `Dict k v`, a hash map in insertion order.
 get_or (d:&Dict k v) (key:&k) (fallback:v) : v =
   ?lookup d key
    |Some x -> x

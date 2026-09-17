@@ -518,8 +518,8 @@ The five refusals that define the language: `match.nonexhaustive`, `own.use_afte
 These are real limitations of the compiler as it stands, and each one has silently wasted
 someone's time. Full list with sources: **`references/sharp-edges.md`**.
 
-- **A dictionary is a linear scan.** `Dict k v` exists (`dict insert lookup remove keys`),
-  but a lookup is O(n); fine for tens of keys, not for a million.
+- **`remove` on a dictionary is O(n).** `Dict k v` (`dict insert lookup remove keys`) is a
+  hash map in insertion order: `insert` and `lookup` are O(1), `remove` shifts the entries.
 - **Anything that may alias is not freed at all.** Drops are deep, but a value a prelude
   call may hand out a piece of (`get`, `fold`, `max_by`, …) or that went to C is left alone.
 - **Building a string byte by byte is O(n²).** There is no byte buffer; every `concat`

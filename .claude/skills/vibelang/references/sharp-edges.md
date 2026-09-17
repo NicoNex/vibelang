@@ -22,8 +22,9 @@ Contents:
 
 ## Missing capabilities
 
-**A dictionary is a linear scan.** `Dict k v` (`dict insert lookup remove keys`) is a vector
-of pairs underneath: O(n) per lookup, O(n²) to build. A set is a `Dict k Unit`.
+**`remove` on a dictionary is O(n).** `Dict k v` (`dict insert lookup remove keys`) is a hash
+map in insertion order: `insert` and `lookup` are O(1), `remove` shifts the entries after
+it. A set is a `Dict k Unit`.
 
 **Grow a string with `push_str`, not `concat`.** `concat` copies both sides, so building a
 string a piece at a time with it is O(n²). `push_str acc &piece` consumes `acc` and appends

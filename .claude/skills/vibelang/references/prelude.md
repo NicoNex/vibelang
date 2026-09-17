@@ -200,7 +200,9 @@ tally (ws:&Vec Str) : Dict Str U32 =
   fold (\d w -> insert d (dup w) 1) dict ws
 ```
 
-ponytail: a lookup is a linear scan, so a large dictionary is O(n) per lookup.
+A dictionary is a hash map that keeps insertion order: `insert` and `lookup` are O(1),
+`keys` and `show` list entries in the order they were first inserted, and re-inserting a
+key replaces its value in place. `remove` is O(n).
 
 ### Vec
 

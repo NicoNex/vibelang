@@ -45,8 +45,8 @@ Shipped since this list was first written, each with the item it closed:
   a vector of two-field objects, so the deep drop, `vb_dup` and `show` were
   already right for it, and the representation can change without any of them
   knowing. Keys compare with `vb_eq`, the equality the language already has. A
-  set is a `Dict k Unit` and gets no names of its own. Lookup is a linear scan
-  — see the ceiling below.
+  set is a `Dict k Unit` and gets no names of its own. It has since become a hash
+  map that keeps insertion order (`VB_DICT`), behind the same five names.
 - **A drop is deep.** `vb_dispose` recurses into a vector's elements and an
   object's fields. `examples/nested.vibe` — 200,000 iterations, eight fresh
   strings in each, nothing kept — is flat at 1.5 MB where the shallow drop grew
@@ -231,10 +231,9 @@ Carried from §16, with what has changed since:
 
 ## Things that are true and easy to forget
 
-- A dictionary lookup is a linear scan, so holding n entries costs O(n) per
-  lookup and building one costs O(n²). The upgrade path is a hash table behind
-  the same five names, and it needs a hash for every tag `vb_eq` compares.
-  Nothing has been slow yet.
+- A dictionary is a hash map in insertion order (`VB_DICT`): `insert` and
+  `lookup` are O(1), `remove` is O(n) because it shifts the entries and rebuilds
+  the index. Tombstones are the upgrade when a profile blames `remove`.
 - `VbVal` is dynamically tagged, and resolved types are not threaded into
   codegen. `runtime/vibert.h` says so in its own header comment. Several of the
   items above would be cheaper afterwards, and any performance claim made before

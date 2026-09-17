@@ -108,7 +108,7 @@ render (rows:&Vec (Vec Str)) : Str
 ## DictX
 
 ```
-;; Helpers over the prelude's `Dict k v`. A lookup is a linear scan.
+;; Helpers over the prelude's `Dict k v`, a hash map in insertion order.
 get_or (d:&Dict k v) (key:&k) (fallback:v) : v
 has_key (d:&Dict k v) (key:&k) : Bool
 ;; Applies `f` to the value at `key`, or to `fallback` when the key is absent.
@@ -545,7 +545,7 @@ max_index (v:&Vec I64, len v>0) : Size
 
 ```
 ;; A set is a `Dict k Unit`, the prelude's own convention: the keys are the
-;; elements and the value carries nothing. Lookups are linear scans.
+;; elements and the value carries nothing. Lookups are O(1).
 from_vec (xs:&Vec k) : Dict k Unit
 member (s:&Dict k Unit) (x:&k) : Bool
 add (s:Dict k Unit) (x:k) : Dict k Unit

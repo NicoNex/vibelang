@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* ------------------------------------------------------------ allocator
  * calloc and free. Every value is freed at the point its owner dies, which the
@@ -94,6 +95,17 @@ VbVal vb_fn(VbFn fn, const char *name, uint32_t arity, uint64_t owns) {
   return box(VB_CLOS, c);
 }
 
+/* A dictionary; see the Dict section. */
+typedef struct {
+  VbVec *e;     /* entries, in insertion order */
+  size_t *slot; /* 0 when empty, else an index into `e` plus one */
+  size_t cap;   /* slots: a power of two, at least twice the entries */
+} VbDict;
+static void dict_free(VbDict *d);
+static VbVal dict_dup(const VbDict *d);
+/* The entries, as the vector their order, equality and `show` come from. */
+static VbVal dict_entries(VbVal d) { return box(VB_VEC, ((VbDict *)d.v.p)->e); }
+
 /* Free one value, at the point its owner dies (spec 4.2,
    docs/static-drop-roadmap.md).
 
@@ -130,6 +142,7 @@ void vb_dispose(VbVal v) {
       break;
     }
     case VB_CLOS: { VbClos *c = v.v.p; vb_free(c->args); vb_free(c); break; }
+    case VB_DICT: dict_free(v.v.p); break;
     default: break;
   }
 }
@@ -317,6 +330,8 @@ VbVal vb_neg(VbVal a) {
 
 int vb_cmp(VbVal a, VbVal b) {
   if (a.tag == VB_UNIT && b.tag == VB_UNIT) return 0;
+  if (a.tag == VB_DICT && b.tag == VB_DICT)
+    return vb_cmp(dict_entries(a), dict_entries(b));
   /* A tuple, a record or a variant orders by constructor, then field by field;
      a vector element by element, then by length. */
   if (a.tag == VB_OBJ && b.tag == VB_OBJ) {
@@ -355,6 +370,8 @@ int vb_cmp(VbVal a, VbVal b) {
 bool vb_eq(VbVal a, VbVal b) {
   /* NaN is equal to nothing, itself included; `vb_cmp` cannot say that. */
   if (either_float(a, b)) return vb_as_float(a) == vb_as_float(b);
+  if (a.tag == VB_DICT && b.tag == VB_DICT)
+    return vb_eq(dict_entries(a), dict_entries(b));
   if (a.tag == VB_STR && b.tag == VB_STR) {
     VbStr *x = a.v.p, *y = b.v.p;
     return x->n == y->n && memcmp(x->p, y->p, x->n) == 0;
@@ -496,6 +513,7 @@ VbVal vb_set(VbVal v, VbVal i, VbVal x, const char *path) {
 }
 VbVal vb_len(VbVal v) {
   if (v.tag == VB_STR) return vb_uint(vb_as_str(v)->n);
+  if (v.tag == VB_DICT) return vb_uint(((VbDict *)v.v.p)->e->n);
   return vb_uint(vb_as_vec(v)->n);
 }
 VbVal vb_map(VbVal f, VbVal v) {
@@ -698,6 +716,7 @@ VbVal vb_dup(VbVal v) {
       if (x->nargs) memcpy(c->args, x->args, x->nargs * sizeof *c->args);
       return box(VB_CLOS, c);
     }
+    case VB_DICT: return dict_dup(v.v.p);
     /* A scalar is already a copy; a C pointer is not ours to duplicate. */
     default: return v;
   }
@@ -763,7 +782,7 @@ static size_t str_find(const VbStr *x, const VbStr *y, size_t from) {
 VbVal vb_split(VbVal c, VbVal s) {
   VbStr *x = vb_as_str(s);
   char buf[4];
-  VbStr sep = {utf8((uint32_t)vb_as_uint(c), buf), buf};
+  VbStr sep = {utf8((uint32_t)vb_as_uint(c), buf), buf, 0};
   VbVec *w = vec_alloc(4);
   size_t start = 0;
   for (size_t i; (i = str_find(x, &sep, start)) != SIZE_MAX; start = i + sep.n)
@@ -873,6 +892,7 @@ static void show_into(Sb *acc, VbVal v) {
       }
       break;
     }
+    case VB_DICT: show_into(acc, dict_entries(v)); break;
     default: sb_puts(acc, "?");
   }
 }
@@ -938,85 +958,179 @@ VbVal vb_none(void) { return vb_obj(&vb_info_None, 1, 0); }
 
 /* ------------------------------------------------------------------ Dict
 
-   An association vector: a `VB_VEC` whose elements are two-field objects. It is
-   not a new tag, which is the point — `vb_dispose`, `vb_dup`, `vb_len` and
-   `show` already do the right thing for a vector of objects, and the
-   representation can change without any of them knowing.
+   A compact hash map, the layout of CPython's dict and Rust's `indexmap`: the
+   entries in a dense vector, in insertion order, and an index of slots that
+   points into it. `keys`, `show` and equality walk the dense vector, so the
+   order a program sees does not depend on the hash; re-inserting a key keeps
+   its place and replaces its value.
 
-   Keys are compared with `vb_eq`, the language's own equality, so a key is
-   whatever the type system already lets you write one of.
+   Each entry is a two-field `{key, value}` object, so the vector's own drop,
+   copy and `show` are the dictionary's. Keys are compared with `vb_eq`, the
+   language's own equality, and hashed consistently with it.
 
-   ponytail: lookup is a linear scan, so a dictionary of n entries costs O(n)
-   and building one costs O(n^2). Upgrade path: a hash table behind the same
-   five functions, which needs a hash for every tag that `vb_eq` compares — do
-   it when a program is slow, not because the complexity is embarrassing. */
+   ponytail: `remove` shifts the entries after it and rebuilds the index, O(n).
+   Tombstones are the upgrade when a profile blames it. */
 
 static const char *const vb_entry_fields[] = {"key", "value"};
 static const VbInfo vb_info_entry = {"entry", 2, vb_entry_fields};
+#define ENTRY_KEY(d, i) (((VbObj *)(d)->e->a[i].v.p)->f[0])
 
-VbVal vb_dict(void) { return wrap_vec(vec_alloc(0)); }
+/* Per process, so an input cannot be built to collide ahead of time. */
+static uint64_t hash_seed;
 
-/* The index of `k`, or `d->n` when it is not there. */
-static size_t dict_find(VbVec *d, VbVal k) {
-  for (size_t i = 0; i < d->n; i++)
-    if (vb_eq(((VbObj *)d->a[i].v.p)->f[0], k)) return i;
-  return d->n;
+static uint64_t mix(uint64_t h, uint64_t x) {
+  h ^= x + 0x9E3779B97F4A7C15u + (h << 6) + (h >> 2);
+  h ^= h >> 31;
+  h *= 0xBF58476D1CE4E5B9u;
+  return h ^ (h >> 29);
+}
+static uint64_t hash_bytes(uint64_t h, const char *p, size_t n) {
+  for (; n >= 8; p += 8, n -= 8) { uint64_t w; memcpy(&w, p, 8); h = mix(h, w); }
+  uint64_t w = 0;
+  memcpy(&w, p, n);
+  return mix(h, w ^ (uint64_t)n << 56);
+}
+/* Equal under `vb_eq`, equal hash: every number hashes as the integer it is
+   when it is one, so `2`, `2u`, `2.0` and `True`'s 1 agree, and `-0.0` is 0.
+   ponytail: an `I64` past 2^53 and the `F64` it rounds to compare equal but
+   hash apart; keys of one type, which is all the type checker lets a `Dict`
+   have, never meet that. */
+static uint64_t hash(uint64_t h, VbVal v) {
+  switch (v.tag) {
+    case VB_FLOAT: {
+      double d = v.v.f;
+      if (d >= -9223372036854775808.0 && d < 9223372036854775808.0 && d == (double)(int64_t)d)
+        return mix(h, (uint64_t)(int64_t)d);
+      if (d >= 0 && d < 18446744073709551616.0 && d == (double)(uint64_t)d)
+        return mix(h, (uint64_t)d);
+      uint64_t bits;
+      memcpy(&bits, &d, sizeof bits);
+      return mix(h, bits);
+    }
+    case VB_INT: case VB_UINT: case VB_BOOL: case VB_CHAR: return mix(h, vb_as_uint(v));
+    case VB_STR: { VbStr *x = v.v.p; return hash_bytes(h, x->p, x->n); }
+    case VB_CSTR: return v.v.p ? hash_bytes(h, v.v.p, strlen(v.v.p)) : h;
+    case VB_OBJ: {
+      VbObj *o = v.v.p;
+      h = mix(h, o->tag);
+      for (uint32_t i = 0; i < o->n; i++) h = hash(h, o->f[i]);
+      return h;
+    }
+    case VB_VEC: {
+      VbVec *w = v.v.p;
+      for (size_t i = 0; i < w->n; i++) h = hash(h, w->a[i]);
+      return mix(h, w->n);
+    }
+    case VB_DICT: return hash(h, dict_entries(v));
+    case VB_PTR: return mix(h, (uint64_t)(uintptr_t)v.v.p);
+    default: return h;
+  }
+}
+
+static size_t home(const VbDict *d, VbVal k) {
+  if (!hash_seed) hash_seed = mix((uint64_t)time(NULL), (uint64_t)(uintptr_t)&hash_seed) | 1;
+  return (size_t)hash(hash_seed, k) & (d->cap - 1);
+}
+
+/* Index every entry again, into a table sized for them. */
+static void dict_reindex(VbDict *d) {
+  size_t cap = 8;
+  while (cap < 2 * d->e->n + 2) cap *= 2;
+  if (cap != d->cap) {
+    vb_free(d->slot);
+    d->slot = vb_alloc(cap * sizeof *d->slot);
+    d->cap = cap;
+  } else {
+    memset(d->slot, 0, cap * sizeof *d->slot);
+  }
+  for (size_t i = 0; i < d->e->n; i++) {
+    size_t j = home(d, ENTRY_KEY(d, i));
+    while (d->slot[j]) j = (j + 1) & (d->cap - 1);
+    d->slot[j] = i + 1;
+  }
+}
+
+/* The slot `k` is in, or the empty slot it would go in. */
+static size_t dict_slot(const VbDict *d, VbVal k) {
+  size_t j = home(d, k);
+  while (d->slot[j] && !vb_eq(ENTRY_KEY(d, d->slot[j] - 1), k)) j = (j + 1) & (d->cap - 1);
+  return j;
+}
+
+static VbDict *as_dict(VbVal v) {
+  if (v.tag != VB_DICT) vb_fail("<runtime>", "expected a Dict");
+  return v.v.p;
+}
+
+VbVal vb_dict(void) {
+  VbDict *d = vb_alloc(sizeof(VbDict));
+  d->e = vec_alloc(0);
+  dict_reindex(d);
+  return box(VB_DICT, d);
+}
+
+static void dict_free(VbDict *d) {
+  vb_dispose(box(VB_VEC, d->e));
+  vb_free(d->slot);
+  vb_free(d);
+}
+static VbVal dict_dup(const VbDict *d) {
+  VbDict *c = vb_alloc(sizeof(VbDict));
+  c->e = vb_dup(box(VB_VEC, d->e)).v.p;
+  c->cap = d->cap;
+  c->slot = vb_alloc(d->cap * sizeof *c->slot);
+  memcpy(c->slot, d->slot, d->cap * sizeof *c->slot);
+  return box(VB_DICT, c);
+}
+
+/* The in-place forms, for a dictionary the frame holds alone (own.rs decides).
+   The entry a key displaces is nobody's after this, so it goes. */
+VbVal vb_insert_owned(VbVal dv, VbVal k, VbVal v) {
+  VbDict *d = as_dict(dv);
+  size_t j = dict_slot(d, k);
+  VbVal entry = vb_obj(&vb_info_entry, 0, 2, k, v);
+  if (d->slot[j]) {
+    size_t i = d->slot[j] - 1;
+    vb_dispose(d->e->a[i]);
+    d->e->a[i] = entry;
+    return dv;
+  }
+  vec_push(d->e, entry);
+  d->slot[j] = d->e->n;
+  if (2 * d->e->n + 2 > d->cap) dict_reindex(d);
+  return dv;
+}
+VbVal vb_remove_owned(VbVal dv, VbVal k) {
+  VbDict *d = as_dict(dv);
+  size_t j = dict_slot(d, k);
+  if (!d->slot[j]) return dv;
+  size_t i = d->slot[j] - 1;
+  vb_dispose(d->e->a[i]);
+  memmove(d->e->a + i, d->e->a + i + 1, (d->e->n - i - 1) * sizeof *d->e->a);
+  d->e->n--;
+  dict_reindex(d);
+  return dv;
 }
 
 /* The copying forms, for a dictionary that may still be part of another value:
-   every entry but the displaced one is copied, and nothing is freed. */
-static VbVec *dict_copy_without(VbVec *s, size_t at, size_t extra) {
-  VbVec *w = vec_alloc(s->n + extra);
-  for (size_t i = 0; i < s->n; i++)
-    if (i != at) vec_push(w, vb_dup(s->a[i]));
-  return w;
-}
-VbVal vb_insert(VbVal d, VbVal k, VbVal v) {
-  VbVec *s = vb_as_vec(d);
-  VbVec *w = dict_copy_without(s, dict_find(s, k), 1);
-  vec_push(w, vb_obj(&vb_info_entry, 0, 2, k, v));
-  return wrap_vec(w);
-}
-VbVal vb_remove(VbVal d, VbVal k) {
-  VbVec *s = vb_as_vec(d);
-  return wrap_vec(dict_copy_without(s, dict_find(s, k), 0));
-}
-
-/* The in-place forms, for a dictionary the frame holds alone (own.rs decides):
-   the entry a key displaces is nobody's after this, so it goes, and the rest
-   keep their order. */
-static void dict_unlink(VbVec *s, size_t at) {
-  if (at == s->n) return;
-  vb_dispose(s->a[at]);
-  memmove(s->a + at, s->a + at + 1, (s->n - at - 1) * sizeof *s->a);
-  s->n--;
-}
-VbVal vb_insert_owned(VbVal d, VbVal k, VbVal v) {
-  VbVec *s = vb_as_vec(d);
-  dict_unlink(s, dict_find(s, k));
-  vec_push(s, vb_obj(&vb_info_entry, 0, 2, k, v));
-  return d;
-}
-VbVal vb_remove_owned(VbVal d, VbVal k) {
-  VbVec *s = vb_as_vec(d);
-  dict_unlink(s, dict_find(s, k));
-  return d;
-}
+   the change lands on a copy, and nothing of the original is freed. */
+VbVal vb_insert(VbVal d, VbVal k, VbVal v) { return vb_insert_owned(dict_dup(as_dict(d)), k, v); }
+VbVal vb_remove(VbVal d, VbVal k) { return vb_remove_owned(dict_dup(as_dict(d)), k); }
 
 /* Borrows, so the value comes back as a copy: handing out the entry's own
    pointer would be an interior pointer into a dictionary the caller still owns
    (docs/aliasing-audit.md, gap 2). */
-VbVal vb_lookup(VbVal d, VbVal k) {
-  VbVec *s = vb_as_vec(d);
-  size_t at = dict_find(s, k);
-  if (at == s->n) return vb_none();
-  return vb_some(vb_dup(((VbObj *)s->a[at].v.p)->f[1]));
+VbVal vb_lookup(VbVal dv, VbVal k) {
+  VbDict *d = as_dict(dv);
+  size_t j = dict_slot(d, k);
+  if (!d->slot[j]) return vb_none();
+  return vb_some(vb_dup(((VbObj *)d->e->a[d->slot[j] - 1].v.p)->f[1]));
 }
 
-VbVal vb_keys(VbVal d) {
-  VbVec *s = vb_as_vec(d);
-  VbVec *w = vec_alloc(s->n);
-  for (size_t i = 0; i < s->n; i++) vec_push(w, vb_dup(((VbObj *)s->a[i].v.p)->f[0]));
+VbVal vb_keys(VbVal dv) {
+  VbDict *d = as_dict(dv);
+  VbVec *w = vec_alloc(d->e->n);
+  for (size_t i = 0; i < d->e->n; i++) vec_push(w, vb_dup(ENTRY_KEY(d, i)));
   return wrap_vec(w);
 }
 
