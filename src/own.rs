@@ -203,7 +203,14 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
 fn borrowed_params(m: &Module) -> HashMap<String, Vec<bool>> {
     let mut map: HashMap<String, Vec<bool>> = PRELUDE_SIGS
         .iter()
-        .map(|(n, sig)| ((*n).to_string(), sig_borrows(sig)))
+        .map(|(n, _)| {
+            (
+                (*n).to_string(),
+                crate::infer::prelude_ty(n)
+                    .map(ty_borrows)
+                    .unwrap_or_default(),
+            )
+        })
         .collect();
     for e in m.exts() {
         for s in &e.sigs {
@@ -235,28 +242,6 @@ fn ty_borrows(t: &Ty) -> Vec<bool> {
         cur = b;
     }
     v
-}
-
-/// The same, over a written prelude signature: split on top-level `->` and
-/// drop the result.
-fn sig_borrows(sig: &str) -> Vec<bool> {
-    let b = sig.as_bytes();
-    let (mut depth, mut start, mut i) = (0usize, 0usize, 0usize);
-    let mut out = Vec::new();
-    while i < b.len() {
-        match b[i] {
-            b'(' => depth += 1,
-            b')' => depth = depth.saturating_sub(1),
-            b'-' if depth == 0 && b.get(i + 1) == Some(&b'>') => {
-                out.push(sig[start..i].trim_start().starts_with('&'));
-                i += 1;
-                start = i + 1;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    out
 }
 
 /// Every name a body can yield as its result, with the span it sits at.

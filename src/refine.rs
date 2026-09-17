@@ -783,12 +783,14 @@ impl<'a> Gen<'a> {
                 }
                 // A saturated prelude call with a numeric result: `byte_at s i`
                 // is a U8, and a `let` of it carries that range.
-                let (_, sig) = crate::types::PRELUDE_SIGS
-                    .iter()
-                    .find(|(p, _)| *p == name)?;
-                let parts: Vec<&str> = sig.split(" -> ").collect();
-                let ret = parts.last()?;
-                (parts.len() == args.len() + 1 && range(ret).is_some()).then(|| ret.to_string())
+                let mut t = crate::infer::prelude_ty(&name)?;
+                for _ in 0..args.len() {
+                    match t {
+                        Ty::Fun(_, r) => t = r,
+                        _ => return None,
+                    }
+                }
+                base_name(t).filter(|r| !matches!(t, Ty::Fun(..)) && range(r).is_some())
             }
             _ => None,
         }

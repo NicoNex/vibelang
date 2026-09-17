@@ -62,6 +62,18 @@ pub fn parse_type(src: &str) -> Ty {
     p.ty().expect("prelude type parses")
 }
 
+/// A prelude name's parsed signature, parsed once.
+pub fn prelude_ty(name: &str) -> Option<&'static Ty> {
+    static TYS: std::sync::OnceLock<HashMap<&'static str, Ty>> = std::sync::OnceLock::new();
+    TYS.get_or_init(|| {
+        PRELUDE_SIGS
+            .iter()
+            .map(|(n, s)| (*n, parse_type(s)))
+            .collect()
+    })
+    .get(name)
+}
+
 pub fn prelude_module() -> Module {
     let toks = lexer::lex(PRELUDE_TYPES, usize::MAX).expect("prelude lexes");
     crate::parser::parse(toks).expect("prelude parses")
