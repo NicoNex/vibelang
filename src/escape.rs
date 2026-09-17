@@ -52,29 +52,8 @@ pub fn releasable(m: &Module, ck: &Checked) -> HashSet<String> {
 /// Every name an expression mentions. Over-approximate on purpose: a name that
 /// is not a call costs one comparison and never costs correctness.
 fn collect(e: &Expr, out: &mut Vec<String>) {
-    use ExprKind::*;
-    if let Var(n) | Ctor(n) = &e.kind {
+    if let ExprKind::Var(n) | ExprKind::Ctor(n) = &e.kind {
         out.push(n.clone());
     }
-    match &e.kind {
-        Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Var(_) | Ctor(_) => {}
-        App(h, args) => {
-            collect(h, out);
-            args.iter().for_each(|a| collect(a, out));
-        }
-        Binop(_, a, b) | Bind(_, a, b) | Let(_, a, b) => {
-            collect(a, out);
-            collect(b, out);
-        }
-        Neg(i) | Not(i) | Borrow(i) | Field(i, _) | Lambda(_, i) | Arena(_, i) => collect(i, out),
-        Match(s, arms) => {
-            collect(s, out);
-            arms.iter().for_each(|(_, b)| collect(b, out));
-        }
-        Record(base, fields) => {
-            base.iter().for_each(|b| collect(b, out));
-            fields.iter().for_each(|(_, v)| collect(v, out));
-        }
-        Tuple(xs) | List(xs) => xs.iter().for_each(|x| collect(x, out)),
-    }
+    e.children(&mut |c| collect(c, out));
 }

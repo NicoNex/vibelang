@@ -765,7 +765,7 @@ impl<'a> Gen<'a> {
     /// a result and says nothing about the value.
     fn ret_ty(&self, name: &str, argc: usize) -> Option<Ty> {
         let f = self.m.funs().find(|f| f.name == name)?;
-        let params: usize = f.params.iter().map(|p| p.names.len()).sum();
+        let params: usize = f.arity();
         (params == argc).then(|| f.ret.clone()).flatten()
     }
 
@@ -1419,7 +1419,7 @@ fn tails(e: &Expr, env: &HashMap<String, usize>, out: &mut HashMap<String, usize
 /// that every arm in `above` already failed to match. Only one shape is read:
 /// `C x` under an earlier `C [..]`.
 fn arm_lens(p: &Pat, above: &[(Pat, Expr)], env: &mut HashMap<String, usize>) {
-    for n in pat_names(p) {
+    for n in p.names() {
         env.remove(&n); // a rebound name keeps nothing from the outer one
     }
     let Pat::Ctor(c, args) = p else { return };
@@ -1445,16 +1445,6 @@ fn arm_lens(p: &Pat, above: &[(Pat, Expr)], env: &mut HashMap<String, usize>) {
     }
     if k > 0 {
         env.insert(n.clone(), k);
-    }
-}
-
-fn pat_names(p: &Pat) -> Vec<String> {
-    match p {
-        Pat::Var(n) => vec![n.clone()],
-        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => {
-            ps.iter().flat_map(pat_names).collect()
-        }
-        _ => Vec::new(),
     }
 }
 

@@ -87,6 +87,47 @@ impl Expr {
     pub fn new(kind: ExprKind, span: Span) -> Expr {
         Expr { kind, span }
     }
+
+    /// Apply `f` to every direct subexpression, in source order. The one place
+    /// that knows the AST's shape, so a new `ExprKind` breaks the build here
+    /// instead of silently going unvisited in some pass.
+    pub fn children(&self, f: &mut dyn FnMut(&Expr)) {
+        use ExprKind::*;
+        match &self.kind {
+            Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Var(_) | Ctor(_) => {}
+            App(h, args) => {
+                f(h);
+                args.iter().for_each(&mut *f);
+            }
+            Binop(_, a, b) | Bind(_, a, b) | Let(_, a, b) => {
+                f(a);
+                f(b);
+            }
+            Neg(i) | Not(i) | Borrow(i) | Field(i, _) | Lambda(_, i) | Arena(_, i) => f(i),
+            Match(s, arms) => {
+                f(s);
+                arms.iter().for_each(|(_, b)| f(b));
+            }
+            Record(base, fields) => {
+                base.iter().for_each(|b| f(b));
+                fields.iter().for_each(|(_, v)| f(v));
+            }
+            Tuple(xs) | List(xs) => xs.iter().for_each(&mut *f),
+        }
+    }
+}
+
+impl Pat {
+    /// Every variable the pattern binds, left to right.
+    pub fn names(&self) -> Vec<String> {
+        match self {
+            Pat::Var(n) => vec![n.clone()],
+            Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => {
+                ps.iter().flat_map(Pat::names).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -110,6 +151,20 @@ pub struct FunDecl {
     pub body: Expr,
     pub measure: Option<Expr>,
     pub span: Span,
+}
+
+impl FunDecl {
+    /// Parameter names, flattened across groups: `(a b:U64) (c:U64)` is `a b c`.
+    pub fn param_names(&self) -> Vec<String> {
+        self.params
+            .iter()
+            .flat_map(|p| p.names.iter().cloned())
+            .collect()
+    }
+
+    pub fn arity(&self) -> usize {
+        self.params.iter().map(|p| p.names.len()).sum()
+    }
 }
 
 #[derive(Clone, Debug)]

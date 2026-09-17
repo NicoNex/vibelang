@@ -170,7 +170,7 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             leaves,
             exts: reaches_c.clone(),
             fun: f.name.clone(),
-            arity: f.params.iter().map(|p| p.names.len()).sum(),
+            arity: f.arity(),
             shared: borrows.iter().map(|b| (*b).to_string()).collect(),
             suppressed: 0,
         };
@@ -351,33 +351,10 @@ fn reaches_result(e: &Expr, out: &mut HashSet<String>) {
 
 /// Every name the expression mentions, at any depth.
 fn names_in(e: &Expr, out: &mut HashSet<String>) {
-    use ExprKind::*;
-    match &e.kind {
-        Var(n) => {
-            out.insert(n.clone());
-        }
-        App(h, xs) => {
-            names_in(h, out);
-            xs.iter().for_each(|x| names_in(x, out));
-        }
-        Binop(_, a, b) | Let(_, a, b) | Bind(_, a, b) => {
-            names_in(a, out);
-            names_in(b, out);
-        }
-        Neg(x) | Not(x) | Borrow(x) | Field(x, _) | Lambda(_, x) | Arena(_, x) => names_in(x, out),
-        Tuple(xs) | List(xs) => xs.iter().for_each(|x| names_in(x, out)),
-        Record(base, fields) => {
-            if let Some(b) = base {
-                names_in(b, out);
-            }
-            fields.iter().for_each(|(_, v)| names_in(v, out));
-        }
-        Match(s, arms) => {
-            names_in(s, out);
-            arms.iter().for_each(|(_, a)| names_in(a, out));
-        }
-        Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Ctor(_) => {}
+    if let ExprKind::Var(n) = &e.kind {
+        out.insert(n.clone());
     }
+    e.children(&mut |c| names_in(c, out));
 }
 
 /// Scalars are copied, not moved. Everything with a payload is affine.
@@ -793,7 +770,7 @@ impl State<'_> {
                 for (p, body) in arms {
                     self.moved = before.clone();
                     self.mutated = updated_before.clone();
-                    let bound = pat_names(p);
+                    let bound = p.names();
                     // The scrutinee is read, not consumed, so a payload the
                     // pattern names is a pointer into a value someone else
                     // still owns (docs/aliasing-audit.md gap 4).
@@ -884,14 +861,4 @@ fn lambda_returns_its_argument(e: &Expr) -> bool {
     let mut out = Vec::new();
     borrow_out(body, &ps, &mut out);
     !out.is_empty()
-}
-
-fn pat_names(p: &Pat) -> Vec<String> {
-    match p {
-        Pat::Var(n) => vec![n.clone()],
-        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => {
-            ps.iter().flat_map(pat_names).collect()
-        }
-        _ => Vec::new(),
-    }
 }

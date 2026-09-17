@@ -43,7 +43,7 @@ pub fn check(m: &Module) -> Vec<Diag> {
         .enumerate()
         .map(|(i, f)| (f.name.as_str(), i))
         .collect();
-    let params: Vec<Vec<String>> = funs.iter().map(|f| param_names(f)).collect();
+    let params: Vec<Vec<String>> = funs.iter().map(|f| f.param_names()).collect();
     let calls: Vec<Vec<Call>> = funs.iter().map(|f| calls_in(&f.body, &index)).collect();
 
     // Reachability closure over the call graph; `i` is recursive when it reaches itself.
@@ -186,13 +186,6 @@ struct Call {
     span: Span,
 }
 
-fn param_names(f: &FunDecl) -> Vec<String> {
-    f.params
-        .iter()
-        .flat_map(|p| p.names.iter().cloned())
-        .collect()
-}
-
 /// Every way this body can reach a module function: a direct call, with its
 /// arguments, and a mention of the name as a *value*, with none.
 ///
@@ -236,35 +229,7 @@ fn scan(e: &Expr, index: &HashMap<&str, usize>, out: &mut Vec<Call>) {
             });
         }
     }
-    children(e, &mut |c| scan(c, index, out));
-}
-
-/// The immediate sub-expressions, in evaluation order.
-fn children(e: &Expr, f: &mut dyn FnMut(&Expr)) {
-    use ExprKind::*;
-    match &e.kind {
-        App(h, args) => {
-            f(h);
-            args.iter().for_each(&mut *f);
-        }
-        Binop(_, a, b) | Bind(_, a, b) | Let(_, a, b) => {
-            f(a);
-            f(b);
-        }
-        Neg(a) | Not(a) | Borrow(a) | Field(a, _) | Lambda(_, a) | Arena(_, a) => f(a),
-        Match(s, arms) => {
-            f(s);
-            arms.iter().for_each(|(_, b)| f(b));
-        }
-        Record(base, fields) => {
-            if let Some(b) = base {
-                f(b);
-            }
-            fields.iter().for_each(|(_, v)| f(v));
-        }
-        Tuple(xs) | List(xs) => xs.iter().for_each(f),
-        Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Var(_) | Ctor(_) => {}
-    }
+    e.children(&mut |c| scan(c, index, out));
 }
 
 /// A measure as `sum(coefficient * atom) + constant`. Atoms are parameters, or

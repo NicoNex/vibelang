@@ -162,7 +162,7 @@ fn cstring(s: &str) -> String {
 pub fn generate(m: &Module, ck: &Checked, file: &str) -> Result<String, Vec<Diag>> {
     let mut arity = HashMap::new();
     for f in m.funs() {
-        arity.insert(f.name.clone(), f.params.iter().map(|p| p.names.len()).sum());
+        arity.insert(f.name.clone(), f.arity());
     }
     let mut g = Gen {
         m,
@@ -1361,7 +1361,7 @@ fn free_vars(e: &Expr, bound: &mut HashSet<String>, out: &mut Vec<String>) {
             free_vars(s, bound, out);
             for (p, body) in arms {
                 let mut added = Vec::new();
-                pat_vars(p, &mut added);
+                added.extend(p.names());
                 let fresh: Vec<String> = added
                     .into_iter()
                     .filter(|a| bound.insert(a.clone()))
@@ -1371,16 +1371,6 @@ fn free_vars(e: &Expr, bound: &mut HashSet<String>, out: &mut Vec<String>) {
                     bound.remove(&a);
                 }
             }
-        }
-        _ => {}
-    }
-}
-
-fn pat_vars(p: &Pat, out: &mut Vec<String>) {
-    match p {
-        Pat::Var(n) => out.push(n.clone()),
-        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => {
-            ps.iter().for_each(|x| pat_vars(x, out))
         }
         _ => {}
     }
@@ -1662,7 +1652,7 @@ pub fn header(m: &Module, ck: &Checked) -> String {
             Some(f) => f,
             None => continue,
         };
-        let ar: usize = f.params.iter().map(|p| p.names.len()).sum();
+        let ar: usize = f.arity();
         let sig = ck.sigs.get(n).cloned().unwrap_or(Scheme::mono(T::unit()));
         let (ps, ret) = split_fn(&sig.ty, ar);
         let pres: Vec<String> = f

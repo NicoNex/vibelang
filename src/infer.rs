@@ -972,20 +972,10 @@ fn bind_pattern(c: &mut Checker, p: &Pat, expected: &T, span: Span, path: &str) 
 /// ownership pass under the span of the arm they scope over — the only stable
 /// identity a pattern binder has, since `Pat` carries no spans.
 fn record_pattern(c: &mut Checker, p: &Pat, scope: Span) {
-    for n in pat_names(p) {
+    for n in p.names() {
         if let Some(s) = c.lookup(&n) {
             c.bound(scope, &n, &s.ty.clone());
         }
-    }
-}
-
-fn pat_names(p: &Pat) -> Vec<String> {
-    match p {
-        Pat::Var(n) => vec![n.clone()],
-        Pat::Ctor(_, ps) | Pat::List(ps) | Pat::Tuple(ps) => {
-            ps.iter().flat_map(pat_names).collect()
-        }
-        _ => Vec::new(),
     }
 }
 

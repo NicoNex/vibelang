@@ -236,45 +236,7 @@ fn collect_calls(e: &Expr, out: &mut Vec<String>) {
     if let ExprKind::Var(n) | ExprKind::Ctor(n) = &e.kind {
         out.push(n.clone());
     }
-    walk(e, &mut |k| collect_calls(k, out));
-}
-
-/// Apply `f` to every direct subexpression. One place to teach the AST shape,
-/// so a new `ExprKind` breaks the build instead of silently going unvisited.
-fn walk(e: &Expr, f: &mut dyn FnMut(&Expr)) {
-    match &e.kind {
-        ExprKind::Int(_)
-        | ExprKind::Float(_)
-        | ExprKind::Str(_)
-        | ExprKind::Char(_)
-        | ExprKind::Bool(_)
-        | ExprKind::Unit
-        | ExprKind::Var(_)
-        | ExprKind::Ctor(_) => {}
-        ExprKind::App(h, args) => {
-            f(h);
-            args.iter().for_each(&mut *f);
-        }
-        ExprKind::Binop(_, a, b) => {
-            f(a);
-            f(b);
-        }
-        ExprKind::Neg(i) | ExprKind::Not(i) | ExprKind::Borrow(i) | ExprKind::Field(i, _) => f(i),
-        ExprKind::Match(s, arms) => {
-            f(s);
-            arms.iter().for_each(|(_, b)| f(b));
-        }
-        ExprKind::Bind(_, v, r) | ExprKind::Let(_, v, r) => {
-            f(v);
-            f(r);
-        }
-        ExprKind::Lambda(_, b) | ExprKind::Arena(_, b) => f(b),
-        ExprKind::Record(base, fields) => {
-            base.iter().for_each(|b| f(b));
-            fields.iter().for_each(|(_, v)| f(v));
-        }
-        ExprKind::Tuple(xs) | ExprKind::List(xs) => xs.iter().for_each(&mut *f),
-    }
+    e.children(&mut |k| collect_calls(k, out));
 }
 
 #[cfg(test)]

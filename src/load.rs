@@ -688,31 +688,5 @@ fn find_qualifiers(e: &Expr, out: &mut Vec<(String, Span)>) {
         }
         _ => {}
     }
-    children(e, &mut |k| find_qualifiers(k, out));
-}
-
-/// Apply `f` to every direct subexpression.
-fn children(e: &Expr, f: &mut dyn FnMut(&Expr)) {
-    use ExprKind::*;
-    match &e.kind {
-        Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Var(_) | Ctor(_) => {}
-        App(h, args) => {
-            f(h);
-            args.iter().for_each(&mut *f);
-        }
-        Binop(_, a, b) | Bind(_, a, b) | Let(_, a, b) => {
-            f(a);
-            f(b);
-        }
-        Neg(i) | Not(i) | Borrow(i) | Field(i, _) | Lambda(_, i) | Arena(_, i) => f(i),
-        Match(s, arms) => {
-            f(s);
-            arms.iter().for_each(|(_, b)| f(b));
-        }
-        Record(base, fields) => {
-            base.iter().for_each(|b| f(b));
-            fields.iter().for_each(|(_, v)| f(v));
-        }
-        Tuple(xs) | List(xs) => xs.iter().for_each(&mut *f),
-    }
+    e.children(&mut |k| find_qualifiers(k, out));
 }
