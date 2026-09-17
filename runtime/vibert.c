@@ -317,10 +317,9 @@ static VbVec *vec_alloc(size_t cap) {
 static void vec_push(VbVec *w, VbVal x) {
   if (w->n == w->cap) {
     size_t cap = w->cap ? w->cap * 2 : 8;
-    VbVal *a = vb_alloc(sizeof(VbVal) * cap);
-    for (size_t i = 0; i < w->n; i++) a[i] = w->a[i];
-    /* The old array is internal to this vector: no other value points at it. */
-    vb_free(w->a);
+    /* The array is internal to this vector: no other value points at it. */
+    VbVal *a = realloc(w->a, sizeof(VbVal) * cap);
+    if (!a) { fputs("vibe: out of memory\n", stderr); exit(70); }
     w->a = a; w->cap = cap;
   }
   w->a[w->n++] = x;
@@ -427,38 +426,45 @@ VbVal vb_sum(VbVal v) {
   for (size_t i = 1; i < s->n; i++) acc = vb_add(acc, s->a[i]);
   return acc;
 }
-VbVal vb_max_by(VbVal f, VbVal v, const char *path) {
+/* The first element whose key compares strictly beyond every earlier one in
+   the direction of `sign`: +1 for the largest, -1 for the smallest. */
+static VbVal extreme_by(VbVal f, VbVal v, const char *path, int sign) {
   VbVec *s = vb_as_vec(v);
   vb_require(s->n > 0, path, "len xs > 0");
   size_t best = 0; VbVal bk = vb_apply1(f, s->a[0]);
   for (size_t i = 1; i < s->n; i++) {
     VbVal k = vb_apply1(f, s->a[i]);
-    if (vb_cmp(k, bk) > 0) { best = i; bk = k; }
+    if (vb_cmp(k, bk) * sign > 0) { best = i; bk = k; }
   }
   return s->a[best];
 }
-VbVal vb_min_by(VbVal f, VbVal v, const char *path) {
-  VbVec *s = vb_as_vec(v);
-  vb_require(s->n > 0, path, "len xs > 0");
-  size_t best = 0; VbVal bk = vb_apply1(f, s->a[0]);
-  for (size_t i = 1; i < s->n; i++) {
-    VbVal k = vb_apply1(f, s->a[i]);
-    if (vb_cmp(k, bk) < 0) { best = i; bk = k; }
-  }
-  return s->a[best];
+VbVal vb_max_by(VbVal f, VbVal v, const char *path) { return extreme_by(f, v, path, 1); }
+VbVal vb_min_by(VbVal f, VbVal v, const char *path) { return extreme_by(f, v, path, -1); }
+/* Stable merge sort on (key, element) pairs: each key is computed once, where
+   the insertion sort it replaces called `f` twice per comparison, O(n²) times. */
+typedef struct { VbVal key, val; } KeyVal;
+static void merge_sort(KeyVal *a, KeyVal *tmp, size_t n) {
+  if (n < 2) return;
+  size_t h = n / 2;
+  merge_sort(a, tmp, h);
+  merge_sort(a + h, tmp, n - h);
+  size_t i = 0, j = h, k = 0;
+  /* `<=` takes from the left on a tie, which is what keeps it stable. */
+  while (i < h && j < n) tmp[k++] = vb_cmp(a[i].key, a[j].key) <= 0 ? a[i++] : a[j++];
+  while (i < h) tmp[k++] = a[i++];
+  while (j < n) tmp[k++] = a[j++];
+  memcpy(a, tmp, n * sizeof *a);
 }
 VbVal vb_sort_by(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
+  KeyVal *kv = vb_alloc(sizeof(KeyVal) * (s->n ? s->n : 1));
+  KeyVal *tmp = vb_alloc(sizeof(KeyVal) * (s->n ? s->n : 1));
+  for (size_t i = 0; i < s->n; i++) { kv[i].val = s->a[i]; kv[i].key = vb_apply1(f, s->a[i]); }
+  merge_sort(kv, tmp, s->n);
   VbVec *w = vec_alloc(s->n);
-  for (size_t i = 0; i < s->n; i++) vec_push(w, vb_dup(s->a[i]));
-  /* Insertion sort: stable, tiny, and the bootstrap never sorts anything big.
-   * vibec debt: swap for a merge sort if a program sorts more than ~10k items. */
-  for (size_t i = 1; i < w->n; i++) {
-    VbVal x = w->a[i]; VbVal kx = vb_apply1(f, x);
-    size_t j = i;
-    while (j > 0 && vb_cmp(vb_apply1(f, w->a[j - 1]), kx) > 0) { w->a[j] = w->a[j - 1]; j--; }
-    w->a[j] = x;
-  }
+  for (size_t i = 0; i < s->n; i++) vec_push(w, vb_dup(kv[i].val));
+  free(kv);
+  free(tmp);
   return wrap_vec(w);
 }
 VbVal vb_rev(VbVal v) {
@@ -501,7 +507,7 @@ VbVal vb_range(VbVal a, VbVal b) {
 
 VbVal vb_split(VbVal c, VbVal s) {
   VbStr *x = vb_as_str(s);
-  char sep = (char)(c.tag == VB_CHAR ? c.v.c : (uint32_t)vb_as_int(c));
+  char sep = (char)vb_as_int(c);
   VbVec *w = vec_alloc(4);
   size_t start = 0;
   for (size_t i = 0; i <= x->n; i++) {
@@ -588,17 +594,29 @@ VbVal vb_starts_with(VbVal s, VbVal p) {
   VbStr *x = vb_as_str(s), *y = vb_as_str(p);
   return vb_bool(y->n <= x->n && memcmp(x->p, y->p, y->n) == 0);
 }
+/* The first index at or after `from` where `y` occurs in `x`, or SIZE_MAX.
+   `memchr` jumps to each candidate first byte, so a scan costs a comparison
+   only where the needle could start. An empty needle is found at `from`.
+   ponytail: still O(n*m) on adversarial input; two-way if a profile blames it. */
+static size_t str_find(const VbStr *x, const VbStr *y, size_t from) {
+  if (y->n == 0) return from <= x->n ? from : SIZE_MAX;
+  if (y->n > x->n) return SIZE_MAX;
+  size_t last = x->n - y->n;
+  for (size_t i = from; i <= last;) {
+    const char *c = memchr(x->p + i, y->p[0], last - i + 1);
+    if (!c) return SIZE_MAX;
+    i = (size_t)(c - x->p);
+    if (memcmp(c, y->p, y->n) == 0) return i;
+    i++;
+  }
+  return SIZE_MAX;
+}
 VbVal vb_contains(VbVal s, VbVal p) {
-  VbStr *x = vb_as_str(s), *y = vb_as_str(p);
-  if (y->n == 0) return vb_bool(true);
-  if (y->n > x->n) return vb_bool(false);
-  for (size_t i = 0; i + y->n <= x->n; i++)
-    if (memcmp(x->p + i, y->p, y->n) == 0) return vb_bool(true);
-  return vb_bool(false);
+  return vb_bool(str_find(vb_as_str(s), vb_as_str(p), 0) != SIZE_MAX);
 }
 VbVal vb_to_cstr(VbVal s) { return vb_cstr_val(vb_as_str(s)->p); }
 VbVal vb_from_cstr(VbVal p) { return vb_strz((const char *)vb_as_ptr(p)); }
-VbVal vb_chr(VbVal c) { char b = (char)(c.tag == VB_CHAR ? c.v.c : (uint32_t)vb_as_int(c)); return vb_str(&b, 1); }
+VbVal vb_chr(VbVal c) { char b = (char)vb_as_int(c); return vb_str(&b, 1); }
 /* A substring is a copy, never a pointer into the argument: the prelude may
    not hand out an interior pointer as an owned value (docs/aliasing-audit.md). */
 VbVal vb_slice(VbVal i, VbVal j, VbVal s) {
@@ -607,32 +625,26 @@ VbVal vb_slice(VbVal i, VbVal j, VbVal s) {
   if (a > b || b > x->n) return vb_none();
   return vb_some(vb_str(x->p + a, (size_t)(b - a)));
 }
-/* ponytail: naive O(n*m) scan, same as vb_contains. Two-way or Boyer-Moore if a
-   profile ever blames it. */
 VbVal vb_index_of(VbVal s, VbVal p) {
-  VbStr *x = vb_as_str(s), *y = vb_as_str(p);
-  if (y->n > x->n) return vb_none();
-  for (size_t i = 0; i + y->n <= x->n; i++)
-    if (memcmp(x->p + i, y->p, y->n) == 0) return vb_some(vb_uint(i));
-  return vb_none();
+  size_t i = str_find(vb_as_str(s), vb_as_str(p), 0);
+  return i == SIZE_MAX ? vb_none() : vb_some(vb_uint(i));
 }
 /* Non-overlapping, left to right. An empty needle replaces nothing. */
 VbVal vb_replace(VbVal s, VbVal from, VbVal to) {
   VbStr *x = vb_as_str(s), *f = vb_as_str(from), *t = vb_as_str(to);
   if (f->n == 0 || f->n > x->n) return vb_str(x->p, x->n);
   size_t hits = 0;
-  for (size_t i = 0; i + f->n <= x->n;) {
-    if (memcmp(x->p + i, f->p, f->n) == 0) { hits++; i += f->n; } else i++;
-  }
+  for (size_t i = str_find(x, f, 0); i != SIZE_MAX; i = str_find(x, f, i + f->n)) hits++;
   if (hits == 0) return vb_str(x->p, x->n);
   size_t n = x->n - hits * f->n + hits * t->n;
   char *buf = vb_alloc(n + 1);
-  size_t w = 0;
-  for (size_t i = 0; i < x->n;) {
-    if (i + f->n <= x->n && memcmp(x->p + i, f->p, f->n) == 0) {
-      memcpy(buf + w, t->p, t->n); w += t->n; i += f->n;
-    } else buf[w++] = x->p[i++];
+  size_t w = 0, done = 0; /* `done`: the input already copied */
+  for (size_t i = str_find(x, f, 0); i != SIZE_MAX; i = str_find(x, f, done)) {
+    memcpy(buf + w, x->p + done, i - done); w += i - done;
+    memcpy(buf + w, t->p, t->n); w += t->n;
+    done = i + f->n;
   }
+  memcpy(buf + w, x->p + done, x->n - done);
   return str_take(buf, n);
 }
 /* ponytail: ASCII only. Upgrade path is a UTF-8 case table, when a program that
@@ -647,16 +659,26 @@ VbVal vb_lower(VbVal s) {
   return str_take(buf, x->n);
 }
 
-static void sb_push(VbVec *acc, const char *s, size_t n) {
-  for (size_t i = 0; i < n; i++) vec_push(acc, vb_char((unsigned char)s[i]));
+/* A growable byte buffer for `show` and `fmt`. */
+typedef struct { char *p; size_t n, cap; } Sb;
+static void sb_push(Sb *acc, const char *s, size_t n) {
+  if (acc->n + n > acc->cap) {
+    size_t cap = acc->cap ? acc->cap : 64;
+    while (cap < acc->n + n) cap *= 2;
+    char *p = realloc(acc->p, cap);
+    if (!p) { fputs("vibe: out of memory\n", stderr); exit(70); }
+    acc->p = p; acc->cap = cap;
+  }
+  if (n) memcpy(acc->p + acc->n, s, n);
+  acc->n += n;
 }
-static VbVal sb_done(VbVec *acc) {
-  char *buf = vb_alloc(acc->n + 1);
-  for (size_t i = 0; i < acc->n; i++) buf[i] = (char)acc->a[i].v.c;
-  return str_take(buf, acc->n);
+static VbVal sb_done(Sb *acc) {
+  VbVal r = vb_str(acc->p ? acc->p : "", acc->n);
+  free(acc->p);
+  return r;
 }
 
-static void show_into(VbVec *acc, VbVal v) {
+static void show_into(Sb *acc, VbVal v) {
   char tmp[64];
   switch (v.tag) {
     case VB_UNIT: sb_push(acc, "()", 2); break;
@@ -698,25 +720,25 @@ static void show_into(VbVec *acc, VbVal v) {
   }
 }
 
-VbVal vb_show(VbVal v) { VbVec *acc = vec_alloc(32); show_into(acc, v); return sb_done(acc); }
+VbVal vb_show(VbVal v) { Sb acc = {0}; show_into(&acc, v); return sb_done(&acc); }
 
 VbVal vb_fmt(VbVal f, uint32_t n, ...) {
   VbStr *s = vb_as_str(f);
-  VbVal *args = n ? vb_alloc(sizeof(VbVal) * n) : NULL;
   va_list ap; va_start(ap, n);
-  for (uint32_t i = 0; i < n; i++) args[i] = va_arg(ap, VbVal);
-  va_end(ap);
-  VbVec *acc = vec_alloc(s->n + 16);
+  Sb acc = {0};
   uint32_t k = 0;
-  for (size_t i = 0; i < s->n; i++) {
-    if (s->p[i] == '{' && i + 1 < s->n && s->p[i + 1] == '}') {
-      if (k < n) show_into(acc, args[k++]); else sb_push(acc, "{}", 2);
+  size_t run = 0; /* start of the literal text not yet copied */
+  for (size_t i = 0; i + 1 < s->n; i++) {
+    if (s->p[i] == '{' && s->p[i + 1] == '}') {
+      sb_push(&acc, s->p + run, i - run);
+      if (k < n) { show_into(&acc, va_arg(ap, VbVal)); k++; } else sb_push(&acc, "{}", 2);
       i++;
-    } else {
-      sb_push(acc, s->p + i, 1);
+      run = i + 1;
     }
   }
-  return sb_done(acc);
+  sb_push(&acc, s->p + run, s->n - run);
+  va_end(ap);
+  return sb_done(&acc);
 }
 
 /* -------------------------------------------------------- conversions */
@@ -724,7 +746,7 @@ VbVal vb_fmt(VbVal f, uint32_t n, ...) {
 VbVal vb_to_f64(VbVal v) { return vb_float(vb_as_float(v)); }
 VbVal vb_to_f32(VbVal v) { return vb_float((double)(float)vb_as_float(v)); }
 VbVal vb_to_signed(VbVal v, int bits) {
-  int64_t x = v.tag == VB_FLOAT ? (int64_t)v.v.f : vb_as_int(v);
+  int64_t x = vb_as_int(v);
   switch (bits) {
     case 8: return vb_int((int8_t)x);
     case 16: return vb_int((int16_t)x);
@@ -928,7 +950,7 @@ VbVal vb_shr(VbVal a, VbVal n) {
 
 /* The inverse of `chr`: a character's code point. */
 VbVal vb_ord(VbVal c) {
-  return vb_uint(c.tag == VB_CHAR ? c.v.c : (uint64_t)vb_as_int(c));
+  return vb_uint(vb_as_uint(c));
 }
 
 VbVal vb_min(VbVal a, VbVal b) { return vb_cmp(a, b) <= 0 ? a : b; }
@@ -973,9 +995,8 @@ VbVal vb_read_stdin(void) {
     size_t got = fread(buf + n, 1, cap - n, stdin);
     n += got;
     if (n < cap) break; /* short read: end of file, or an error */
-    char *bigger = vb_alloc(cap * 2);
-    memcpy(bigger, buf, n);
-    free(buf);
+    char *bigger = realloc(buf, cap * 2);
+    if (!bigger) { fputs("vibe: out of memory\n", stderr); exit(70); }
     buf = bigger;
     cap *= 2;
   }
