@@ -416,7 +416,10 @@ fn a_lent_value_is_never_freed_by_the_callee() {
 fn the_runtime_holds_at_the_edges() {
     let (ok, out) = vibe(&["run", "tests/edges.vibe"]);
     assert!(ok, "edges.vibe failed to build or run:\n{out}");
-    assert_eq!(out.trim(), "False True Er Overflow None None None Some 4294967295");
+    assert_eq!(
+        out.trim(),
+        "False True Er Overflow None None None Some 4294967295"
+    );
 }
 
 /// `push_str` appends to a string it consumes: in place for an accumulator the

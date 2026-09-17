@@ -376,7 +376,11 @@ impl<'a> Gen<'a> {
         };
         f.params
             .iter()
-            .flat_map(|p| p.names.iter().map(move |_| !matches!(p.ty, Some(Ty::Ref(_)))))
+            .flat_map(|p| {
+                p.names
+                    .iter()
+                    .map(move |_| !matches!(p.ty, Some(Ty::Ref(_))))
+            })
             .enumerate()
             .filter_map(|(i, owned)| owned.then_some(i))
             .collect()
@@ -895,7 +899,12 @@ impl<'a> Gen<'a> {
             return c;
         }
         if let Some(ar) = self.arity.get(n).copied() {
-            return closure(&format!("vbf_{}", cname(n)), n, ar.max(1), self.owned_params(n));
+            return closure(
+                &format!("vbf_{}", cname(n)),
+                n,
+                ar.max(1),
+                self.owned_params(n),
+            );
         }
         if let Some(sig) = self.ck.ext.get(n) {
             let ar = fn_arity(&sig.ty);
@@ -909,7 +918,9 @@ impl<'a> Gen<'a> {
                 return b;
             }
             self.need_wrapper.insert(n.to_string());
-            let borrows = crate::infer::prelude_ty(n).map(crate::own::ty_borrows).unwrap_or_default();
+            let borrows = crate::infer::prelude_ty(n)
+                .map(crate::own::ty_borrows)
+                .unwrap_or_default();
             let owns = (0..ar).filter(|i| borrows.get(*i) == Some(&false));
             return closure(&format!("vbw_{}", cname(n)), n, ar, owns);
         }
@@ -1172,8 +1183,10 @@ impl<'a> Gen<'a> {
                     if args.len() == ar {
                         let (vs, temps) = self.args_with_temps(args, out);
                         let mut b = tpl;
-                        if matches!(n.as_str(), "push" | "set" | "insert" | "remove" | "push_str")
-                            && self.inplace.contains(&(span.file, span.line, span.col))
+                        if matches!(
+                            n.as_str(),
+                            "push" | "set" | "insert" | "remove" | "push_str"
+                        ) && self.inplace.contains(&(span.file, span.line, span.col))
                         {
                             b = b.replacen(&format!("vb_{}(", n), &format!("vb_{}_owned(", n), 1);
                         }
@@ -1316,7 +1329,10 @@ fn ffi_ret_diag(span: Span, t: &Ty) -> Diag {
 /// prelude function handing it a value it was only lent copies that one first;
 /// one that consumes none is a plain `vb_clos`, as a lambda is.
 fn closure(f: &str, name: &str, arity: usize, owns: impl IntoIterator<Item = usize>) -> String {
-    let bits = owns.into_iter().filter(|i| *i < 64).fold(0u64, |m, i| m | 1 << i);
+    let bits = owns
+        .into_iter()
+        .filter(|i| *i < 64)
+        .fold(0u64, |m, i| m | 1 << i);
     if bits == 0 {
         format!("vb_clos({}, {}, {})", f, cstring(name), arity)
     } else {

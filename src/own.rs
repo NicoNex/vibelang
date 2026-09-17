@@ -609,15 +609,20 @@ impl State<'_> {
                         Field(..) | Borrow(_) => false,
                         _ => !self.maybe_shared(first),
                     };
-                    if matches!(hn.as_str(), "push" | "set" | "insert" | "remove" | "push_str") && alone {
+                    if matches!(
+                        hn.as_str(),
+                        "push" | "set" | "insert" | "remove" | "push_str"
+                    ) && alone
+                    {
                         self.inplace.insert((e.span.file, e.span.line, e.span.col));
                     }
                 }
                 self.walk(h, Mode::Borrow, owned);
                 let acc = match (&h.kind, args.first().map(|a| &a.kind)) {
-                    (Var(hn), Some(Lambda(ps, _))) if hn == "fold" => {
-                        ps.first().filter(|p| self.accs.insert((*p).clone())).cloned()
-                    }
+                    (Var(hn), Some(Lambda(ps, _))) if hn == "fold" => ps
+                        .first()
+                        .filter(|p| self.accs.insert((*p).clone()))
+                        .cloned(),
                     _ => None,
                 };
                 // A saturated self-call is not a call: codegen overwrites the

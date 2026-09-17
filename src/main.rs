@@ -208,7 +208,11 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     // read its imports too. Walk `prog.units` — each carries its own `src`,
     // `comments` and file id — when formatting a whole project is wanted.
     if o.cmd == "fmt" {
-        let canon = view::reattach(&view::render(&root, &checked, view::Mode::Canon), &src, &comments);
+        let canon = view::reattach(
+            &view::render(&root, &checked, view::Mode::Canon),
+            &src,
+            &comments,
+        );
         if canon == src {
             return Ok(ExitCode::SUCCESS);
         }
