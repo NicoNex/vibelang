@@ -325,3 +325,25 @@ fn guards_lend_what_they_can() {
     let (ok, out) = vibe(&["check", "--prove", "tests/refine_guard.vibe"]);
     assert!(ok, "every obligation follows from a guard:\n{out}");
 }
+
+/// `set`, `max_by` and `min_by` abort at run time on a bad index or an empty
+/// vector; those are compile-time obligations like `get`'s.
+#[test]
+fn set_and_max_by_carry_their_run_time_checks() {
+    if !have_z3() {
+        return;
+    }
+    let dir = std::env::temp_dir().join("vibe-refine-prelude");
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("mx.vibe");
+    std::fs::write(
+        &f,
+        "mod Mx\n\nf (v:&Vec U64) : U64 = max_by (\\x -> x) v\n\ng (v:Vec U64) : Vec U64 = set v 3 9\n\nh (v:&Vec U64, len v>0) : U64 = min_by (\\x -> x) v\n",
+    )
+    .unwrap();
+    let (ok, out) = vibe(&["check", "--prove", f.to_str().unwrap()]);
+    assert!(!ok, "{out}");
+    assert!(out.contains("precondition of `max_by`"), "{out}");
+    assert!(out.contains("index is inside `v`"), "{out}");
+    assert!(!out.contains("min_by"), "h has the precondition:\n{out}");
+}

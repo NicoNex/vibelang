@@ -1163,7 +1163,26 @@ impl<'a> Gen<'a> {
         if is_checked(name) {
             return; // §7.5: the checked forms discharge the obligation at run time
         }
-        if matches!(name, "get" | "byte_at") && args.len() == 2 {
+        // The run-time checks of the prelude that have a static form: an index
+        // inside its vector or string, and a non-empty vector to pick from.
+        if matches!(name, "max_by" | "min_by") && args.len() == 2 {
+            match as_name(strip(args[1])) {
+                Some(v) => {
+                    let v = self.var(&v);
+                    let l = self.len_sym(&v);
+                    self.push(
+                        e.span,
+                        "refine.unproven",
+                        &format!("cannot prove the precondition of `{name}`: len {v} > 0"),
+                        format!("len {v} > 0"),
+                        format!("(> {l} 0)"),
+                    );
+                }
+                None => self.skipped += 1,
+            }
+            return;
+        }
+        if matches!(name, "get" | "byte_at" | "set") && args.len() >= 2 {
             let got = (as_name(strip(args[0])), self.term(args[1]));
             if let (Some(v), Some((ti, _))) = got {
                 let v = self.var(&v);
