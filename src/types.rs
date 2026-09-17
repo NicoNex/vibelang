@@ -549,12 +549,108 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 
-/// A pattern every value of its type matches: `_`, a name, or a tuple of those.
-fn irrefutable(p: &Pat) -> bool {
+/// The constructor at the head of a pattern, for exhaustiveness. A literal or
+/// a list length is a constructor of a type with infinitely many.
+#[derive(Clone, PartialEq)]
+enum Head {
+    Ctor(String),
+    Tuple(usize),
+    Lit(String),
+    List(usize),
+}
+
+/// `None` for a pattern that matches anything; otherwise its head and the
+/// patterns under it.
+fn head(p: &Pat) -> Option<(Head, Vec<Pat>)> {
     match p {
-        Pat::Wild | Pat::Var(_) => true,
-        Pat::Tuple(ps) => ps.iter().all(irrefutable),
-        _ => false,
+        Pat::Wild | Pat::Var(_) => None,
+        Pat::Bool(b) => Some((Head::Ctor(if *b { "True" } else { "False" }.into()), vec![])),
+        Pat::Ctor(c, ps) => Some((Head::Ctor(c.clone()), ps.clone())),
+        Pat::Tuple(ps) => Some((Head::Tuple(ps.len()), ps.clone())),
+        Pat::List(ps) => Some((Head::List(ps.len()), ps.clone())),
+        Pat::Int(_) | Pat::Float(_) | Pat::Str(_) | Pat::Char(_) => {
+            Some((Head::Lit(format!("{p:?}")), vec![]))
+        }
+    }
+}
+
+/// The rows that match `h` in their first column, with that column replaced by
+/// the `k` patterns under it (Maranget's specialisation).
+fn specialise(rows: &[Vec<Pat>], h: &Head, k: usize) -> Vec<Vec<Pat>> {
+    rows.iter()
+        .filter_map(|r| {
+            let under = match head(&r[0]) {
+                None => vec![Pat::Wild; k],
+                Some((rh, ps)) if rh == *h => ps,
+                Some(_) => return None,
+            };
+            Some(under.into_iter().chain(r[1..].iter().cloned()).collect())
+        })
+        .collect()
+}
+
+impl Checker {
+    /// Whether some value matches `q` and no row of `rows` (Maranget,
+    /// "Warnings for pattern matching"). A match is exhaustive when `_` is not
+    /// useful after its arms.
+    fn useful(&self, rows: &[Vec<Pat>], q: &[Pat]) -> bool {
+        let Some(first) = q.first() else {
+            return rows.is_empty();
+        };
+        match head(first) {
+            Some((h, ps)) => {
+                let k = ps.len();
+                let q2: Vec<Pat> = ps.into_iter().chain(q[1..].iter().cloned()).collect();
+                self.useful(&specialise(rows, &h, k), &q2)
+            }
+            None => {
+                let heads: Vec<Head> = rows
+                    .iter()
+                    .filter_map(|r| head(&r[0]).map(|(h, _)| h))
+                    .collect();
+                match self.signature(&heads) {
+                    Some(sig) if sig.iter().all(|(h, _)| heads.contains(h)) => {
+                        sig.iter().any(|(h, k)| {
+                            let q2: Vec<Pat> = std::iter::repeat_n(Pat::Wild, *k)
+                                .chain(q[1..].iter().cloned())
+                                .collect();
+                            self.useful(&specialise(rows, h, *k), &q2)
+                        })
+                    }
+                    _ => {
+                        let rest: Vec<Vec<Pat>> = rows
+                            .iter()
+                            .filter(|r| head(&r[0]).is_none())
+                            .map(|r| r[1..].to_vec())
+                            .collect();
+                        self.useful(&rest, &q[1..])
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every constructor of the type the heads belong to, with its arity, or
+    /// `None` when that type has infinitely many (literals, list lengths) or
+    /// cannot be told from the heads.
+    fn signature(&self, heads: &[Head]) -> Option<Vec<(Head, usize)>> {
+        match heads.first()? {
+            Head::Tuple(n) => Some(vec![(Head::Tuple(*n), *n)]),
+            Head::Ctor(c) if c == "True" || c == "False" => Some(vec![
+                (Head::Ctor("True".into()), 0),
+                (Head::Ctor("False".into()), 0),
+            ]),
+            Head::Ctor(c) => {
+                let owner = &self.data.ctors.get(c)?.owner;
+                self.data
+                    .variants
+                    .get(owner)?
+                    .iter()
+                    .map(|v| Some((Head::Ctor(v.clone()), self.data.ctors.get(v)?.args.len())))
+                    .collect()
+            }
+            Head::Lit(_) | Head::List(_) => None,
+        }
     }
 }
 
@@ -579,51 +675,47 @@ impl Checker {
         let pending = std::mem::take(&mut self.pending_matches);
         for (span, scrut, pats, path) in pending {
             let ty = self.resolve(&scrut);
-            let has_catchall = pats.iter().any(irrefutable);
-            if has_catchall {
+            let rows: Vec<Vec<Pat>> = pats.iter().map(|p| vec![p.clone()]).collect();
+            if !self.useful(&rows, &[Pat::Wild]) {
                 continue;
             }
-            let missing: Vec<String> = match &ty {
-                T::Con(n, _) if n == "Bool" => {
-                    let mut m = Vec::new();
-                    let covered = |b: bool| {
-                        pats.iter().any(|p| matches!(p, Pat::Bool(x) if *x == b)
-                            || matches!(p, Pat::Ctor(c, _) if (c == "True") == b && (c == "True" || c == "False")))
-                    };
-                    if !covered(true) {
-                        m.push("True".into());
-                    }
-                    if !covered(false) {
-                        m.push("False".into());
-                    }
-                    m
-                }
-                T::Con(n, _) if self.data.variants.contains_key(n) => {
-                    let all = self.data.variants[n].clone();
-                    all.into_iter()
-                        // A constructor is covered by an arm that takes every
-                        // payload: `|Some 3` leaves `Some 4` to nobody.
-                        .filter(|c| {
-                            !pats.iter().any(
-                                |p| matches!(p, Pat::Ctor(pc, subs) if pc == c && subs.iter().all(irrefutable)),
-                            )
-                        })
-                        .collect()
-                }
-                T::Con(n, _) if n == "Vec" => {
-                    let lens: Vec<usize> = pats
-                        .iter()
-                        .filter_map(|p| match p {
-                            Pat::List(xs) => Some(xs.len()),
-                            _ => None,
-                        })
-                        .collect();
-                    let next = (0..).find(|k| !lens.contains(k)).unwrap();
-                    vec![format!("a list of length {}", next)]
-                }
-                T::Tuple(_) => vec!["the remaining combinations".into()],
-                _ => vec!["any other value".into()],
+            // Name what is missing: the constructors of the column no arm
+            // finishes covering, or, for an open-ended type, a shape.
+            let heads: Vec<Head> = pats
+                .iter()
+                .filter_map(|p| head(p).map(|(h, _)| h))
+                .collect();
+            let mut missing: Vec<String> = match self.signature(&heads) {
+                Some(sig) => sig
+                    .into_iter()
+                    .filter(|(h, k)| {
+                        let spec = specialise(&rows, h, *k);
+                        self.useful(&spec, &vec![Pat::Wild; *k])
+                    })
+                    .map(|(h, k)| match h {
+                        Head::Ctor(c) if k > 0 => format!("{c}{}", " _".repeat(k)),
+                        Head::Ctor(c) => c,
+                        _ => "the remaining combinations".into(),
+                    })
+                    .collect(),
+                None => Vec::new(),
             };
+            if missing.is_empty() {
+                missing.push(match &ty {
+                    T::Con(n, _) if n == "Vec" => {
+                        let lens: Vec<usize> = heads
+                            .iter()
+                            .filter_map(|h| match h {
+                                Head::List(n) => Some(*n),
+                                _ => None,
+                            })
+                            .collect();
+                        let next = (0..).find(|k| !lens.contains(k)).unwrap_or(0);
+                        format!("a list of length {}", next)
+                    }
+                    _ => "any other value".into(),
+                });
+            }
             if !missing.is_empty() {
                 let list = missing.join(", ");
                 self.errors.push(
@@ -638,7 +730,7 @@ impl Checker {
                         "add `|{} -> ...`",
                         missing
                             .first()
-                            .map(|m| if m.contains(' ') {
+                            .map(|m| if m.contains(' ') && !m.ends_with(" _") {
                                 "_".to_string()
                             } else {
                                 m.clone()

@@ -449,4 +449,20 @@ fn a_refutable_payload_does_not_cover_its_constructor() {
     .unwrap();
     let (ok, out) = vibe(&["check", f.to_str().unwrap()]);
     assert!(!ok && out.contains("match.nonexhaustive"), "{out}");
+    // Arms that cover a constructor together still cover it.
+    std::fs::write(
+        &f,
+        "mod Ex\n\nf (o:Opt (Opt U64)) : U64 =\n  ?o |Some (Some x) -> x\n     |Some None -> 0\n     |None -> 1\n  end\n\ng (p:(Bool, Bool)) : U64 =\n  ?p |(True, _) -> 1\n     |(False, True) -> 2\n     |(False, False) -> 3\n  end\n",
+    )
+    .unwrap();
+    let (ok, out) = vibe(&["check", f.to_str().unwrap()]);
+    assert!(ok, "{out}");
+    // A literal past i64::MAX is a U64, never a signed value.
+    std::fs::write(
+        &f,
+        "mod Ex\n\nf (x:I64) : Bool = x < 0\n\ng : Bool = f 18446744073709551615\n",
+    )
+    .unwrap();
+    let (ok, out) = vibe(&["check", f.to_str().unwrap()]);
+    assert!(!ok && out.contains("type.mismatch"), "{out}");
 }
