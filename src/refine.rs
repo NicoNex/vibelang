@@ -1153,14 +1153,8 @@ impl<'a> Gen<'a> {
         self.push(
             e.span,
             "overflow",
-            &format!(
-                "cannot prove `{} {} {}` stays in {}",
-                show(a),
-                op,
-                show(b),
-                ty
-            ),
-            format!("{} {} {} <= {}", show(a), op, show(b), hi),
+            &format!("cannot prove `{}` stays in {}", show(e), ty),
+            format!("{} <= {}", show(e), hi),
             format!("(and (<= {t} {hi}) (>= {t} {lo}))"),
         );
     }
@@ -1553,7 +1547,8 @@ fn show(e: &Expr) -> String {
         ExprKind::Not(i) => format!("!{}", show(i)),
         ExprKind::Field(b, f) => format!("{}.{}", show(b), f),
         ExprKind::Binop(op, a, b) => {
-            // Parenthesise a side only where precedence would regroup it.
+            // Parenthesise a side only where precedence would regroup it: every
+            // operator groups to the left, so an equal one on the right needs them.
             let prec = |o: &str| match o {
                 "||" => 1,
                 "&&" => 2,
@@ -1563,10 +1558,7 @@ fn show(e: &Expr) -> String {
                 _ => 6,
             };
             let side = |x: &Expr, right: bool| match &x.kind {
-                ExprKind::Binop(o, ..)
-                    if prec(o) < prec(op)
-                        || (right && prec(o) == prec(op) && matches!(op.as_str(), "-" | "/")) =>
-                {
+                ExprKind::Binop(o, ..) if prec(o) < prec(op) || (right && prec(o) == prec(op)) => {
                     format!("({})", show(x))
                 }
                 _ => show(x),
@@ -1601,6 +1593,18 @@ mod tests {
         let m = parser::parse(toks).expect("parses");
         let ck = infer::check(&m).expect("checks");
         obligations(&m, &ck).0
+    }
+
+    /// An obligation's text keeps the grouping of the source: an equal operator
+    /// on the right needs its parentheses back.
+    #[test]
+    fn a_right_operand_keeps_its_parentheses() {
+        let o = obs_of("mod T\n\nf (a:U64) (b:U64) (c:U64, c>0) : U64 = a * (b / c)\n");
+        assert!(
+            o.iter().any(|o| o.msg.contains("`a * (b / c)`")),
+            "{:?}",
+            o.iter().map(|o| &o.msg).collect::<Vec<_>>()
+        );
     }
 
     /// `load`, in miniature: the `Ok []` arm is the only reason the `Ok ys`
