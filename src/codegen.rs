@@ -1162,6 +1162,15 @@ impl<'a> Gen<'a> {
                     if args.len() == ar {
                         let (vs, temps) = self.args_with_temps(args, out);
                         let mut b = tpl;
+                        if matches!(n.as_str(), "push" | "set")
+                            && self.inplace.contains(&(span.file, span.line, span.col))
+                        {
+                            b = b.replacen("vb_push(", "vb_push_owned(", 1).replacen(
+                                "vb_set(",
+                                "vb_set_owned(",
+                                1,
+                            );
+                        }
                         for (i, v) in vs.iter().enumerate() {
                             b = b.replace(&format!("${}", i), v);
                         }

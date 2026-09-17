@@ -28,8 +28,9 @@ use std::collections::{HashMap, HashSet};
 /// Everything the ownership pass finds, from one walk over the module.
 pub struct Analysis {
     pub errors: Vec<Diag>,
-    /// Spans of `{r with ...}` updates whose base is a uniquely owned value, so
-    /// codegen can mutate in place instead of copying (spec §4.3).
+    /// Spans of `{r with ...}` updates, and of `push`/`set` calls, whose record
+    /// or vector is uniquely owned, so codegen can mutate in place instead of
+    /// copying (spec §4.3).
     pub inplace: HashSet<(usize, usize, usize)>,
     /// Where every owned value dies, in source order. The same traversal that
     /// reports affine misuse computes it, so the two cannot disagree. Codegen
@@ -579,6 +580,19 @@ impl State<'_> {
             // Reading a field reads through the value; it does not consume it.
             Field(x, _) => self.walk(x, Mode::Borrow, owned),
             App(h, args) => {
+                // `push v x` / `set v i x` on a vector this frame owns alone
+                // and has not handed on grows or writes it in place: the old
+                // spine is unreachable once the call has it. A vector that may
+                // alias another value's element keeps the copy.
+                if let (Var(hn), Some(Var(v))) = (&h.kind, args.first().map(|a| &a.kind)) {
+                    if matches!(hn.as_str(), "push" | "set")
+                        && owned.contains(&v.as_str())
+                        && !self.moved.contains_key(v)
+                        && !self.shared.contains(v)
+                    {
+                        self.inplace.insert((e.span.file, e.span.line, e.span.col));
+                    }
+                }
                 self.walk(h, Mode::Borrow, owned);
                 // A saturated self-call is not a call: codegen overwrites the
                 // parameters and loops (§11.2). A parameter still owned here is

@@ -357,6 +357,21 @@ VbVal vb_push(VbVal v, VbVal x) {
   return wrap_vec(w);
 }
 
+/* The same two operations on a vector the caller owns alone (own.rs decides):
+ * the spine grows or is written in place, amortised O(1) per push rather than
+ * a copy of every element. */
+VbVal vb_push_owned(VbVal v, VbVal x) {
+  vec_push(vb_as_vec(v), x);
+  return v;
+}
+VbVal vb_set_owned(VbVal v, VbVal i, VbVal x, const char *path) {
+  VbVec *s = vb_as_vec(v);
+  uint64_t k = vb_as_uint(i);
+  vb_require(k < s->n, path, "i < len xs");
+  s->a[k] = x;
+  return v;
+}
+
 VbVal vb_byte_at(VbVal s, VbVal i, const char *path) {
   VbStr *x = vb_as_str(s);
   uint64_t k = vb_as_uint(i);

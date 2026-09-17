@@ -193,6 +193,8 @@ VbVal vb_pow(VbVal a, VbVal b);
 VbVal vb_floor(VbVal a);
 VbVal vb_show_exact(VbVal a);
 VbVal vb_byte_at(VbVal s, VbVal i, const char *path);
+VbVal vb_push_owned(VbVal v, VbVal x);
+VbVal vb_set_owned(VbVal v, VbVal i, VbVal x, const char *path);
 
 /* --- IO --- */
 VbVal vb_read(VbVal path);

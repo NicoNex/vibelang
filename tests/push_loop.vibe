@@ -1,0 +1,18 @@
+mod PushLoop
+
+;; `acc` is owned and handed straight to `push`, so it grows in place.
+go (k:U64) (acc:Vec U64) : Vec U64 =
+  ?k |0 -> acc
+     |_ -> go (k - 1) (push acc k)
+  end
+
+;; `w` may be the element `vv` still holds, so `push` must copy it.
+aliased (vv:Vec (Vec U64)) : Size =
+  let w = get &vv 0 in
+  let x = push w 9 in
+  len &(get &vv 0) * 10 + len &x
+
+main : E! Unit =
+  let v = go 200000 empty in
+  out (fmt "{} {} {}"
+           (len &(set v 3 7)) (aliased [[1]]) (get &(set (go 5 empty) 0 42) 0))

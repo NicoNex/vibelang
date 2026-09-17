@@ -478,3 +478,14 @@ fn a_literal_two_records_could_build_resolves_the_same_way_every_run() {
         assert!(ok, "{out}");
     }
 }
+
+/// `push` and `set` copied the whole spine on every call and never freed the
+/// old one: 200,000 pushes in a loop took 25 s and 4 GB. On a vector the frame
+/// owns alone they now work in place; on one that may be another value's
+/// element (`aliased`) they still copy, so the original stays length 1.
+#[test]
+fn an_owned_vector_grows_in_place_and_an_aliased_one_is_copied() {
+    let (ok, out) = vibe(&["run", "tests/push_loop.vibe"]);
+    assert!(ok, "push_loop.vibe failed to build or run:\n{out}");
+    assert_eq!(out.trim(), "200000 12 42");
+}

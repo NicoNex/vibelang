@@ -34,3 +34,4 @@
 /tests/bytes
 /tests/tuple_total
 /tests/signal
+/tests/push_loop
