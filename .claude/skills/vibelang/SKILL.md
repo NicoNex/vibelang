@@ -20,9 +20,28 @@ Vibelang is designed to be written by a machine and checked by a compiler. The r
 the feature: a program that compiles has already been proved total, memory-safe without a
 GC, exhaustive, and free of the division, index and overflow faults a solver could find.
 
+Five things carry that, and every rule below is one of them applied:
+
+1. **z3 discharges the refinements.** A type carries a proposition (`len ts>0`), and the
+   solver hunts a counterexample before the binary exists. No run-time check survives it.
+2. **Affine ownership, no GC and no lifetimes.** One owner, move by default, `&` borrows
+   for the call. The compiler computes where each value dies and emits the free there.
+   Never write a deallocation.
+3. **Termination is proved.** Divergence is an effect: a pure recursive function shows a
+   measure, an `E!` one may loop for ever.
+4. **The CLI is the token budget.** `--sig-only`, `patch`, `proof`, `--diag=struct` exist so
+   a task loads the nodes it touches and nothing else, and a diagnostic is a `fix:` line to
+   apply rather than prose to read. Use them — that is the protocol below.
+5. **It is C.** Portable C99 out, `ext c` in, `exp c` out: 50 years of libraries, and a new
+   module can be injected into an old system as an ordinary static library plus a header.
+
+When a program compiles, the remaining risk is that the requirements were misunderstood —
+not that memory, arithmetic or the loop bound were.
+
 `vibelang-spec.md` at the repo root is normative. This skill is the working subset, plus
 the places where today's compiler is narrower than the spec. Everything here compiles
-against the compiler in this tree.
+against the compiler in this tree (2026-09-17: 167 tests green, 20 `lib/` modules, each
+passing `--prove`).
 
 ## Spend as few tokens as the compiler lets you
 
@@ -34,8 +53,8 @@ touches. Measured on `lib/regex.vibe`: the file is ~14k tokens, `--sig-only` ~1.
    the one body you need (it prints the node and its hash). Do not read a whole `.vibe`.
 2. **Find callers/callees** with `vibe deps f.vibe | grep name`.
 3. **Look up the library** with `vibe view --sig-only lib/<module>.vibe`, or `grep -A40
-   '^## Module' references/stdlib.md`. Do not load `stdlib.md` whole; check it before
-   writing a helper.
+   '^## Regex' references/stdlib.md` — one section per module, named after it. Do not load
+   `stdlib.md` whole; check it before writing a helper.
 4. **Write dense code**: one line per declaration where it fits, no alignment, no body
    type annotations. `vibe fmt` lays it out; do not read the file back afterwards.
 5. **Change an existing declaration** with `vibe patch f.vibe <path> <hash> '<node>'`

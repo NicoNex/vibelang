@@ -63,15 +63,23 @@ error[refine.unproven]: cannot prove the precondition of `mean`: len xs > 0
    = fix: Avg.report.sig += len xs > 0
 ```
 
-## 60 seconds
+## Install
 
-No dependencies: the compiler is a single Rust crate with an empty dependency graph. You need a Rust toolchain, a C compiler, and `z3` on PATH if you want proofs.
+Three things have to be on your machine: a **Rust toolchain** to build the compiler, a **C compiler** (`cc`, `gcc` or `clang`) because Vibelang emits C99, and **`z3`** on `PATH` — only needed for `--prove`, everything else works without it.
 
 ```bash
+# Debian/Ubuntu: apt install build-essential z3
+# macOS:         brew install z3          (cc comes with the Command Line Tools)
+# Arch:          pacman -S base-devel z3
+
 git clone https://github.com/NicoNex/vibelang && cd vibelang
-cargo build
-./target/debug/vibe run examples/ledger.vibe
+cargo install --path .          # puts `vibe` in ~/.cargo/bin
+vibe run examples/ledger.vibe   # should print the ledger report
 ```
+
+The compiler itself is a single Rust crate with an empty dependency graph — nothing else is downloaded. To work in the tree instead of installing, `cargo build` and use `./target/debug/vibe`.
+
+## 60 seconds
 
 ```
 vibe check   file.vibe [--prove]   types, ownership, totality, refinements
@@ -151,7 +159,7 @@ How much of this is delivered rather than intended is the next section. The comp
 
 ## Status
 
-**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, deep drops for vectors and records, a hash map that keeps insertion order, strings that grow in place (`push_str`), bit operations, a deep and generic `dup`, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, record fields resolved per use site, four projection views, the whole CLI above, a standard library in `lib/` with JSON, CSV and regular expressions. 169 tests, green.
+**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, deep drops for vectors and records, a hash map that keeps insertion order, strings that grow in place (`push_str`), bit operations, a deep and generic `dup`, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, record fields resolved per use site, four projection views, the whole CLI above, a standard library in `lib/` with JSON, CSV and regular expressions. 167 tests, green.
 
 **Partial** — inference is not bidirectional, so a lambda parameter takes no type from the signature it is passed to, and a `.field` there has to be unambiguous; refinements on prelude builtins are hardcoded; a proof about a float is a proof about a mathematical real; a closure's captures are not freed with it, and a value that may alias one the caller owns is not freed at all — `vibe view --drops` counts both; a call's result read only by a `match` is never freed; every closure is on the heap; values are dynamically tagged, so any performance claim today is a claim about a boxed interpreter.
 
