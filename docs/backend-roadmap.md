@@ -1312,7 +1312,7 @@ Add a non-variadic form of each — `vb_obj_n(const VbInfo*, uint32_t tag, uint3
 
 - [ ] **Step 3: Closures**
 
-`VbClos { VbFn fn; const char *name; uint32_t arity, nargs; VbVal *args; }` with `VbFn = VbVal (*)(VbVal *)`. Emitting one from Cranelift is `vb_clos(func_addr, name_ptr, arity)`, where `func_addr` comes from `declare_func_in_func` plus `func_addr`. Partial application already lives in `vb_apply1`/`vb_applyn`; do not reimplement it in the backend.
+`VbClos { VbFn fn; const char *name; uint32_t arity, nargs; VbVal *args; }` with `VbFn = VbVal (*)(VbVal *)`. Emitting one from Cranelift is `vb_clos(func_addr, name_ptr, arity)`, where `func_addr` comes from `declare_func_in_func` plus `func_addr`. Partial application already lives in `vb_apply1`; do not reimplement it in the backend.
 
 Note while you are here: the C backend has a latent bug in this area — `Gen::value_ref` references a `vbe_<name>` wrapper for an `ext c` symbol used as a value, and no such wrapper is ever emitted. Fix it in the C backend in its own commit before mirroring the behaviour, or you will faithfully reproduce a bug.
 

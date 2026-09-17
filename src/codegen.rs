@@ -1059,8 +1059,8 @@ impl<'a> Gen<'a> {
     }
 
     // ponytail: every closure owns heap-allocated captures. Escape analysis
-    // (spec §4.6) would put the non-escaping ones on the stack; with a bump
-    // allocator the win is small, so it waits until allocation costs something.
+    // (spec §4.6) would put the non-escaping ones on the stack, saving a
+    // malloc/free pair per closure.
     fn lambda(&mut self, ps: &[String], body: &Expr, span: Span, out: &mut String) -> String {
         let mut bound: HashSet<String> = ps.iter().cloned().collect();
         let mut free = Vec::new();

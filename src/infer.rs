@@ -311,7 +311,7 @@ fn collect_type(c: &mut Checker, t: &TypeDecl) {
             }
             c.data.variants.insert(t.name.clone(), names);
         }
-        TypeBody::Opaque => c.data.opaque.push(t.name.clone()),
+        TypeBody::Opaque => {}
     }
 }
 

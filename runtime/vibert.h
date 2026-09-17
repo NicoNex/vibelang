@@ -97,7 +97,6 @@ void vb_fail(const char *path, const char *what);
 
 /* --- application --- */
 VbVal vb_apply1(VbVal f, VbVal x);
-VbVal vb_applyn(VbVal f, uint32_t n, VbVal *xs);
 
 /* --- arithmetic / comparison --- */
 VbVal vb_add(VbVal a, VbVal b);

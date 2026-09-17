@@ -63,8 +63,7 @@ pub enum DropWhen {
 }
 
 /// Where every owned value dies. The same traversal that reports affine misuse
-/// computes it, so the two cannot disagree. Nothing consumes this yet: the
-/// frontend records the points and the backend still brackets whole frames.
+/// computes it, so the two cannot disagree. Codegen emits a free at each one.
 pub fn drop_points(m: &Module, ck: &Checked) -> Vec<DropSite> {
     let mut v = run(m, ck).2;
     v.sort_by_key(|d| (d.at.file, d.at.line, d.at.col, d.name.clone()));
@@ -87,9 +86,8 @@ type Analysis = (
 
 fn run(m: &Module, ck: &Checked) -> Analysis {
     let sigs = borrowed_params(m);
-    // `escape::releasable` answers "may this frame free in bulk"; with drops
-    // the same question is per value, and the answer it gives — this call may
-    // put a pointer somewhere we cannot see — is the one that still matters.
+    // `escape::releasable` answers whether a call may put a pointer somewhere
+    // this frame cannot see; a value that reaches one is not freed here.
     let releasable = crate::escape::releasable(m, ck);
     let reaches_c: HashSet<String> = m
         .exts()

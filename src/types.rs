@@ -107,7 +107,6 @@ pub struct Data {
     pub ctors: HashMap<String, CtorInfo>,
     /// type name -> constructor names, in declaration order.
     pub variants: HashMap<String, Vec<String>>,
-    pub opaque: Vec<String>,
     /// field name -> owning record type, for the one case a field has to be
     /// resolved by its name alone: a record literal or a `.field` read whose
     /// base type inference never pinned down. It holds the *first* record to
@@ -128,8 +127,6 @@ type Opt t = Some t | None
 type Fault = Overflow | DivZero | OutOfBounds | BadParse
 ";
 
-/// Prelude signatures. `name : type`, one per line. Everything here is
-/// implemented by the C runtime in runtime/vibert.c.
 /// Prelude names whose result *is* part of an argument rather than a fresh
 /// value: `get` returns the element itself (`return s->a[k]`), `to_cstr` points
 /// into a string's bytes (docs/aliasing-audit.md, gaps 2 and 8). A binder
@@ -137,15 +134,16 @@ type Fault = Overflow | DivZero | OutOfBounds | BadParse
 /// carrying it is freed by the frame that named it.
 ///
 /// The structural vector operations — `rev`, `filter`, `push`, `map`, … — are
-/// deliberately absent. They allocate a fresh spine and copy the same element
-/// pointers into it (gap 3), and a drop is shallow: freeing the spine cannot
-/// free an element twice. A deep drop would have to put them back.
+/// absent: they copy each element with `vb_dup` into a fresh spine, so their
+/// result shares nothing with the argument.
 ///
 /// The table is the compiler's own knowledge of its runtime, written by a human
 /// once; §4.2's ban is on lifetime annotations in the source language, which an
 /// entry in the compiler's builtin table is not.
 pub const PRELUDE_SHARES: &[&str] = &["get", "max_by", "min_by", "sum", "fold", "seq", "to_cstr"];
 
+/// Prelude signatures, `(name, type)`. Everything here is implemented by the C
+/// runtime in runtime/vibert.c.
 pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     // Copy. Deep, and generic: the copy owns everything it points at, so it is
     // the "return a copy" of spec §4.4 — one of the three answers to the absence

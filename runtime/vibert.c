@@ -71,8 +71,7 @@ VbVal vb_clos(VbFn fn, const char *name, uint32_t arity) {
 }
 
 /* Free one value, at the point its owner dies (spec 4.2,
-   docs/static-drop-roadmap.md). A no-op under the bump allocator, where
-   `vb_free` is itself a no-op, so the same generated C serves both.
+   docs/static-drop-roadmap.md).
 
    Deep for a vector and for an object, because nothing else points at what
    they hold. Three things had to be true first, and now are: the operations
@@ -194,10 +193,6 @@ VbVal vb_apply1(VbVal f, VbVal x) {
   VbVal v; v.tag = VB_CLOS; v.v.p = n; return v;
 }
 
-VbVal vb_applyn(VbVal f, uint32_t n, VbVal *xs) {
-  for (uint32_t i = 0; i < n; i++) f = vb_apply1(f, xs[i]);
-  return f;
-}
 
 /* ------------------------------------------------------------ arithmetic */
 
@@ -342,10 +337,7 @@ VbVal vb_vec_lit(uint32_t n, ...) {
   return wrap_vec(w);
 }
 
-/* Persistent-by-copy push: the bootstrap has no ownership analysis yet, so
- * in-place reuse (spec §4.3) is not safe to assume.
- *
- * `push` and `set` take the vector by value, so the old spine is already the
+/* `push` and `set` take the vector by value, so the old spine is already the
  * caller's to lose and its elements move rather than copy. The operations that
  * take `&Vec` — `rev`, `filter`, `sort_by`, `take`, `drop`, `concat_vec` —
  * cannot do that: the caller still owns the source and will free it, so each
