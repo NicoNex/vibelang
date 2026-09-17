@@ -81,9 +81,9 @@ after `ext` / `exp`; elsewhere it is an ordinary name.
 | form | example |
 |---|---|
 | comment | `;; to end of line` |
-| integer | `42`, `0` |
+| integer | `42`, `0` — up to `18446744073709551615`, so any `U64` constant can be written |
 | float | `1.5`, `0.0` — a literal without a point adopts whatever numeric type surrounds it, one with a point constrains to `F32`/`F64` |
-| string | `"hi\n"` |
+| string | `"hi\n"` — UTF-8 bytes; escapes are `\n \t \r \0 \\ \" \'` and nothing else |
 | char | `'A'` |
 | bool | `True`, `False` |
 | unit | `()` |
@@ -244,7 +244,14 @@ slice        : Size -> Size -> &Str -> Opt Str
 index_of     : &Str -> &Str -> Opt Size
 replace      : &Str -> &Str -> &Str -> Str
 lower        : &Str -> Str
+byte_at      : &Str -> Size -> U8
+byte_str     : U8 -> Str
 ```
+
+A `Str` is bytes, and `len`, `slice` and `index_of` count bytes. `byte_at s i` carries the
+same obligation as `get`, `i < len s`; `byte_str` is the one-byte string. Together they are
+how an encoding, a hash or a byte-level parser is written — `chr` takes a `Char`, and there
+is no `U32 -> Char`.
 
 `slice` and `index_of` return `Opt` because the bootstrap cannot yet phrase their
 refinements on a prelude name — not because `Opt` was the better design.
@@ -288,7 +295,17 @@ max          : a -> a -> a
 sqrt         : F64 -> F64
 pow          : F64 -> F64 -> F64
 floor        : F64 -> F64
+show_exact   : F64 -> Str
+wrap_add     : U64 -> U64 -> U64
+wrap_sub     : U64 -> U64 -> U64
+wrap_mul     : U64 -> U64 -> U64
 ```
+
+`show` prints a float with `%g`, six significant digits; `show_exact` prints the fewest
+digits that read back as the same `F64`, which is what a serialiser wants.
+
+`wrap_*` are arithmetic modulo 2^64, with no obligation. `--prove` refuses every `+`, `-`,
+`*` that may overflow; a hash or a generator overflows on purpose, and these say so.
 
 ### IO — all effectful
 

@@ -192,6 +192,18 @@ else constrains a parameter:
 step (a:U32, a<1000) (b:U32, b<1000) : U32 = a + b
 ```
 
+A **guard** is the other source of bounds, and what the solver takes from it is exact:
+
+- `?(i<len s)` bounds `i + 1` in the `True` arm, because a length is a `Size`.
+- `?(i<n && byte_at s i==34)` lends the `True` arm every conjunct it can phrase (`i<n`) even
+  though it cannot phrase the call. The `False` arm of such a guard learns **nothing**: a
+  fact you need there goes in a match of its own.
+- The left side of `&&` is known while checking the right: `i<=len s && len s - i>2`.
+- `let b = byte_at s i` keeps `b`'s `U8` range; `u64 (byte_at s i)` inline does not, because
+  the call is outside the solver's fragment. Bind first, then convert.
+- Arithmetic that overflows on purpose (hashes, generators) is `wrap_add` / `wrap_mul`, not
+  `+` / `*`.
+
 `ghost` declarations parse and are excluded from codegen, but today they are also excluded
 from obligation generation, so they teach the solver nothing yet. Do not reach for one.
 
@@ -248,6 +260,52 @@ must write tuples of the same width; a short one is not padded.
 arguments, so no measure can decrease at it and the function is rejected. `sum &(map loopy
 &(single n))` inside `loopy` is `total.no_measure`. The fix is to call the function rather
 than pass it.
+
+**Walking a string or vector by index** is the loop you will write most. A measure may name
+only scalar parameters — not `len s` — so pin the length to a parameter with a refinement:
+
+```
+skip_spaces (s:&Str) (n:Size, n==len s) (i:Size) : Size =
+  ?(i<n)
+   |False -> i
+   |True  -> ?(byte_at s i==32)
+              |True  -> skip_spaces s n (i + 1)
+              |False -> i
+             end
+  end
+  %(n - i)
+```
+
+The measure checker does **not** read guards: the step has to be syntactic (`i + 1`, `i + 2`
+under a guard that keeps it in range). When the next position comes back from a callee — a
+recursive-descent parser — nothing proves it moved, so thread a `fuel:U64` that every call
+decrements and write `%fuel` on every member of the group; start it at a bound the input
+cannot exceed. A self-call inside a nested match is still turned into a loop.
+
+```
+;; `item` returns where it stopped; nothing proves that moved, so fuel pays for each step.
+items (s:&Str) (i:Size) (acc:Vec Str) (fuel:U64) : Res Str (Vec Str) =
+  ?fuel
+   |0 -> Er "input too long"
+   |_ -> ?item s i
+          |Er e      -> Er e
+          |Ok (w, k) -> ?(k<len s)
+                         |True  -> items s (k + 1) (push acc (dup &w)) (fuel - 1)
+                         |False -> Ok (push acc (dup &w))
+                        end
+         end
+  end
+  %fuel
+
+all_items (s:&Str) : Res Str (Vec Str) =
+  ?(len s<1000000000000)
+   |True  -> items s 0 empty (len s + 1)
+   |False -> Er "input too long"
+  end
+```
+
+`Ok (w, k)` binds into the result: a tuple pattern reads the fields rather than taking them,
+hence `dup &w`.
 
 **The other trap:** `%` is not modulo. `f (a:U64) (b:U64) : U64 = a % b` parses silently as
 body `a` with measure `b`. There is no remainder operator in the language.
@@ -369,6 +427,30 @@ same C function, since it is the same function, but they may not give it two typ
 (Module and field namespacing is the part of the compiler most actively in motion; if
 something here disagrees with `docs/remaining-work.md` or `tests/modules.rs`, those win.)
 
+## The standard library
+
+`lib/` beside the compiler is on the search path, so these are one qualified name away
+(`Json.parse`, `Json.JNum`, `Rand.Rng`). Each passes `--prove`. Every signature, with its doc
+comment, is in **`references/stdlib.md`** — read the module's section there before calling
+into it.
+
+| module | what it has |
+|---|---|
+| `Json` | `Json` ADT, `parse : &Str -> Res Str Json`, `render`, `field`, `index`, `as_*` |
+| `Csv` | RFC 4180 `parse : &Str -> Res Str (Vec (Vec Str))`, `render` |
+| `Path` | POSIX text: `join basename dirname extension stem normalize segments` |
+| `Encoding` | `hex unhex base64 unbase64` over bytes |
+| `Hash` | `fnv1a`, `mix` (splitmix64 finaliser), `combine` — not cryptographic |
+| `Rand` | `Rng`, `seed next below unit` — splitmix64, deterministic, not for secrets |
+| `Args` | `parse` into flags / `--k=v` options / positionals, `has_flag`, `option` |
+| `Text` | character classes, `join words pad_left repeat upper reverse …` |
+| `List`, `DictX`, `Set`, `Opt`, `Res` | combinators beyond the prelude |
+| `Math`, `Stats`, `Bits`, `Search`, `Time` | numeric helpers, statistics, binary search, calendar |
+| `Io` | file, argument and environment conveniences |
+
+Before writing a helper, check whether one of these already has it. A new module goes in
+`lib/<name>.vibe` with its check beside the others, and should pass `--prove` too.
+
 ## Bit operations are functions
 
 `band bor bxor bnot shl shr ord` are prelude **functions**, not operators, because `&` is
@@ -436,13 +518,16 @@ The five refusals that define the language: `match.nonexhaustive`, `own.use_afte
 These are real limitations of the compiler as it stands, and each one has silently wasted
 someone's time. Full list with sources: **`references/sharp-edges.md`**.
 
-- **No map, no set, no dictionary.** Nothing in the prelude associates a key with a value.
-  Design around `Vec` of pairs or a record, or say the task needs a runtime type that does
-  not exist yet.
-- **Drops are shallow.** `dup` copies in depth, but the *free* does not: disposing a vector
-  frees its spine, not its elements, and anything that may alias is not freed at all. A
-  library that builds nested structures leaks the interior. Do not write something whose
-  correctness depends on deep freeing.
+- **A dictionary is a linear scan.** `Dict k v` exists (`dict insert lookup remove keys`),
+  but a lookup is O(n); fine for tens of keys, not for a million.
+- **Anything that may alias is not freed at all.** Drops are deep, but a value a prelude
+  call may hand out a piece of (`get`, `fold`, `max_by`, …) or that went to C is left alone.
+- **Building a string byte by byte is O(n²).** There is no byte buffer; every `concat`
+  copies. Slice whole ranges out of the input where you can.
+- **A nullary `ext c` function is never called.** `abort : E! Unit` then `abort ;` compiles
+  and does nothing. Give the binding a parameter.
+- **A program that crashes** under `vibe run` prints `error[run.signal]`; a double free or a
+  failed run-time assert is a compiler bug worth reducing, not a flaky test.
 - **A proof about an `F32`/`F64` is a proof about a mathematical real** — nothing about
   rounding, precision or NaN. `--prove` says so in a note. Do not present a float proof as
   a guarantee about the machine float.
@@ -464,6 +549,7 @@ someone's time. Full list with sources: **`references/sharp-edges.md`**.
 - `references/c-interop.md` — `ext c` and `exp c` in full, the boundary type mapping, and
   building a library for C to link.
 - `references/sharp-edges.md` — what does not work yet, and what to do instead.
+- `references/stdlib.md` — every `lib/` module's signatures and doc comments.
 
 In the repository itself: `README.md` (the tour), `vibelang-spec.md` (normative),
 `docs/remaining-work.md` (read before starting anything large), `examples/ledger.vibe` (the

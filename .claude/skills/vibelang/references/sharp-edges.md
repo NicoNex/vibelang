@@ -22,10 +22,15 @@ Contents:
 
 ## Missing capabilities
 
-**No map, no set, no dictionary.** Nothing in `PRELUDE_SIGS` associates a key with a value.
-This needs a runtime type, not a library written in Vibelang, so it cannot be worked around
-inside the language. Design with a `Vec` of pairs and a linear scan, or with a record whose
-fields are the keys — or say the task needs something the language does not have.
+**A dictionary is a linear scan.** `Dict k v` (`dict insert lookup remove keys`) is a vector
+of pairs underneath: O(n) per lookup, O(n²) to build. A set is a `Dict k Unit`.
+
+**No byte buffer.** A string grows by `concat`, which copies, so building one a byte at a
+time is O(n²). Slice whole ranges out of the input (`slice a b s`) instead of appending bytes
+one by one where the shape allows it.
+
+**No `U32 -> Char`.** `chr` takes a `Char` and `ord` gives a `U32`, but nothing goes back.
+Use `byte_str : U8 -> Str` to make a byte, and `byte_at : &Str -> Size -> U8` to read one.
 
 **No record pattern.** The grammar lists one, the parser rejects it with `parse.pattern`.
 Match on ADTs; project records with `.`.
@@ -129,9 +134,23 @@ record invariant into the arm, but the `Tx` in `Res Err (Vec Tx)` is lost, and a
 introduced by `<-` has no type at all for the solver. Expect a proof that "obviously"
 follows to fail when the fact has to travel through two type constructors.
 
-**Measure inference is narrow.** It only handles direct self-recursion over one scalar
-parameter that shrinks syntactically at every call. Mutual recursion always needs `%`
-tuples written out, of the same width on every member — a short one is not padded.
+**Measure inference is narrow, and the measure checker does not read guards.** Inference
+only handles direct self-recursion over one scalar parameter that shrinks syntactically at
+every call (a call to a helper outside the recursive group does not get in the way). A
+written measure may name only scalar parameters — `%(len s - i)` is refused, so pin the
+length: `(n:Size, n==len s)` and `%(n - i)`. And whether `n - i` decreases is decided without
+the guards around the call, so the argument must shrink syntactically (`i + 1`); a position
+returned by a callee needs a `fuel:U64` parameter measured `%fuel`.
+
+**What a guard lends the solver.** A guard's `True` arm learns each conjunct the solver can
+phrase, even when others (a call, a string comparison) are out of its fragment; the `False`
+arm of such a guard learns nothing. The left side of `&&` is known while checking the right.
+`let x = call …` keeps the numeric range of the call's result type; the same call inline
+inside a conversion (`u64 (byte_at s i)`) does not.
+
+**A nullary `ext c` binding is never called.** `abort : E! Unit` followed by `abort ;`
+compiles and does nothing, like a nullary top-level declaration. Give the binding a
+parameter.
 
 **The proof cache is keyed on SMT text**, not on the subtree, so an unrelated edit to the
 context re-asks every question whose text changed. A slow `--prove` after a small edit is
@@ -141,11 +160,11 @@ expected, not a bug.
 
 ## Memory
 
-**Drops are shallow.** `dup` copies in depth, but disposal does not: freeing a vector frees
-its spine, not its elements, because the structural operations (`rev`, `filter`, `push`,
-`map`, …) copy element pointers between vectors and a deep free would free one twice. **A
-library that builds nested structures leaks the interior.** Do not write something whose
-correctness depends on deep freeing.
+**Drops are deep.** Freeing a vector frees its elements, and every example runs clean under
+AddressSanitizer. A crash under `vibe run` (`error[run.signal]`) is a compiler defect to
+reduce and report, not a flake: the ones found writing `lib/` were a payload moved out of a
+match, a self-tail-call inside a nested match, and an argument of a call sitting in a borrow
+position, each freed twice.
 
 **Anything that may alias is not freed at all** — a prelude result that points into an
 argument (`get`, `max_by`, `min_by`, `sum`, `fold`, `seq`, `to_cstr`), a capture a callee

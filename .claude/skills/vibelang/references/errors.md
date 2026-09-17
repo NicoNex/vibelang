@@ -92,6 +92,8 @@ Argument evaluation order made the borrow land after the move. Reorder.
 ```
 
 `{r with f=v}` on a uniquely owned `r` mutates in place, so the base is no longer readable.
+An update in one match arm is not seen by the other arms: `?b |True -> {c with x=1} |False
+-> {c with y=c.x}` is fine.
 
 ---
 
@@ -129,6 +131,12 @@ error[total.not_decreasing]: the measure of `TotalGrowing.up` does not decrease 
 
 The measure you wrote grows. There is no increasing form; convert mechanically: `k` rising
 towards `n` is `%(n - k)`.
+
+The same error when the step is not syntactic. The checker does not use the guards around
+the call, so `go (k + 1)` decreases `%(n - k)` but `go (next_index s k)` does not, whatever
+`next_index` guarantees. Thread a `fuel:U64` that each call decrements and measure `%fuel`.
+And `%(len s - i)` is refused outright (`the measure … is not arithmetic over its
+parameters`): add `(n:Size, n==len s)` and write `%(n - i)`.
 
 For a mutually recursive group, write the same lexicographic tuple on every member —
 `%(n, k)` — and note the members must use tuples of the same width, because a short one is
@@ -201,6 +209,11 @@ error[match.nonexhaustive]: this match does not cover Holes.Blue
 
 The missing constructor is named. Add the arm, or a `|_ -> …` wildcard — but prefer the
 named arm, because an arm is also a proof step and a wildcard teaches the solver nothing.
+
+A constructor counts as covered only by an arm whose payload patterns are all names, `_`, or
+tuples of those: `|Some 3 -> … |None -> …` names `Some` as missing. Nested constructor
+patterns are not combined either, so `|Some (Ok x) |Some (Er e) |None` needs a `|_`. A
+tuple of names, `|(a, b) -> …`, covers its type on its own.
 
 ---
 
@@ -347,6 +360,21 @@ refuses costs a whole retry for nothing.
 `codegen.*` (`codegen.unbound`, `codegen.record`, `codegen.field`, `codegen.ctor`,
 `codegen.binop`) are internal invariants. If one fires, it is a compiler bug, not a program
 error.
+
+---
+
+## Running
+
+### `run.signal`
+
+```
+error[run.signal]: the program was killed by signal 6
+```
+
+The program crashed; `vibe run` exits 128 + the signal. Signal 6 (`SIGABRT`) from the C
+allocator is a double free or a bad pointer, which a checked program should never do: reduce
+it to a few lines and treat it as a compiler defect. A run-time refinement failure is not a
+signal; it prints `✗ <path> ⊨ <predicate>` and exits 70.
 
 ---
 
