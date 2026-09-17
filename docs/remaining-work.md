@@ -16,7 +16,7 @@ code is, so the first step is never a search.
 
 ## Where the compiler is today
 
-2026-09-16. `cargo test -- --test-threads=1`: 151 tests across 12 binaries,
+2026-09-17. `cargo test -- --test-threads=1`: 158 tests across 12 binaries,
 green. `cargo clippy --all-targets -- -D warnings`: clean.
 
 A `.vibe` file goes to a native executable through C. What stands between the
@@ -91,6 +91,28 @@ Shipped since this list was first written, each with the item it closed:
   `Res Err Tx` discharges what `Tx` declares.
 - **A pure function can no longer diverge through a higher-order call.** A
   recursive name used as a value is an edge in the call graph.
+- **A standard library**, `lib/`: `Json`, `Csv`, `Path`, `Encoding`, `Hash`,
+  `Rand`, `Args` beside `Text`, `List`, `DictX`, `Set`, `Opt`, `Res`, `Math`,
+  `Stats`, `Bits`, `Search`, `Time`, `Io`. Every module passes `--prove` and has
+  a runnable check in `lib/check/`. The skill's `references/stdlib.md` lists
+  every signature. Writing it found, and fixed:
+  - three double frees — a payload moved out of an owned scrutinee, a
+    self-tail-call inside a nested match, and an argument of a call that sits in
+    a borrow position (`fmt "{}" (fold f acc v)`);
+  - a soundness hole in `match.nonexhaustive`, which looked only at constructor
+    names, so `|Some 3 |None` checked and failed at run time;
+  - refusals of correct programs: a literal above `i64::MAX`, a lone tuple
+    pattern, a recursive function calling a helper outside its group, an
+    in-place update in one arm seen by its sibling;
+  - `vibe fmt` breaking a top-level application where a newline ends the
+    declaration, so the file it wrote did not parse;
+  - the lexer reading a UTF-8 string literal one char per byte;
+  - facts the solver dropped: a length's range, a `let`'s range, the phrasable
+    conjuncts of a guard, the left side of `&&`;
+  - five runtime buffers never freed, and `vibe run` silent when the program
+    was killed by a signal.
+  New prelude names: `byte_at`, `byte_str`, `wrap_add`, `wrap_sub`, `wrap_mul`,
+  `show_exact`.
 
 ---
 
@@ -286,6 +308,28 @@ Carried from §16, with what has changed since:
 
 ---
 
+## Found writing the standard library, still open
+
+- **A nullary `ext c` binding is never called.** `abort : E! Unit` then `abort ;`
+  compiles and does nothing, the same shape as the nullary declaration below.
+- **The measure checker does not read guards.** `go (next s k)` cannot be shown
+  to decrease even under `?(next s k > k)`, so a parser threads `fuel`. Passing
+  the path condition to the same z3 query the refinements use would retire it.
+- **A guard's `False` arm learns nothing when the guard is partly outside the
+  fragment.** The `True` arm now gets each phrasable conjunct; the negation of a
+  conjunction is a disjunction, and only the whole one is sound.
+- **Nested constructor patterns are not combined** by `match.nonexhaustive`:
+  `|Some (Ok x) |Some (Er e) |None` needs a `|_`. Conservative, not unsound.
+- **No byte buffer and no `U32 -> Char`.** Every string built a byte at a time is
+  O(n²); `Json`, `Csv` and `Encoding` all carry a `ponytail:` note for it.
+- **`lib/check/io_check.vibe` writes to `/tmp/claude-1000/...`**, a path from the
+  machine it was written on, and fails anywhere else.
+- **`Text.digit_value`'s `ord c - 48`** is counted as an obligation the solver
+  cannot phrase, so every module that loads `Text` prints that note under
+  `--prove`. It was never checked; it is now counted.
+
+---
+
 ## Before a standard library can be written
 
 Not a list of missing functions. What is left after the module system landed
@@ -301,5 +345,4 @@ Worth knowing before starting, none of them blocking:
   every self-call; a mutually recursive pair needs the lexicographic tuple
   written out (`%(n, k)`); and a recursive name passed as a *value* is a call
   with unknown arguments, so it is rejected.
-- A library that builds nested structures leaks the inner ones: drops are
-  shallow (item 1 above).
+- A value that may alias is not freed (item 1 above); drops are otherwise deep.
