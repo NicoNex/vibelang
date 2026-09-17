@@ -838,23 +838,49 @@ fn quote(s: &str) -> String {
 /// up when the counts disagreed, which quietly deleted every comment in exactly
 /// that case.
 ///
+/// The count is of the *source's* tokens, and the rendering need not have the
+/// same ones: the canonical form writes `!(f x)` for `!f x`, and drops a
+/// redundant pair. So the two token streams are lined up first, stepping over a
+/// parenthesis that only one side has; without that, every comment after a
+/// rewritten `!` landed two tokens early, inside the declaration before it.
+///
 /// ponytail: an own-line comment is placed before the token it preceded and a
 /// trailing one after the line holding the token before it, which is the whole
 /// model. A comment written in the middle of an expression that the projection
 /// then rewraps can move to the start of that line; it is never lost.
-pub fn reattach(rendered: &str, comments: &[Comment]) -> String {
+pub fn reattach(rendered: &str, src: &str, comments: &[Comment]) -> String {
     if comments.is_empty() {
         return rendered.to_string();
     }
-    let Ok(toks) = lexer::lex(rendered, 0) else {
+    let (Ok(toks), Ok(orig)) = (lexer::lex(rendered, 0), lexer::lex(src, 0)) else {
         return rendered.to_string();
     };
+    let real = |ts: Vec<lexer::Token>| -> Vec<lexer::Token> {
+        ts.into_iter()
+            .filter(|t| !matches!(t.tok, lexer::Tok::Newline | lexer::Tok::Eof))
+            .collect()
+    };
+    let (toks, orig) = (real(toks), real(orig));
+    // `at[i]`: the rendered index of the source's token `i`.
+    let paren = |t: &lexer::Token| matches!(t.tok, lexer::Tok::Sym("(") | lexer::Tok::Sym(")"));
+    let mut at = Vec::with_capacity(orig.len() + 1);
+    let (mut i, mut j) = (0, 0);
+    while i < orig.len() {
+        if j < toks.len() && toks[j].tok != orig[i].tok && paren(&toks[j]) {
+            j += 1;
+        } else if j < toks.len() && toks[j].tok != orig[i].tok && paren(&orig[i]) {
+            at.push(j);
+            i += 1;
+        } else {
+            at.push(j);
+            i += 1;
+            j += 1;
+        }
+    }
+    at.push(j);
     // line number of each real token, in the same counting the lexer used
-    let lines: Vec<usize> = toks
-        .iter()
-        .filter(|t| !matches!(t.tok, lexer::Tok::Newline | lexer::Tok::Eof))
-        .map(|t| t.span.line)
-        .collect();
+    let line_of = |k: usize| toks.get(k).map(|t| t.span.line);
+    let lines: Vec<usize> = (0..=orig.len()).filter_map(|k| line_of(at[k])).collect();
     let body: Vec<&str> = rendered.lines().collect();
     let mut before: Vec<Vec<&str>> = vec![Vec::new(); body.len() + 1];
     let mut after: Vec<Vec<&str>> = vec![Vec::new(); body.len() + 1];

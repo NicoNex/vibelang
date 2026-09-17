@@ -85,7 +85,7 @@ fn every_file_round_trips_byte_for_byte() {
     // these two exist to be rejected, so they never reach the projection
     let broken = ["bad.vibe", "blank.vibe"];
     let mut seen = 0;
-    for dir in ["examples", "examples/shop", "tests"] {
+    for dir in ["examples", "examples/shop", "tests", "lib", "lib/check"] {
         for e in std::fs::read_dir(root.join(dir)).expect("the directory exists") {
             let p = e.expect("readable entry").path();
             if p.extension().is_none_or(|x| x != "vibe") {
@@ -146,4 +146,26 @@ fn reformatting_a_ragged_file_keeps_its_comments() {
     // many lines there are — which is exactly the case that used to drop them
     assert!(out.contains("f (n:U64) : U64 = n + 1 ;; and me"), "{out}");
     assert!(out.contains(";; keep me"), "{out}");
+}
+
+/// A comment is placed back by how many tokens precede it in the source, and
+/// the canonical form does not keep the source's tokens: it writes `!(odd k)`
+/// for `!odd k`. Counting one against the other put every comment after such a
+/// rewrite two tokens early — a declaration's doc landed inside the body of the
+/// declaration above it, and `vibe fmt` wrote that back to the file.
+#[test]
+fn a_rewrite_that_adds_parentheses_does_not_move_a_comment() {
+    let dir = std::env::temp_dir().join("vibe-view-comments");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("moved.vibe");
+    std::fs::write(
+        &file,
+        "mod Moved\n\nodd (x:Size) : Bool = x==1\n\nwalk (n:Size) (k:Size) : Size =\n  ?(k<n && !odd k)\n   |False -> k\n   |True  -> walk n (k + 1)\n  end\n  %(n - k)\n\n;; The doc of `after`.\nafter (x:Size) : Bool = !odd x\n",
+    )
+    .expect("fixture written");
+    let out = view(&[file.to_str().expect("utf-8 path")]);
+    assert!(
+        out.contains("  %(n - k)\n\n;; The doc of `after`.\nafter (x:Size) : Bool = !(odd x)\n"),
+        "the comment moved:\n{out}"
+    );
 }

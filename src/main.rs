@@ -194,7 +194,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         // Only the canonical projection lines up with the file, so only it can
         // put the comments back; the others rewrite the program (§13.1).
         let r = match o.view {
-            view::Mode::Canon => view::reattach(&r, &comments),
+            view::Mode::Canon => view::reattach(&r, &src, &comments),
             _ => r,
         };
         print!("{r}");
@@ -208,7 +208,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
     // read its imports too. Walk `prog.units` — each carries its own `src`,
     // `comments` and file id — when formatting a whole project is wanted.
     if o.cmd == "fmt" {
-        let canon = view::reattach(&view::render(&root, &checked, view::Mode::Canon), &comments);
+        let canon = view::reattach(&view::render(&root, &checked, view::Mode::Canon), &src, &comments);
         if canon == src {
             return Ok(ExitCode::SUCCESS);
         }
