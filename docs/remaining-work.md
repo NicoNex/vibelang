@@ -10,7 +10,7 @@ compiler. Two bodies of work have their own plans:
 
 ## Where the compiler is today
 
-2026-09-17. `cargo test -- --test-threads=1`: 167 tests across 12 binaries,
+2026-09-17. `cargo test -- --test-threads=1`: 168 tests across 12 binaries,
 green. `cargo clippy --all-targets -- -D warnings`: clean.
 
 A `.vibe` file goes to a native executable through C99. Working: HM inference

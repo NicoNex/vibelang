@@ -345,3 +345,35 @@ fn a_qualified_type_loads_its_module() {
     assert!(ok, "a module named only by a type and a pattern:\n{out}");
     assert_eq!(out.trim(), "3");
 }
+
+/// The installed standard library lives under the user's home, like `~/.cargo`,
+/// so installing one needs no root: `~/.vibe/lib` is on the search path.
+#[test]
+fn a_module_is_found_under_the_home_directory() {
+    let home = project("home", &[]);
+    let lib = home.join(".vibe").join("lib");
+    std::fs::create_dir_all(&lib).expect("a home library");
+    std::fs::write(
+        lib.join("greet.vibe"),
+        "mod Greet\n\nhi (n:&Str) : Str = concat \"hi \" n\n",
+    )
+    .expect("write a module");
+    let app = project(
+        "home_app",
+        &[(
+            "prog.vibe",
+            "mod Prog\n\nmain : E! Unit =\n  out (Greet.hi \"there\")\n",
+        )],
+    );
+    let o = Command::new(env!("CARGO_BIN_EXE_vibe"))
+        .args(["run", "prog.vibe"])
+        .current_dir(&app)
+        .env("HOME", &home)
+        .env_remove("VIBE_PATH")
+        .output()
+        .expect("vibe runs");
+    let mut out = String::from_utf8_lossy(&o.stdout).to_string();
+    out.push_str(&String::from_utf8_lossy(&o.stderr));
+    assert!(o.status.success(), "~/.vibe/lib must be searched:\n{out}");
+    assert_eq!(out.trim(), "hi there");
+}

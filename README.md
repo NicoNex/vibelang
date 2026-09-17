@@ -74,10 +74,15 @@ Three things have to be on your machine: a **Rust toolchain** to build the compi
 
 git clone https://github.com/NicoNex/vibelang && cd vibelang
 cargo install --path .          # puts `vibe` in ~/.cargo/bin
+mkdir -p ~/.vibe && cp -r lib ~/.vibe/lib   # the standard library
 vibe run examples/ledger.vibe   # should print the ledger report
 ```
 
-The compiler itself is a single Rust crate with an empty dependency graph — nothing else is downloaded. To work in the tree instead of installing, `cargo build` and use `./target/debug/vibe`.
+Everything lands under your home, like `~/.cargo` — no `sudo`, no system directory, and uninstalling is `rm -rf ~/.vibe ~/.cargo/bin/vibe`.
+
+**The `cp -r lib` line is not optional.** There is no package manager: a module is found beside the file that names it, then on `VIBE_PATH`, then in `~/.vibe/lib`, then in a `lib` directory next to the `vibe` binary. `Json.parse` resolves because `lib/json.vibe` is on one of those paths, and `mod.missing` — which prints every place it looked — is what you get when it is not. `export VIBE_PATH=/path/to/vibelang/lib` does the same job if you would rather keep the clone and copy nothing.
+
+The compiler itself is a single Rust crate with an empty dependency graph — nothing else is downloaded. Working inside the tree needs none of this: `cargo build`, then `./target/debug/vibe`, finds `lib/` on its own.
 
 ## 60 seconds
 
@@ -159,7 +164,7 @@ How much of this is delivered rather than intended is the next section. The comp
 
 ## Status
 
-**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, deep drops for vectors and records, a hash map that keeps insertion order, strings that grow in place (`push_str`), bit operations, a deep and generic `dup`, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, record fields resolved per use site, four projection views, the whole CLI above, a standard library in `lib/` with JSON, CSV and regular expressions. 167 tests, green.
+**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, deep drops for vectors and records, a hash map that keeps insertion order, strings that grow in place (`push_str`), bit operations, a deep and generic `dup`, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, record fields resolved per use site, four projection views, the whole CLI above, a standard library in `lib/` with JSON, CSV and regular expressions. 168 tests, green.
 
 **Partial** — inference is not bidirectional, so a lambda parameter takes no type from the signature it is passed to, and a `.field` there has to be unambiguous; refinements on prelude builtins are hardcoded; a proof about a float is a proof about a mathematical real; a closure's captures are not freed with it, and a value that may alias one the caller owns is not freed at all — `vibe view --drops` counts both; a call's result read only by a `match` is never freed; every closure is on the heap; values are dynamically tagged, so any performance claim today is a claim about a boxed interpreter.
 

@@ -40,7 +40,7 @@ not that memory, arithmetic or the loop bound were.
 
 `vibelang-spec.md` at the repo root is normative. This skill is the working subset, plus
 the places where today's compiler is narrower than the spec. Everything here compiles
-against the compiler in this tree (2026-09-17: 167 tests green, 20 `lib/` modules, each
+against the compiler in this tree (2026-09-17: 168 tests green, 20 `lib/` modules, each
 passing `--prove`).
 
 ## Spend as few tokens as the compiler lets you
@@ -457,7 +457,8 @@ main : E! Unit =
 Types and constructors qualify the same way (`Shape.Kind`, `Shape.Line`). A declared name
 carries its module, so two modules may both declare `parse`, and a module may declare a name
 the prelude already has — inside that module the declaration wins. Modules are looked up
-next to the naming file, then on `VIBE_PATH`, then in `lib/` beside the compiler. Module
+next to the naming file, then on `VIBE_PATH`, then in `~/.vibe/lib` (where an installed
+standard library goes), then in `lib/` beside the compiler. Module
 names do not nest: `Std.Json` is not a path.
 
 Record fields are resolved per use site from the *base's* inferred type, so two modules may

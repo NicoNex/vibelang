@@ -456,8 +456,12 @@ struct Loader<'a> {
     order: Vec<Unit>,
 }
 
-/// Where a module may live, in order: beside the file that names it, then each
-/// entry of `VIBE_PATH`, then the `lib` directory shipped with the compiler.
+/// Where a module may live, in order: beside the file that names it, each entry
+/// of `VIBE_PATH`, `~/.vibe/lib`, then the `lib` directory shipped with the
+/// compiler.
+///
+/// `~/.vibe/lib` is where an installed standard library goes — under the user's
+/// home like `~/.cargo`, so installing needs no root and no system directory.
 ///
 /// No manifest, no lockfile, no versions. A name maps to a file mechanically,
 /// in both directions, which is the property that lets a generator write
@@ -466,6 +470,9 @@ fn search_path(dir: &Path) -> Vec<PathBuf> {
     let mut v = vec![dir.to_path_buf()];
     if let Ok(p) = std::env::var("VIBE_PATH") {
         v.extend(p.split(':').filter(|s| !s.is_empty()).map(PathBuf::from));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        v.push(PathBuf::from(home).join(".vibe/lib"));
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(d) = exe.parent() {
