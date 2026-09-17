@@ -780,6 +780,12 @@ impl State<'_> {
                             fresh.push(n.clone());
                         }
                     }
+                    // A binder is a new name: an outer one of the same name
+                    // moved earlier says nothing about it inside the arm.
+                    let shadowed: Vec<(String, Span)> = bound
+                        .iter()
+                        .filter_map(|n| self.moved.remove(n).map(|at| (n.clone(), at)))
+                        .collect();
                     let visible = self.scope(owned, &bound, body.span);
                     self.walk(body, mode, &visible);
                     // A payload handed on takes the scrutinee's memory with it,
@@ -798,6 +804,10 @@ impl State<'_> {
                     for n in &fresh {
                         self.shared.remove(n);
                     }
+                    for n in &bound {
+                        self.moved.remove(n);
+                    }
+                    self.moved.extend(shadowed);
                     for n in &visible {
                         if !self.moved.contains_key(*n) && !self.leaves.contains(*n) {
                             kept.push(((*n).to_string(), body.span));

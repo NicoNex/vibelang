@@ -32,6 +32,14 @@ tally (c:Counter) (hit:Bool) : Counter =
        |False -> {c with misses=c.hits}
   end
 
+;; `x` moved above the match; the arm's own `x` is a different name, and the
+;; option is still there to read afterwards.
+shadow (x:Str) (o:Opt Str) : Size =
+  let n = len x in
+  let gone = x in
+  let m = ?o |Some x -> 3 |None -> n end in
+  m + len &gone + (?o |Some s -> len &s |None -> 0 end)
+
 main : E! Unit =
   ?keep (Some (dup "kept")) "none" |Some v -> out &v |None -> out "lost" end ;
   out (fmt " {} {}\n" (walk "a" 3 "") (folded "x"))
