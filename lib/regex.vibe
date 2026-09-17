@@ -1,0 +1,1287 @@
+mod Regex
+
+;; Regular expressions with Go's syntax and Go's semantics, run by a Pike VM: a
+;; Thompson NFA simulated with prioritised thread lists, so a match costs time
+;; linear in the subject for every pattern (docs/regex-design.md). Positions are
+;; byte offsets. `\d \w \s \b`, the POSIX classes and `(?i)` are ASCII, as the
+;; first four are in Go; `.` and `[^...]` match whole UTF-8 code points.
+;;
+;; ponytail: one engine, and a first-byte skip for a pattern that must start
+;; with one. Go's one-pass and backtracking engines, or a lazy DFA, are the
+;; upgrade when a profile blames the VM.
+type Look = Bol | Eol | BText | EText | WordB | NoWordB
+
+;; A class is sorted, merged code-point ranges, negation already applied.
+type Node = Empty | Class (Vec (Size, Size)) | Assert Look | Cat (Vec Node) | Alt (Vec Node) | Star Node Bool | Plus Node Bool | Quest Node Bool | Group Node Size
+
+;; `IRange`, `ISave` and `IAssert` go on to the next instruction; `ISplit`'s
+;; first target has priority.
+type Inst = IMatch | IRange (Vec (Size, Size)) | ISplit Size Size | IJmp Size | ISave Size | IAssert Look
+
+type Regex = { source:Str, prog:Vec Inst, names:Vec Str, first:Size, anchored:Bool }
+
+;; ---------------------------------------------------------------- bytes
+;; The byte at `i`, or 256 past the end.
+byte (s:&Str) (i:Size) : Size =
+  ?(i<len s)
+   |True  -> size (byte_at s i)
+   |False -> 256
+  end
+
+is (s:&Str) (i:Size) (c:Char) : Bool = byte s i==size (ord c)
+
+cont (x:Size) : Bool = x>=128 && x<192
+
+is_word (x:Size) : Bool =
+  x>=48 && x<=57 || x>=65 && x<=90 || x>=97 && x<=122 || x==95
+
+;; The code point at `i` and its width, packed as `cp * 8 + width` so that the
+;; loop that calls it for every byte allocates nothing. An invalid or truncated
+;; sequence is U+FFFD one byte wide, as Go decodes it.
+decode (s:&Str) (i:Size) : Size =
+  let b0 = byte s i in
+  ?(b0<128)
+   |True  -> wrap_add (wrap_mul b0 8) 1
+   |False -> ?(b0<194 || b0>244)
+              |True  -> wrap_add (wrap_mul 65533 8) 1
+              |False -> ?(b0<224)
+                         |True  -> two s i b0
+                         |False -> ?(b0<240)
+                                    |True  -> three s i b0
+                                    |False -> four s i b0
+                                   end
+                        end
+             end
+  end
+
+two (s:&Str) (i:Size) (b0:Size) : Size =
+  let b1 = byte s (wrap_add i 1) in
+  ?cont b1
+   |True  -> wrap_add (wrap_mul (bor (shl (band b0 31) 6) (band b1 63)) 8) 2
+   |False -> wrap_add (wrap_mul 65533 8) 1
+  end
+
+three (s:&Str) (i:Size) (b0:Size) : Size =
+  let b1 = byte s (wrap_add i 1) in
+  let b2 = byte s (wrap_add i 2) in
+  let lo = ?(b0==224) |True -> 160 |False -> 128 end in
+  let hi = ?(b0==237) |True -> 160 |False -> 192 end in
+  ?(b1>=lo && b1<hi && cont b2)
+   |True  -> wrap_add (wrap_mul (bor (bor (shl (band b0 15) 12)
+                                          (shl (band b1 63) 6))
+                                     (band b2 63))
+                                8)
+                      3
+   |False -> wrap_add (wrap_mul 65533 8) 1
+  end
+
+four (s:&Str) (i:Size) (b0:Size) : Size =
+  let b1 = byte s (wrap_add i 1) in
+  let b2 = byte s (wrap_add i 2) in
+  let b3 = byte s (wrap_add i 3) in
+  let lo = ?(b0==240) |True -> 144 |False -> 128 end in
+  let hi = ?(b0==244) |True -> 144 |False -> 192 end in
+  ?(b1>=lo && b1<hi && cont b2 && cont b3)
+   |True  -> wrap_add (wrap_mul (bor (bor (bor (shl (band b0 7) 18)
+                                               (shl (band b1 63) 12))
+                                          (shl (band b2 63) 6))
+                                     (band b3 63))
+                                8)
+                      4
+   |False -> wrap_add (wrap_mul 65533 8) 1
+  end
+
+width (s:&Str) (i:Size) : Size = band (decode s i) 7
+
+;; `s` from `a` to `b`, "" when that is not a range of it.
+cut (s:&Str) (a:Size) (b:Size) : Str =
+  ?slice a b s
+   |Some t -> t
+   |None   -> ""
+  end
+
+;; ---------------------------------------------------------------- ranges
+lo_of (r:&(Size, Size)) : Size =
+  ?r |(lo, hi) -> lo
+  end
+
+merge (acc:Vec (Size, Size)) (r:&(Size, Size)) : Vec (Size, Size) =
+  ?r |(lo, hi) -> ?(len &acc==0)
+                   |True  -> push acc (lo, hi)
+                   |False -> let k = len &acc - 1 in
+                             ?get &acc k
+                              |(plo, phi) -> ?(lo<=wrap_add phi 1)
+                                              |True  -> set acc
+                                                            k (plo, max phi hi)
+                                              |False -> push acc (lo, hi)
+                                             end
+                             end
+                  end
+  end
+
+;; Sorted by start, with overlapping and adjacent ranges merged.
+normalize (rs:&Vec (Size, Size)) : Vec (Size, Size) =
+  fold merge empty &(sort_by lo_of rs)
+
+;; What sorted, merged ranges leave out of [0, U+10FFFF].
+gaps (rs:&Vec (Size, Size)) (n:Size, n==len rs) (k:Size) (next:Size) (acc:Vec (Size, Size)) : Vec (Size, Size) =
+  ?(k<n)
+   |False -> ?(next<=1114111)
+              |True  -> push acc (next, 1114111)
+              |False -> acc
+             end
+   |True  -> ?get rs k
+              |(lo, hi) -> let more = ?(lo>next) |True -> push acc (next, lo - 1) |False -> acc end in
+                           gaps rs n (k + 1) (wrap_add hi 1) more
+             end
+  end
+  %(n - k)
+
+negate (rs:&Vec (Size, Size)) : Vec (Size, Size) = gaps rs (len rs) 0 0 empty
+
+;; The part of [lo, hi] inside [from, to], moved 32 up or down.
+shifted (acc:Vec (Size, Size)) (lo:Size) (hi:Size) (from:Size) (to:Size) (up:Bool) : Vec (Size, Size) =
+  let a = max lo from in
+  let b = min hi to in
+  ?(a<=b)
+   |False -> acc
+   |True  -> ?up |True  -> push acc (wrap_add a 32, wrap_add b 32)
+                 |False -> push acc (wrap_sub a 32, wrap_sub b 32)
+             end
+  end
+
+add_case (acc:Vec (Size, Size)) (r:&(Size, Size)) : Vec (Size, Size) =
+  ?r |(lo, hi) -> shifted (shifted acc lo hi 65 90 True) lo hi 97 122 False
+  end
+
+;; Under `(?i)` a range also covers the other case of the ASCII letters in it.
+fold_case (rs:&Vec (Size, Size)) : Vec (Size, Size) =
+  normalize &(fold add_case (dup rs) rs)
+
+;; A literal code point, folded when `(?i)` is on.
+lit (fl:U64) (c:Size) : Vec (Size, Size) =
+  ?(band fl 1==0)
+   |True  -> [(c, c)]
+   |False -> fold_case &[(c, c)]
+  end
+
+in_ranges (rs:&Vec (Size, Size)) (n:Size, n==len rs) (k:Size) (c:Size) : Bool =
+  ?(k<n)
+   |False -> False
+   |True  -> ?get rs k
+              |(lo, hi) -> ?(c<lo)
+                            |True  -> False
+                            |False -> c<=hi || in_ranges rs n (k + 1) c
+                           end
+             end
+  end
+  %(n - k)
+
+;; `\d \s \w`, and their capitals negated. ASCII, as in Go: `\s` has no `\v`.
+perl (c:Size) : Opt (Vec (Size, Size)) =
+  ?c |100 -> Some [(48, 57)]
+     |115 -> Some [(9, 10), (12, 13), (32, 32)]
+     |119 -> Some [(48, 57), (65, 90), (95, 95), (97, 122)]
+     |68  -> Some (negate &[(48, 57)])
+     |83  -> Some (negate &[(9, 10), (12, 13), (32, 32)])
+     |87  -> Some (negate &[(48, 57), (65, 90), (95, 95), (97, 122)])
+     |_   -> None
+  end
+
+posix (name:&Str) : Opt (Vec (Size, Size)) =
+  ?name |"alnum"  -> Some [(48, 57), (65, 90), (97, 122)]
+        |"alpha"  -> Some [(65, 90), (97, 122)]
+        |"ascii"  -> Some [(0, 127)]
+        |"blank"  -> Some [(9, 9), (32, 32)]
+        |"cntrl"  -> Some [(0, 31), (127, 127)]
+        |"digit"  -> Some [(48, 57)]
+        |"graph"  -> Some [(33, 126)]
+        |"lower"  -> Some [(97, 122)]
+        |"print"  -> Some [(32, 126)]
+        |"punct"  -> Some [(33, 47), (58, 64), (91, 96), (123, 126)]
+        |"space"  -> Some [(9, 13), (32, 32)]
+        |"upper"  -> Some [(65, 90)]
+        |"word"   -> Some [(48, 57), (65, 90), (95, 95), (97, 122)]
+        |"xdigit" -> Some [(48, 57), (65, 70), (97, 102)]
+        |_        -> None
+  end
+
+;; ---------------------------------------------------------------- parse
+err (msg:&Str) (i:Size) : Str = fmt "{} at byte {}" msg i
+
+hex (x:Size) : Size =
+  ?(x>=48 && x<=57)
+   |True  -> x - 48
+   |False -> ?(x>=97 && x<=102)
+              |True  -> x - 87
+              |False -> ?(x>=65 && x<=70)
+                         |True  -> x - 55
+                         |False -> 16
+                        end
+             end
+  end
+
+;; Up to `k` more octal digits after the value `v` so far.
+octal (p:&Str) (i:Size) (v:Size) (k:Size) : (Size, Size) =
+  let d = byte p i in
+  ?(k>0 && d>=48 && d<=55)
+   |True  -> octal p (wrap_add i 1) (wrap_add (wrap_mul v 8) (d - 48)) (k - 1)
+   |False -> (v, i)
+  end
+
+;; `\x{...}`: hex digits up to `}`, at most U+10FFFF.
+hex_braced (p:&Str) (n:Size, n==len p) (i:Size) (v:Size) (digits:Size) : Res Str (Size, Size) =
+  ?(i<n)
+   |False -> Er (err "invalid escape sequence" i)
+   |True  -> let d = byte p i in
+             ?(d==125 && digits>0)
+              |True  -> Ok (v, i + 1)
+              |False -> let h = hex d in
+                        let next = wrap_add (wrap_mul v 16) h in
+                        ?(h<16 && v<69632 && next<=1114111)
+                         |True  -> hex_braced p
+                                              n (i + 1) next (wrap_add digits 1)
+                         |False -> Er (err "invalid escape sequence" i)
+                        end
+             end
+  end
+  %(n - i)
+
+;; The code point an escape stands for, `i` just past the backslash, and where it ends.
+escape_char (p:&Str) (i:Size) : Res Str (Size, Size) =
+  let c = byte p i in
+  let next = wrap_add i 1 in
+  ?c |256 -> Er (err "trailing backslash at end of expression" i)
+     |97  -> Ok (7, next)
+     |102 -> Ok (12, next)
+     |116 -> Ok (9, next)
+     |110 -> Ok (10, next)
+     |114 -> Ok (13, next)
+     |118 -> Ok (11, next)
+     |48  -> Ok (octal p next 0 2)
+     |120 -> ?is p next '{'
+              |True  -> ?(len p<1000000)
+                         |True  -> hex_braced p (len p) (wrap_add i 2) 0 0
+                         |False -> Er "pattern too long"
+                        end
+              |False -> let h1 = hex (byte p next) in
+                        let h2 = hex (byte p (wrap_add i 2)) in
+                        ?(h1<16 && h2<16)
+                         |True  -> Ok (h1 * 16 + h2, wrap_add i 3)
+                         |False -> Er (err "invalid escape sequence" i)
+                        end
+             end
+     |112 -> Er (err "Unicode classes are not supported yet" i)
+     |80  -> Er (err "Unicode classes are not supported yet" i)
+     |_   -> ?(c>=49 && c<=55)
+              |True  -> let d = byte p next in
+                        ?(d>=48 && d<=55)
+                         |True  -> Ok (octal p next (c - 48) 2)
+                         |False -> Er (err "invalid escape sequence" i)
+                        end
+              |False -> ?(c<128 && !(is_word c) || c==95)
+                         |True  -> Ok (c, next)
+                         |False -> Er (err "invalid escape sequence" i)
+                        end
+             end
+  end
+
+;; The end of the run of word bytes from `i`.
+word_end (p:&Str) (n:Size, n==len p) (i:Size) : Size =
+  ?(i<n)
+   |False -> i
+   |True  -> ?is_word (byte p i)
+              |True  -> word_end p n (i + 1)
+              |False -> i
+             end
+  end
+  %(n - i)
+
+;; `[:name:]` inside a class, `i` just past `[:`. `None` when there is no `:]`,
+;; which makes the `[` a literal, as in Go.
+named_class (p:&Str) (i:Size) : Opt (Res Str (Vec (Size, Size), Size)) =
+  let neg = is p i '^' in
+  let a = ?neg |True -> wrap_add i 1 |False -> i end in
+  let b = word_end p (len p) a in
+  ?(is p b ':' && is p (wrap_add b 1) ']')
+   |False -> None
+   |True  -> ?posix &(cut p a b)
+              |None    -> Some (Er (err "invalid character class range" i))
+              |Some rs -> ?neg |True  -> Some (Ok (negate &rs, wrap_add b 2))
+                               |False -> Some (Ok (dup &rs, wrap_add b 2))
+                          end
+             end
+  end
+
+;; One class member's code point: an escape or a literal.
+class_char (p:&Str) (i:Size) : Res Str (Size, Size) =
+  ?is p i '\\'
+   |True  -> escape_char p (wrap_add i 1)
+   |False -> let cw = decode p i in
+             let c = shr cw 3 in
+             let w = band cw 7 in
+             ?(c==65533 && w==1)
+              |True  -> Er (err "invalid UTF-8" i)
+              |False -> Ok (c, wrap_add i w)
+             end
+  end
+
+;; A single code point or a range `lo-hi`, added to `acc`.
+class_range (p:&Str) (i:Size) (acc:Vec (Size, Size)) : Res Str (Vec (Size, Size), Size) =
+  ?class_char p i
+   |Er e       -> Er e
+   |Ok (lo, j) -> ?(is p j '-' && !(is p (wrap_add j 1) ']') && wrap_add j 1<len p)
+                   |False -> Ok (push acc (lo, lo), j)
+                   |True  -> ?class_char p (wrap_add j 1)
+                              |Er e       -> Er e
+                              |Ok (hi, k) -> ?(lo<=hi)
+                                              |True  -> Ok (push acc (lo, hi), k)
+                                              |False -> Er (err "invalid character class range"
+                                                                i)
+                                             end
+                             end
+                  end
+  end
+
+;; The members of a class up to its `]`; `first` makes a leading `]` a literal.
+members (p:&Str) (i:Size) (acc:Vec (Size, Size)) (first:Bool) (fuel:U64) : Res Str (Vec (Size, Size), Size) =
+  ?fuel |0 -> Er (err "missing closing ]" i)
+        |_ -> ?(i<len p)
+               |False -> Er (err "missing closing ]" i)
+               |True  -> ?(is p i ']' && !first)
+                          |True  -> Ok (acc, i + 1)
+                          |False -> ?(is p i '[' && is p (i + 1) ':')
+                                     |True  -> ?named_class p (wrap_add i 2)
+                                                |Some (Ok (rs, j)) -> members p
+                                                                              j (concat_vec &acc &rs) False (fuel - 1)
+                                                |Some (Er e)       -> Er (dup &e)
+                                                |None              -> single p
+                                                                             i acc (fuel - 1)
+                                               end
+                                     |False -> ?is p i '\\'
+                                                |True  -> ?perl (byte p (i + 1))
+                                                           |Some rs -> members p
+                                                                               (wrap_add i 2) (concat_vec &acc &rs) False (fuel - 1)
+                                                           |None    -> single p
+                                                                              i acc (fuel - 1)
+                                                          end
+                                                |False -> single p
+                                                                 i acc (fuel - 1)
+                                               end
+                                    end
+                         end
+              end
+  end
+  %fuel
+
+single (p:&Str) (i:Size) (acc:Vec (Size, Size)) (fuel:U64) : Res Str (Vec (Size, Size), Size) =
+  ?fuel |0 -> Er (err "missing closing ]" i)
+        |_ -> ?class_range p i acc
+               |Er e       -> Er e
+               |Ok (rs, j) -> members p j (dup &rs) False (fuel - 1)
+              end
+  end
+  %fuel
+
+;; A bracketed class, `i` just past `[`.
+bracket (p:&Str) (i:Size) (fl:U64) : Res Str (Vec (Size, Size), Size) =
+  let neg = is p i '^' in
+  let a = ?neg |True -> wrap_add i 1 |False -> i end in
+  ?members p a empty True (wrap_add (len p) 1)
+   |Er e       -> Er e
+   |Ok (rs, j) -> let folded = ?(band fl 1==0) |True -> normalize &rs |False -> fold_case &rs end in
+                  ?neg |True  -> Ok (negate &folded, j)
+                       |False -> Ok (folded, j)
+                  end
+  end
+
+number (p:&Str) (n:Size, n==len p) (i:Size) (v:Size) (digits:Size) : (Size, Size, Size) =
+  ?(i<n)
+   |False -> (v, digits, i)
+   |True  -> let d = byte p i in
+             ?(d>=48 && d<=57)
+              |True  -> number p
+                               n (i + 1) (min (wrap_add (wrap_mul v 10) (d - 48)) 100000) (wrap_add digits 1)
+              |False -> (v, digits, i)
+             end
+  end
+  %(n - i)
+
+;; `{n}`, `{n,}` or `{n,m}` from `i`, just past `{`: the bounds, whether there is
+;; an upper one, and where it ends. `None` when it is not one, which makes the
+;; `{` a literal.
+counts (p:&Str) (i:Size) : Opt (Size, Size, Bool, Size) =
+  ?(len p<1000000)
+   |False -> None
+   |True  -> ?number p (len p) i 0 0
+              |(lo, d1, j) -> ?(d1==0)
+                               |True  -> None
+                               |False -> ?is p j '}'
+                                          |True  -> Some (lo, lo, True, wrap_add j 1)
+                                          |False -> ?is p j ','
+                                                     |False -> None
+                                                     |True  -> ?number p (len p) (wrap_add j 1) 0 0
+                                                                |(hi, d2, k) -> ?is p k '}'
+                                                                                 |False -> None
+                                                                                 |True  -> Some (lo, hi, d2>0, wrap_add k 1)
+                                                                                end
+                                                               end
+                                                    end
+                                         end
+                              end
+             end
+  end
+
+cat_of (xs:Vec Node) : Node =
+  ?(len &xs==0)
+   |True  -> Empty
+   |False -> ?(len &xs==1)
+              |True  -> dup &(get &xs 0)
+              |False -> Cat xs
+             end
+  end
+
+copies (x:&Node) (k:Size) (acc:Vec Node) : Vec Node =
+  ?k |0 -> acc
+     |_ -> copies x (k - 1) (push acc (dup x))
+  end
+
+;; `x` up to `k` more times: `(x(x(x)?)?)?`.
+optional (x:&Node) (k:Size) (greedy:Bool) : Node =
+  ?k |0 -> Empty
+     |1 -> rep_of 2 (dup x) greedy
+     |_ -> rep_of 2 (Cat [dup x, optional x (k - 1) greedy]) greedy
+  end
+
+same_op (x:&Node) (op:Size) (g:Bool) : Bool =
+  ?x |Star y h  -> op==0 && h==g
+     |Plus y h  -> op==1 && h==g
+     |Quest y h -> op==2 && h==g
+     |_         -> False
+  end
+
+;; `*` (0), `+` (1) or `?` (2) over `x`, simplified as Go's `simplify1` does: a
+;; repetition of the empty match is the empty match, and `(?:x*)*` is `x*`.
+rep_of (op:Size) (x:Node) (g:Bool) : Node =
+  ?(x==Empty || same_op &x op g)
+   |True  -> x
+   |False -> ?op |0 -> Star x g
+                 |1 -> Plus x g
+                 |_ -> Quest x g
+             end
+  end
+
+;; `x{lo,hi}` as Go's `Simplify` spells it out: `x{0,}` is `x*`, `x{1,}` is
+;; `x+`, `x{3,}` is `xxx+`, and `x{2,5}` is `xx(x(x(x)?)?)?`.
+counted (x:&Node) (lo:Size) (hi:Size) (bounded:Bool) (greedy:Bool) : Node =
+  ?bounded |False -> ?lo |0 -> rep_of 0 (dup x) greedy
+                         |1 -> rep_of 1 (dup x) greedy
+                         |_ -> cat_of (push (copies x (lo - 1) empty)
+                                            (rep_of 1 (dup x) greedy))
+                     end
+           |True  -> ?(hi>lo)
+                      |True  -> cat_of (push (copies x lo empty)
+                                             (optional x (hi - lo) greedy))
+                      |False -> cat_of (copies x lo empty)
+                     end
+  end
+
+;; A repetition operator right after another one.
+nested (p:&Str) (i:Size) : Bool =
+  ?(is p i '*' || is p i '+' || is p i '?')
+   |True  -> True
+   |False -> is p i '{' && counts p (wrap_add i 1)!=None
+  end
+
+;; The repetition after the atom `x`, if there is one. Laziness is `?` after the
+;; operator, flipped by `(?U)`.
+repeat (p:&Str) (i:Size) (fl:U64) (x:Node) : Res Str (Node, Size) =
+  let c = byte p i in
+  let lazy = is p (wrap_add i 1) '?' in
+  let greedy = lazy==(band fl 8!=0) in
+  let j = ?lazy |True -> wrap_add i 2 |False -> wrap_add i 1 end in
+  ?(c==42 || c==43 || c==63)
+   |True  -> ?nested p j
+              |True  -> Er (err "invalid nested repetition operator" i)
+              |False -> ?c |42 -> Ok (rep_of 0 x greedy, j)
+                           |43 -> Ok (rep_of 1 x greedy, j)
+                           |_  -> Ok (rep_of 2 x greedy, j)
+                        end
+             end
+   |False -> ?(c==123)
+              |False -> Ok (x, i)
+              |True  -> ?counts p (wrap_add i 1)
+                         |None                      -> Ok (x, i)
+                         |Some (lo, hi, bounded, k) -> ?(lo>1000 || hi>1000 || bounded && hi<lo)
+                                                        |True  -> Er (err "invalid repeat count"
+                                                                          i)
+                                                        |False -> let lz = is p k '?' in
+                                                                  let g = lz==(band fl 8!=0) in
+                                                                  let e = ?lz |True -> wrap_add k 1 |False -> k end in
+                                                                  ?nested p e
+                                                                   |True  -> Er (err "invalid nested repetition operator"
+                                                                                     i)
+                                                                   |False -> Ok (counted &x lo hi bounded g, e)
+                                                                  end
+                                                       end
+                        end
+             end
+  end
+
+;; `\Q...\E`: every code point up to `\E` or the end, literally.
+quoted (p:&Str) (n:Size, n==len p) (i:Size) (fl:U64) (acc:Vec Node) (fuel:U64) : Res Str (Node, Size) =
+  ?fuel |0 -> Er "pattern too long"
+        |_ -> ?(i<n)
+               |False -> Ok (cat_of acc, i)
+               |True  -> ?(is p i '\\' && is p (i + 1) 'E')
+                          |True  -> Ok (cat_of acc, wrap_add i 2)
+                          |False -> let cw = decode p i in
+                                    let c = shr cw 3 in
+                                    let w = band cw 7 in
+                                    ?(c==65533 && w==1)
+                                     |True  -> Er (err "invalid UTF-8" i)
+                                     |False -> quoted p
+                                                      n (wrap_add i w) fl (push acc (Class (lit fl c))) (fuel - 1)
+                                    end
+                         end
+              end
+  end
+  %fuel
+
+;; An escape outside a class, `i` just past the backslash.
+escape (p:&Str) (i:Size) (fl:U64) : Res Str (Node, Size) =
+  let next = wrap_add i 1 in
+  ?byte p i
+   |65  -> Ok (Assert BText, next)
+   |122 -> Ok (Assert EText, next)
+   |98  -> Ok (Assert WordB, next)
+   |66  -> Ok (Assert NoWordB, next)
+   |81  -> ?(len p<1000000)
+            |True  -> quoted p (len p) next fl empty (len p + 1)
+            |False -> Er "pattern too long"
+           end
+   |c   -> ?perl c
+            |Some rs -> Ok (Class (dup &rs), next)
+            |None    -> ?escape_char p i
+                         |Er e      -> Er e
+                         |Ok (x, j) -> Ok (Class (lit fl x), j)
+                        end
+           end
+  end
+
+;; A flag's bit: `i` 1, `m` 2, `s` 4, `U` 8; 0 for anything else.
+flag_bit (c:Size) : U64 =
+  ?c |105 -> 1
+     |109 -> 2
+     |115 -> 4
+     |85  -> 8
+     |_   -> 0
+  end
+
+;; The inside of a group up to its `)`. `cap` is the group's number when it
+;; captures; the flags go back to `outer` after it.
+inner (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (cap:Opt Size) (outer:U64) (fuel:U64) : Res Str (Opt Node, Size, Vec Str, U64) =
+  ?fuel |0 -> Er "pattern too complex"
+        |_ -> ?alt p i fl names depth (fuel - 1)
+               |Er e          -> Er e
+               |Ok (x, j, ns) -> ?is p j ')'
+                                  |False -> Er (err "missing closing )" j)
+                                  |True  -> ?cap |Some k -> Ok (Some (Group (dup &x) k), wrap_add j 1, dup &ns, outer)
+                                                 |None   -> Ok (Some (dup &x), wrap_add j 1, dup &ns, outer)
+                                            end
+                                 end
+              end
+  end
+  %fuel
+
+;; `(?flags)` or `(?flags:re)`, `i` just past `(?`.
+flags (p:&Str) (i:Size) (fl:U64) (outer:U64) (neg:Bool) (seen:Bool) (names:Vec Str) (depth:Size) (fuel:U64) : Res Str (Opt Node, Size, Vec Str, U64) =
+  ?fuel |0 -> Er "pattern too complex"
+        |_ -> let c = byte p i in
+              let next = wrap_add i 1 in
+              ?c |45 -> ?neg |True  -> Er (err "invalid or unsupported Perl syntax"
+                                               i)
+                             |False -> flags p
+                                             next fl outer True False names depth (fuel - 1)
+                        end
+                 |58 -> ?(neg && !seen)
+                         |True  -> Er (err "invalid or unsupported Perl syntax"
+                                           i)
+                         |False -> inner p
+                                         next fl names depth None outer (fuel - 1)
+                        end
+                 |41 -> ?(neg && !seen)
+                         |True  -> Er (err "invalid or unsupported Perl syntax"
+                                           i)
+                         |False -> Ok (None, next, names, fl)
+                        end
+                 |_  -> let bit = flag_bit c in
+                        ?(bit==0)
+                         |True  -> Er (err "invalid or unsupported Perl syntax"
+                                           i)
+                         |False -> ?neg |True  -> flags p
+                                                        next (band fl (bnot bit)) outer neg True names depth (fuel - 1)
+                                        |False -> flags p
+                                                        next (bor fl bit) outer neg True names depth (fuel - 1)
+                                   end
+                        end
+              end
+  end
+  %fuel
+
+;; `(?P<name>re)` or `(?<name>re)`, `i` at the name.
+named (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (fuel:U64) : Res Str (Opt Node, Size, Vec Str, U64) =
+  ?fuel |0 -> Er "pattern too complex"
+        |_ -> let j = word_end p (len p) i in
+              ?(j>i && is p j '>')
+               |False -> Er (err "invalid named capture" i)
+               |True  -> let k = len &names in
+                         inner p
+                               (wrap_add j 1) fl (push names (cut p i j)) depth (Some k) fl (fuel - 1)
+              end
+  end
+  %fuel
+
+;; A group, `i` just past `(`.
+paren (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (fuel:U64) : Res Str (Opt Node, Size, Vec Str, U64) =
+  ?fuel |0 -> Er "pattern too complex"
+        |_ -> ?(depth>=1000)
+               |True  -> Er (err "expression nests too deeply" i)
+               |False -> let d = depth + 1 in
+                         ?is p i '?'
+                          |False -> let k = len &names in
+                                    inner p
+                                          i fl (push names "") d (Some k) fl (fuel - 1)
+                          |True  -> ?(is p (wrap_add i 1) 'P' && is p (wrap_add i 2) '<')
+                                     |True  -> named p
+                                                     (wrap_add i 3) fl names d (fuel - 1)
+                                     |False -> ?(is p (wrap_add i 1) '<' && !(is p (wrap_add i 2) '=') && !(is p (wrap_add i 2) '!'))
+                                                |True  -> named p
+                                                                (wrap_add i 2) fl names d (fuel - 1)
+                                                |False -> flags p
+                                                                (wrap_add i 1) fl fl False False names d (fuel - 1)
+                                               end
+                                    end
+                         end
+              end
+  end
+  %fuel
+
+;; One atom, before any repetition. `None` for `(?flags)`, which changes the
+;; flags and matches nothing.
+atom (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (fuel:U64) : Res Str (Opt Node, Size, Vec Str, U64) =
+  ?fuel |0 -> Er "pattern too complex"
+        |_ -> let next = wrap_add i 1 in
+              ?byte p i
+               |40 -> paren p next fl names depth (fuel - 1)
+               |91 -> ?bracket p next fl
+                       |Er e       -> Er e
+                       |Ok (rs, j) -> Ok (Some (Class (dup &rs)), j, names, fl)
+                      end
+               |46 -> ?(band fl 4==0)
+                       |True  -> Ok (Some (Class [(0, 9), (11, 1114111)]), next, names, fl)
+                       |False -> Ok (Some (Class [(0, 1114111)]), next, names, fl)
+                      end
+               |94 -> ?(band fl 2==0)
+                       |True  -> Ok (Some (Assert BText), next, names, fl)
+                       |False -> Ok (Some (Assert Bol), next, names, fl)
+                      end
+               |36 -> ?(band fl 2==0)
+                       |True  -> Ok (Some (Assert EText), next, names, fl)
+                       |False -> Ok (Some (Assert Eol), next, names, fl)
+                      end
+               |92 -> ?escape p next fl
+                       |Er e      -> Er e
+                       |Ok (x, j) -> Ok (Some (dup &x), j, names, fl)
+                      end
+               |42 -> Er (err "missing argument to repetition operator" i)
+               |43 -> Er (err "missing argument to repetition operator" i)
+               |63 -> Er (err "missing argument to repetition operator" i)
+               |c  -> ?(c==123 && counts p next!=None)
+                       |True  -> Er (err "missing argument to repetition operator"
+                                         i)
+                       |False -> let cw = decode p i in
+                                 let x = shr cw 3 in
+                                 let w = band cw 7 in
+                                 ?(x==65533 && w==1)
+                                  |True  -> Er (err "invalid UTF-8" i)
+                                  |False -> Ok (Some (Class (lit fl x)), wrap_add i w, names, fl)
+                                 end
+                      end
+              end
+  end
+  %fuel
+
+;; A concatenation, up to `|`, `)` or the end, with the flags as they stand at
+;; its end.
+seq (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (acc:Vec Node) (fuel:U64) : Res Str (Node, Size, Vec Str, U64) =
+  ?fuel |0 -> Er "pattern too complex"
+        |_ -> ?(i>=len p || is p i '|' || is p i ')')
+               |True  -> Ok (cat_of acc, i, names, fl)
+               |False -> ?atom p i fl names depth (fuel - 1)
+                          |Er e                   -> Er e
+                          |Ok (None, j, ns, f2)   -> seq p
+                                                         j f2 (dup &ns) depth acc (fuel - 1)
+                          |Ok (Some x, j, ns, f2) -> ?repeat p j f2 (dup &x)
+                                                      |Er e      -> Er e
+                                                      |Ok (y, k) -> seq p
+                                                                        k f2 (dup &ns) depth (push acc (dup &y)) (fuel - 1)
+                                                     end
+                         end
+              end
+  end
+  %fuel
+
+;; The branches of an alternation, in priority order.
+branches (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (acc:Vec Node) (fuel:U64) : Res Str (Node, Size, Vec Str) =
+  ?fuel |0 -> Er "pattern too complex"
+        |_ -> ?seq p i fl names depth empty (fuel - 1)
+               |Er e              -> Er e
+               |Ok (x, j, ns, f2) -> let more = push acc (dup &x) in
+                                     ?is p j '|'
+                                      |True  -> branches p
+                                                         (wrap_add j 1) f2 (dup &ns) depth more (fuel - 1)
+                                      |False -> ?(len &more==1)
+                                                 |True  -> Ok (dup &x, j, dup &ns)
+                                                 |False -> Ok (Alt more, j, dup &ns)
+                                                end
+                                     end
+              end
+  end
+  %fuel
+
+alt (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (fuel:U64) : Res Str (Node, Size, Vec Str) =
+  ?fuel |0 -> Er "pattern too complex"
+        |_ -> branches p i fl names depth empty (fuel - 1)
+  end
+  %fuel
+
+;; ---------------------------------------------------------------- compile
+;; Whether `x` can match the empty string.
+nullable (x:&Node) (fuel:U64) : Bool =
+  ?fuel |0 -> True
+        |_ -> ?x |Empty     -> True
+                 |Class rs  -> False
+                 |Assert a  -> True
+                 |Cat xs    -> len &(filter (\y -> !(nullable &y (fuel - 1))) xs)==0
+                 |Alt xs    -> len &(filter (\y -> nullable &y (fuel - 1)) xs)>0
+                 |Star y g  -> True
+                 |Plus y g  -> nullable y (fuel - 1)
+                 |Quest y g -> True
+                 |Group y k -> nullable y (fuel - 1)
+              end
+  end
+  %fuel
+
+;; How many instructions `x` compiles to; `fuel` runs out only on a tree too
+;; large to compile, which then counts as too large.
+size_of (x:&Node) (fuel:U64) : Size =
+  ?fuel |0 -> 100000000
+        |_ -> ?x |Empty     -> 0
+                 |Class rs  -> 1
+                 |Assert a  -> 1
+                 |Cat xs    -> fold (\acc y -> wrap_add acc (size_of &y (fuel - 1)))
+                                    0 xs
+                 |Alt xs    -> wrap_add (fold (\acc y -> wrap_add acc (size_of &y (fuel - 1)))
+                                              0 xs)
+                                        (wrap_mul 2 (wrap_sub (len xs) 1))
+                 |Star y g  -> wrap_add (size_of y (fuel - 1)) 2
+                 |Plus y g  -> wrap_add (size_of y (fuel - 1)) 1
+                 |Quest y g -> wrap_add (size_of y (fuel - 1)) 1
+                 |Group y k -> wrap_add (size_of y (fuel - 1)) 2
+              end
+  end
+  %fuel
+
+emit (x:&Node) (prog:Vec Inst) (fuel:U64) : Vec Inst =
+  ?fuel |0 -> prog
+        |_ -> let pc = len &prog in
+              ?x |Empty     -> prog
+                 |Class rs  -> push prog (IRange (dup rs))
+                 |Assert a  -> push prog (IAssert (dup a))
+                 |Cat xs    -> emit_all xs (len xs) 0 prog (fuel - 1)
+                 |Alt xs    -> emit_alt xs
+                                        (len xs) 0 (wrap_add pc (size_of x 100000000)) prog (fuel - 1)
+                 ;; A loop, or `(y+)?` when `y` can match empty, as Go compiles
+                 ;; them: the loop would drop the iteration that matched "".
+                 |Star y g  -> let sy = size_of y 100000000 in
+                               let body = wrap_add pc 1 in
+                               let out = wrap_add pc (wrap_add sy 2) in
+                               let split = ?g |True -> ISplit body out |False -> ISplit out body end in
+                               let looped = emit y (push prog split) (fuel - 1) in
+                               ?nullable y 100000000
+                                |False -> push looped (IJmp pc)
+                                |True  -> ?g |True  -> push looped
+                                                            (ISplit body out)
+                                             |False -> push looped
+                                                            (ISplit out body)
+                                          end
+                               end
+                 |Plus y g  -> let sy = size_of y 100000000 in
+                               let out = wrap_add pc (wrap_add sy 1) in
+                               let split = ?g |True -> ISplit pc out |False -> ISplit out pc end in
+                               push (emit y prog (fuel - 1)) split
+                 |Quest y g -> let sy = size_of y 100000000 in
+                               let body = wrap_add pc 1 in
+                               let out = wrap_add pc (wrap_add sy 1) in
+                               let split = ?g |True -> ISplit body out |False -> ISplit out body end in
+                               emit y (push prog split) (fuel - 1)
+                 |Group y k -> push (emit y
+                                          (push prog (ISave (wrap_mul 2 k))) (fuel - 1))
+                                    (ISave (wrap_add (wrap_mul 2 k) 1))
+              end
+  end
+  %fuel
+
+emit_all (xs:&Vec Node) (n:Size, n==len xs) (k:Size) (prog:Vec Inst) (fuel:U64) : Vec Inst =
+  ?fuel |0 -> prog
+        |_ -> ?(k<n)
+               |False -> prog
+               |True  -> emit_all xs
+                                  n (k + 1) (emit &(get xs k) prog (fuel - 1)) (fuel - 1)
+              end
+  end
+  %fuel
+
+;; Every branch but the last is `ISplit here next-branch`, the branch, and a
+;; jump to `out`.
+emit_alt (xs:&Vec Node) (n:Size) (k:Size) (out:Size) (prog:Vec Inst) (fuel:U64) : Vec Inst =
+  ?fuel |0 -> prog
+        |_ -> ?(k<n && k<len xs)
+               |False -> prog
+               |True  -> ?(k + 1==n)
+                          |True  -> emit &(get xs k) prog (fuel - 1)
+                          |False -> let pc = len &prog in
+                                    let sx = size_of &(get xs k) 100000000 in
+                                    let branch = emit &(get xs k) (push prog (ISplit (wrap_add pc 1) (wrap_add pc (wrap_add sx 2)))) (fuel - 1) in
+                                    emit_alt xs
+                                             n (k + 1) out (push branch (IJmp out)) (fuel - 1)
+                         end
+              end
+  end
+  %fuel
+
+;; The byte every match must start with, 256 when there is none.
+first_byte (x:&Node) (fuel:U64) : Size =
+  ?fuel |0 -> 256
+        |_ -> ?x |Class [(lo, hi)] -> ?(lo==hi && lo<128)
+                                       |True  -> lo
+                                       |False -> 256
+                                      end
+                 |Cat xs           -> ?(len xs>0)
+                                       |True  -> first_byte &(get xs 0)
+                                                            (fuel - 1)
+                                       |False -> 256
+                                      end
+                 |Group y k        -> first_byte y (fuel - 1)
+                 |Plus y g         -> first_byte y (fuel - 1)
+                 |_                -> 256
+              end
+  end
+  %fuel
+
+;; Whether every match must start at the beginning of the subject.
+anchored_at (x:&Node) (fuel:U64) : Bool =
+  ?fuel |0 -> False
+        |_ -> ?x |Assert BText -> True
+                 |Cat xs       -> len xs>0 && anchored_at &(get xs 0) (fuel - 1)
+                 |Group y k    -> anchored_at y (fuel - 1)
+                 |_            -> False
+              end
+  end
+  %fuel
+
+;; The pattern, compiled once for the functions under API below; `Er` names what is
+;; wrong and at which byte.
+compile (p:&Str) : Res Str Regex =
+  ?(len p<1000000)
+   |False -> Er "pattern too long"
+   |True  -> ?alt p 0 0 [""] 0 (len p * 8 + 64)
+              |Er e             -> Er e
+              |Ok (x, i, names) -> ?(i<len p)
+                                    |True  -> Er (err "unexpected )" i)
+                                    |False -> let root = Group (dup &x) 0 in
+                                              ?(size_of &root 100000000>1000000)
+                                               |True  -> Er "expression too large"
+                                               |False -> Ok {source=dup p, prog=push (emit &root empty 100000000) IMatch, names=dup &names, first=first_byte &root 100000000, anchored=anchored_at &root 100000000}
+                                              end
+                                   end
+             end
+  end
+
+;; ---------------------------------------------------------------- run
+;; A thread list is one vector, so that it is updated in place: the count at 0,
+;; the dense program counters from 1, the sparse index from `1 + np`, and each
+;; counter's capture slots from `1 + 2np + pc*ns`. Arithmetic on these offsets
+;; wraps rather than carrying a proof, and `at` and `put` check the bound.
+at (v:&Vec Size) (i:Size) : Size =
+  ?(i<len v)
+   |True  -> get v i
+   |False -> 0
+  end
+
+put (v:Vec Size) (i:Size) (x:Size) : Vec Size =
+  ?(i<len v)
+   |True  -> set v i x
+   |False -> v
+  end
+
+zero (x:Size) : Size = 0
+
+unset (x:Size) : Size = 18446744073709551615
+
+slot_base (np:Size) (ns:Size) (pc:Size) : Size =
+  wrap_add (wrap_add 1 (wrap_mul 2 np)) (wrap_mul pc ns)
+
+has (l:&Vec Size) (np:Size) (pc:Size) : Bool =
+  let k = at l (wrap_add (wrap_add 1 np) pc) in
+  k<at l 0 && at l (wrap_add 1 k)==pc
+
+mark (l:Vec Size) (np:Size) (pc:Size) : Vec Size =
+  let c = at &l 0 in
+  let a = put l (wrap_add 1 c) pc in
+  let b = put a (wrap_add (wrap_add 1 np) pc) c in
+  put b 0 (wrap_add c 1)
+
+write_slots (l:Vec Size) (base:Size) (caps:&Vec Size) (n:Size, n==len caps) (j:Size) : Vec Size =
+  ?(j<n)
+   |False -> l
+   |True  -> write_slots (put l (wrap_add base j) (get caps j))
+                         base caps n (j + 1)
+  end
+  %(n - j)
+
+read_slots (l:&Vec Size) (base:Size) (ns:Size) (j:Size) (acc:Vec Size) : Vec Size =
+  ?(j<ns)
+   |False -> acc
+   |True  -> read_slots l base ns (j + 1) (push acc (at l (wrap_add base j)))
+  end
+  %(ns - j)
+
+holds (a:&Look) (s:&Str) (n:Size) (pos:Size) : Bool =
+  let before = ?(pos>0) |True -> byte s (pos - 1) |False -> 256 end in
+  let after = byte s pos in
+  ?a |Bol     -> pos==0 || before==10
+     |Eol     -> pos==n || after==10
+     |BText   -> pos==0
+     |EText   -> pos==n
+     |WordB   -> is_word before!=is_word after
+     |NoWordB -> is_word before==is_word after
+  end
+
+;; Add the thread at `pc` to `l`, following jumps, splits, saves and assertions
+;; to the instructions that consume or match. A counter already in the list is
+;; not added again, which is what bounds a step by the size of the program.
+add (prog:&Vec Inst) (np:Size) (ns:Size) (s:&Str) (n:Size) (pos:Size) (l:Vec Size) (pc:Size) (caps:Vec Size) (fuel:U64) : Vec Size =
+  ?fuel |0 -> l
+        |_ -> ?(pc<len prog && !(has &l np pc))
+               |False -> l
+               |True  -> let marked = mark l np pc in
+                         ?get prog pc
+                          |IJmp x     -> add prog
+                                             np ns s n pos marked x caps (fuel - 1)
+                          |ISplit x y -> add prog
+                                             np ns s n pos (add prog np ns s n pos marked x (dup &caps) (fuel - 1)) y caps (fuel - 1)
+                          |ISave k    -> add prog
+                                             np ns s n pos marked (pc + 1) (put caps k pos) (fuel - 1)
+                          |IAssert a  -> ?holds &a s n pos
+                                          |True  -> add prog
+                                                        np ns s n pos marked (pc + 1) caps (fuel - 1)
+                                          |False -> marked
+                                         end
+                          |_          -> write_slots marked
+                                                     (slot_base np ns pc) &caps (len &caps) 0
+                         end
+              end
+  end
+  %fuel
+
+;; The position in `l` of its first matching thread, `count` when there is none.
+first_match (prog:&Vec Inst) (l:&Vec Size) (t:Size) (count:Size) : Size =
+  ?(t<count)
+   |False -> count
+   |True  -> let pc = at l (t + 1) in
+             ?(pc<len prog)
+              |False -> first_match prog l (t + 1) count
+              |True  -> ?get prog pc
+                         |IMatch -> t
+                         |_      -> first_match prog l (t + 1) count
+                        end
+             end
+  end
+  %(count - t)
+
+;; Step the threads before position `m` over the code point `c`, into `nl` at `next`.
+step (prog:&Vec Inst) (np:Size) (ns:Size) (s:&Str) (n:Size) (cl:&Vec Size) (nl:Vec Size) (t:Size) (m:Size) (c:Size) (next:Size) : Vec Size =
+  ?(t<m)
+   |False -> nl
+   |True  -> let pc = at cl (t + 1) in
+             ?(pc<len prog)
+              |False -> step prog np ns s n cl nl (t + 1) m c next
+              |True  -> ?get prog pc
+                         |IRange rs -> ?in_ranges rs (len rs) 0 c
+                                        |True  -> step prog
+                                                       np ns s n cl (add prog np ns s n next nl (pc + 1) (read_slots cl (slot_base np ns pc) ns 0 empty) (wrap_add np 1)) (t + 1) m c next
+                                        |False -> step prog
+                                                       np ns s n cl nl (t + 1) m c next
+                                       end
+                         |_         -> step prog
+                                            np ns s n cl nl (t + 1) m c next
+                        end
+             end
+  end
+  %(m - t)
+
+;; Advance to the next place `b` occurs, `n` when it does not.
+skip (s:&Str) (n:Size, n==len s) (i:Size) (b:Size) : Size =
+  ?(i<n)
+   |False -> n
+   |True  -> ?(byte s i==b)
+              |True  -> i
+              |False -> skip s n (i + 1) b
+             end
+  end
+  %(n - i)
+
+;; The simulation, one code point at a time: a new thread at each position until
+;; something matches, the match of the highest-priority thread kept, and the
+;; threads below it dropped.
+scan (s:&Str) (n:Size, n==len s) (re:&Regex) (np:Size) (ns:Size) (pos:Size) (cl:Vec Size) (nl:Vec Size) (best:Vec Size) (matched:Bool) (fuel:U64) : Vec Size =
+  ?fuel |0 -> best
+        |_ -> let count = at &cl 0 in
+              ?(count==0 && (matched || re.anchored && pos>0))
+               |True  -> best
+               |False -> let here = ?(count==0 && !matched && re.first<256) |True -> skip s n pos re.first |False -> pos end in
+                         let threads = ?(!matched && (here==0 || !re.anchored)) |True -> add &re.prog np ns s n here cl 0 (map unset &(range 0 ns)) (wrap_add np 1) |False -> cl end in
+                         let live = at &threads 0 in
+                         let m = first_match &re.prog &threads 0 live in
+                         let found = ?(m<live) |True -> read_slots &threads (slot_base np ns (at &threads (wrap_add m 1))) ns 0 empty |False -> best end in
+                         ?(here<n)
+                          |False -> found
+                          |True  -> let cw = decode s here in
+                                    let c = shr cw 3 in
+                                    let w = band cw 7 in
+                                    scan s
+                                         n re np ns (wrap_add here w) (step &re.prog np ns s n &threads (put nl 0 0) 0 m c (wrap_add here w)) threads found (matched || m<live) (fuel - 1)
+                         end
+              end
+  end
+  %fuel
+
+;; The capture slots of the leftmost-first match at or after `start`, two per
+;; group with 18446744073709551615 for one that did not take part; empty when
+;; there is no match.
+run (s:&Str) (re:&Regex) (start:Size) : Vec Size =
+  let np = len &re.prog in
+  let ns = wrap_mul 2 (len &re.names) in
+  let total = slot_base np ns np in
+  ?(len s<1000000000000)
+   |False -> empty
+   |True  -> scan s
+                  (len s) re np ns start (map zero &(range 0 total)) (map zero &(range 0 total)) empty False (len s + 2)
+  end
+
+;; ---------------------------------------------------------------- API
+;; Whether `re` matches anywhere in `s`.
+matches (s:&Str) (re:&Regex) : Bool = len &(run s re 0)>0
+
+;; The leftmost-first match as a byte range, start included and end excluded.
+find (s:&Str) (re:&Regex) : Opt (Size, Size) =
+  let c = run s re 0 in
+  ?(len &c>1)
+   |True  -> Some (get &c 0, get &c 1)
+   |False -> None
+  end
+
+;; Go's rule for empty matches: one right after the previous match is skipped,
+;; and after an empty match the search moves on one code point.
+all_from (s:&Str) (re:&Regex) (n:Size, n==len s) (pos:Size) (prev:Size) (acc:Vec (Size, Size)) (fuel:U64) : Vec (Size, Size) =
+  ?fuel |0 -> acc
+        |_ -> ?(pos<=n)
+               |False -> acc
+               |True  -> let c = run s re pos in
+                         ?(len &c>1)
+                          |False -> acc
+                          |True  -> let a = get &c 0 in
+                                    let b = get &c 1 in
+                                    let next = ?(b==pos) |False -> b |True -> ?(pos<n) |True -> wrap_add pos (width s pos) |False -> wrap_add n 1 end end in
+                                    ?(b==pos && a==prev)
+                                     |True  -> all_from s
+                                                        re n next b acc (fuel - 1)
+                                     |False -> all_from s
+                                                        re n next b (push acc (a, b)) (fuel - 1)
+                                    end
+                         end
+              end
+  end
+  %fuel
+
+;; Every non-overlapping match, left to right, as `FindAllStringIndex(s, -1)`.
+find_all (s:&Str) (re:&Regex) : Vec (Size, Size) =
+  ?(len s<1000000000000)
+   |False -> empty
+   |True  -> all_from s re (len s) 0 18446744073709551615 empty (len s + 2)
+  end
+
+;; The text of each group, 0 being the whole match.
+texts (s:&Str) (c:&Vec Size) (n:Size, n==len c) (k:Size) (acc:Vec (Opt Str)) : Vec (Opt Str) =
+  ?(k<n)
+   |False -> acc
+   |True  -> ?(k + 1<n)
+              |False -> acc
+              |True  -> let a = get c k in
+                        let b = get c (k + 1) in
+                        ?(a==18446744073709551615 || b==18446744073709551615)
+                         |True  -> texts s c n (k + 2) (push acc None)
+                         |False -> texts s
+                                         c n (k + 2) (push acc (Some (cut s a b)))
+                        end
+             end
+  end
+  %(n - k)
+
+;; The whole match and the text of each group in order, `None` for a group
+;; that did not take part.
+captures (s:&Str) (re:&Regex) : Opt (Vec (Opt Str)) =
+  let c = run s re 0 in
+  ?(len &c>1)
+   |True  -> Some (texts s &c (len &c) 0 empty)
+   |False -> None
+  end
+
+index_in (names:&Vec Str) (n:Size) (k:Size) (name:&Str) : Opt Size =
+  ?(k<n && k<len names)
+   |False -> None
+   |True  -> ?(get names k==name)
+              |True  -> Some k
+              |False -> index_in names n (k + 1) name
+             end
+  end
+  %(n - k)
+
+;; The number of the group called `name`.
+group (re:&Regex) (name:&Str) : Opt Size =
+  ?(len name==0)
+   |True  -> None
+   |False -> index_in &re.names (len &re.names) 0 name
+  end
+
+;; A decimal group number with no leading zero, as `Expand` reads one.
+group_number (name:&Str) : Opt Size =
+  ?(len name>1 && is name 0 '0' || len name>8)
+   |True  -> None
+   |False -> parse_u64 name
+  end
+
+;; The text of group `k` in the slots `c`, "" when it did not take part.
+group_text (s:&Str) (c:&Vec Size) (k:Size) : Str =
+  let a = at c (wrap_mul 2 k) in
+  let b = at c (wrap_add (wrap_mul 2 k) 1) in
+  ?(wrap_add (wrap_mul 2 k) 1<len c && a!=18446744073709551615)
+   |True  -> cut s a b
+   |False -> ""
+  end
+
+;; The first group called `name` that took part in the match, as `Expand` picks
+;; among groups sharing a name.
+taking_part (s:&Str) (c:&Vec Size) (names:&Vec Str) (n:Size) (k:Size) (name:&Str) : Opt Size =
+  ?(k<n && k<len names)
+   |False -> None
+   |True  -> ?(get names k==name && at c (wrap_mul 2 k)!=18446744073709551615)
+              |True  -> Some k
+              |False -> taking_part s c names n (k + 1) name
+             end
+  end
+  %(n - k)
+
+;; `Regexp.Expand`'s template: `$1`, `${1}`, `$name`, `${name}`, `$$`. A name that
+;; is not a group expands to nothing; a `$` that starts no name is itself.
+;; What the `$` at `i` expands to, and where the template goes on after it.
+dollar (t:&Str) (i:Size) (s:&Str) (c:&Vec Size) (re:&Regex) : (Str, Size) =
+  let next = wrap_add i 1 in
+  ?is t next '$'
+   |True  -> ("$", wrap_add i 2)
+   |False -> let brace = is t next '{' in
+             let a = ?brace |True -> wrap_add i 2 |False -> next end in
+             let b = ?(len t<1000000000000) |True -> word_end t (len t) a |False -> a end in
+             let e = ?brace |True -> wrap_add b 1 |False -> b end in
+             ?(b>a && (!brace || is t b '}'))
+              |False -> ("$", next)
+              |True  -> let name = cut t a b in
+                        ?group_number &name
+                         |Some v -> (group_text s c v, e)
+                         |None   -> ?taking_part s c &re.names (len &re.names) 0 &name
+                                     |Some v -> (group_text s c v, e)
+                                     |None   -> ("", e)
+                                    end
+                        end
+             end
+  end
+
+expand (out:Str) (t:&Str) (n:Size) (i:Size) (s:&Str) (c:&Vec Size) (re:&Regex) (fuel:U64) : Str =
+  ?fuel |0 -> out
+        |_ -> ?(i<n)
+               |False -> out
+               |True  -> let x = byte t i in
+                         ?(x!=36)
+                          |True  -> expand (push_str out &(byte_str (u8 x)))
+                                           t n (i + 1) s c re (fuel - 1)
+                          |False -> ?dollar t i s c re
+                                     |(piece, e) -> expand (push_str out &piece)
+                                                           t n e s c re (fuel - 1)
+                                    end
+                         end
+              end
+  end
+  %fuel
+
+replace_from (s:&Str) (re:&Regex) (tpl:&Str) (n:Size, n==len s) (search:Size) (last:Size) (out:Str) (fuel:U64) : Str =
+  ?fuel |0 -> push_str out &(cut s last n)
+        |_ -> ?(search<=n)
+               |False -> push_str out &(cut s last n)
+               |True  -> let c = run s re search in
+                         ?(len &c>1)
+                          |False -> push_str out &(cut s last n)
+                          |True  -> let a = get &c 0 in
+                                    let b = get &c 1 in
+                                    let before = push_str out &(cut s last a) in
+                                    let replaced = ?(b>last || a==0) |True -> ?(len tpl<1000000000000) |True -> expand before tpl (len tpl) 0 s &c re (len tpl + 1) |False -> before end |False -> before end in
+                                    let w = ?(search<n) |True -> width s search |False -> 0 end in
+                                    let next = ?(wrap_add search w>b) |True -> wrap_add search w |False -> ?(wrap_add search 1>b) |True -> wrap_add search 1 |False -> b end end in
+                                    replace_from s
+                                                 re tpl n next b replaced (fuel - 1)
+                         end
+              end
+  end
+  %fuel
+
+;; Every match replaced by the template, as `ReplaceAllString`.
+replace (s:&Str) (re:&Regex) (tpl:&Str) : Str =
+  ?(len s<1000000000000)
+   |False -> dup s
+   |True  -> replace_from s re tpl (len s) 0 0 "" (len s + 2)
+  end
+
+pieces (s:&Str) (ms:&Vec (Size, Size)) (n:Size, n==len ms) (k:Size) (beg:Size) (end_at:Size) (acc:Vec Str) : Vec Str =
+  ?(k<n)
+   |False -> ?(end_at!=len s)
+              |True  -> push acc (cut s beg (len s))
+              |False -> acc
+             end
+   |True  -> ?get ms k
+              |(a, b) -> ?(b!=0)
+                          |True  -> pieces s
+                                           ms n (k + 1) b a (push acc (cut s beg a))
+                          |False -> pieces s ms n (k + 1) b a acc
+                         end
+             end
+  end
+  %(n - k)
+
+;; The text between matches, as `Split(s, -1)`.
+split (s:&Str) (re:&Regex) : Vec Str =
+  ?(len &re.source>0 && len s==0)
+   |True  -> [""]
+   |False -> let ms = find_all s re in
+             pieces s &ms (len &ms) 0 0 0 empty
+  end

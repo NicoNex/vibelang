@@ -449,6 +449,217 @@ below (r:Rng) (bound:U64, bound>0) : (U64, Rng)
 unit (r:Rng) : (F64, Rng)
 ```
 
+## Regex
+
+```
+;; Regular expressions with Go's syntax and Go's semantics, run by a Pike VM: a
+;; Thompson NFA simulated with prioritised thread lists, so a match costs time
+;; linear in the subject for every pattern (docs/regex-design.md). Positions are
+;; byte offsets. `\d \w \s \b`, the POSIX classes and `(?i)` are ASCII, as the
+;; first four are in Go; `.` and `[^...]` match whole UTF-8 code points.
+;;
+;; ponytail: one engine, and a first-byte skip for a pattern that must start
+;; with one. Go's one-pass and backtracking engines, or a lazy DFA, are the
+;; upgrade when a profile blames the VM.
+type Look = Bol | Eol | BText | EText | WordB | NoWordB
+;; A class is sorted, merged code-point ranges, negation already applied.
+type Node = Empty | Class (Vec (Size, Size)) | Assert Look | Cat (Vec Node) | Alt (Vec Node) | Star Node Bool | Plus Node Bool | Quest Node Bool | Group Node Size
+;; `IRange`, `ISave` and `IAssert` go on to the next instruction; `ISplit`'s
+;; first target has priority.
+type Inst = IMatch | IRange (Vec (Size, Size)) | ISplit Size Size | IJmp Size | ISave Size | IAssert Look
+type Regex = { source:Str, prog:Vec Inst, names:Vec Str, first:Size, anchored:Bool }
+;; ---------------------------------------------------------------- bytes
+;; The byte at `i`, or 256 past the end.
+byte (s:&Str) (i:Size) : Size
+is (s:&Str) (i:Size) (c:Char) : Bool
+cont (x:Size) : Bool
+is_word (x:Size) : Bool
+;; The code point at `i` and its width, packed as `cp * 8 + width` so that the
+;; loop that calls it for every byte allocates nothing. An invalid or truncated
+;; sequence is U+FFFD one byte wide, as Go decodes it.
+decode (s:&Str) (i:Size) : Size
+two (s:&Str) (i:Size) (b0:Size) : Size
+three (s:&Str) (i:Size) (b0:Size) : Size
+four (s:&Str) (i:Size) (b0:Size) : Size
+width (s:&Str) (i:Size) : Size
+;; `s` from `a` to `b`, "" when that is not a range of it.
+cut (s:&Str) (a:Size) (b:Size) : Str
+;; ---------------------------------------------------------------- ranges
+lo_of (r:&(Size, Size)) : Size
+merge (acc:Vec (Size, Size)) (r:&(Size, Size)) : Vec (Size, Size)
+;; Sorted by start, with overlapping and adjacent ranges merged.
+normalize (rs:&Vec (Size, Size)) : Vec (Size, Size)
+;; What sorted, merged ranges leave out of [0, U+10FFFF].
+gaps (rs:&Vec (Size, Size)) (n:Size, n==len rs) (k:Size) (next:Size) (acc:Vec (Size, Size)) : Vec (Size, Size)
+negate (rs:&Vec (Size, Size)) : Vec (Size, Size)
+;; The part of [lo, hi] inside [from, to], moved 32 up or down.
+shifted (acc:Vec (Size, Size)) (lo:Size) (hi:Size) (from:Size) (to:Size) (up:Bool) : Vec (Size, Size)
+add_case (acc:Vec (Size, Size)) (r:&(Size, Size)) : Vec (Size, Size)
+;; Under `(?i)` a range also covers the other case of the ASCII letters in it.
+fold_case (rs:&Vec (Size, Size)) : Vec (Size, Size)
+;; A literal code point, folded when `(?i)` is on.
+lit (fl:U64) (c:Size) : Vec (Size, Size)
+in_ranges (rs:&Vec (Size, Size)) (n:Size, n==len rs) (k:Size) (c:Size) : Bool
+;; `\d \s \w`, and their capitals negated. ASCII, as in Go: `\s` has no `\v`.
+perl (c:Size) : Opt (Vec (Size, Size))
+posix (name:&Str) : Opt (Vec (Size, Size))
+;; ---------------------------------------------------------------- parse
+err (msg:&Str) (i:Size) : Str
+hex (x:Size) : Size
+;; Up to `k` more octal digits after the value `v` so far.
+octal (p:&Str) (i:Size) (v:Size) (k:Size) : (Size, Size)
+;; `\x{...}`: hex digits up to `}`, at most U+10FFFF.
+hex_braced (p:&Str) (n:Size, n==len p) (i:Size) (v:Size) (digits:Size) : Res Str (Size, Size)
+;; The code point an escape stands for, `i` just past the backslash, and where it ends.
+escape_char (p:&Str) (i:Size) : Res Str (Size, Size)
+;; The end of the run of word bytes from `i`.
+word_end (p:&Str) (n:Size, n==len p) (i:Size) : Size
+;; `[:name:]` inside a class, `i` just past `[:`. `None` when there is no `:]`,
+;; which makes the `[` a literal, as in Go.
+named_class (p:&Str) (i:Size) : Opt (Res Str (Vec (Size, Size), Size))
+;; One class member's code point: an escape or a literal.
+class_char (p:&Str) (i:Size) : Res Str (Size, Size)
+;; A single code point or a range `lo-hi`, added to `acc`.
+class_range (p:&Str) (i:Size) (acc:Vec (Size, Size)) : Res Str (Vec (Size, Size), Size)
+;; The members of a class up to its `]`; `first` makes a leading `]` a literal.
+members (p:&Str) (i:Size) (acc:Vec (Size, Size)) (first:Bool) (fuel:U64) : Res Str (Vec (Size, Size), Size)
+single (p:&Str) (i:Size) (acc:Vec (Size, Size)) (fuel:U64) : Res Str (Vec (Size, Size), Size)
+;; A bracketed class, `i` just past `[`.
+bracket (p:&Str) (i:Size) (fl:U64) : Res Str (Vec (Size, Size), Size)
+number (p:&Str) (n:Size, n==len p) (i:Size) (v:Size) (digits:Size) : (Size, Size, Size)
+;; `{n}`, `{n,}` or `{n,m}` from `i`, just past `{`: the bounds, whether there is
+;; an upper one, and where it ends. `None` when it is not one, which makes the
+;; `{` a literal.
+counts (p:&Str) (i:Size) : Opt (Size, Size, Bool, Size)
+cat_of (xs:Vec Node) : Node
+copies (x:&Node) (k:Size) (acc:Vec Node) : Vec Node
+;; `x` up to `k` more times: `(x(x(x)?)?)?`.
+optional (x:&Node) (k:Size) (greedy:Bool) : Node
+same_op (x:&Node) (op:Size) (g:Bool) : Bool
+;; `*` (0), `+` (1) or `?` (2) over `x`, simplified as Go's `simplify1` does: a
+;; repetition of the empty match is the empty match, and `(?:x*)*` is `x*`.
+rep_of (op:Size) (x:Node) (g:Bool) : Node
+;; `x{lo,hi}` as Go's `Simplify` spells it out: `x{0,}` is `x*`, `x{1,}` is
+;; `x+`, `x{3,}` is `xxx+`, and `x{2,5}` is `xx(x(x(x)?)?)?`.
+counted (x:&Node) (lo:Size) (hi:Size) (bounded:Bool) (greedy:Bool) : Node
+;; A repetition operator right after another one.
+nested (p:&Str) (i:Size) : Bool
+;; The repetition after the atom `x`, if there is one. Laziness is `?` after the
+;; operator, flipped by `(?U)`.
+repeat (p:&Str) (i:Size) (fl:U64) (x:Node) : Res Str (Node, Size)
+;; `\Q...\E`: every code point up to `\E` or the end, literally.
+quoted (p:&Str) (n:Size, n==len p) (i:Size) (fl:U64) (acc:Vec Node) (fuel:U64) : Res Str (Node, Size)
+;; An escape outside a class, `i` just past the backslash.
+escape (p:&Str) (i:Size) (fl:U64) : Res Str (Node, Size)
+;; A flag's bit: `i` 1, `m` 2, `s` 4, `U` 8; 0 for anything else.
+flag_bit (c:Size) : U64
+;; The inside of a group up to its `)`. `cap` is the group's number when it
+;; captures; the flags go back to `outer` after it.
+inner (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (cap:Opt Size) (outer:U64) (fuel:U64) : Res Str (Opt Node, Size, Vec Str, U64)
+;; `(?flags)` or `(?flags:re)`, `i` just past `(?`.
+flags (p:&Str) (i:Size) (fl:U64) (outer:U64) (neg:Bool) (seen:Bool) (names:Vec Str) (depth:Size) (fuel:U64) : Res Str (Opt Node, Size, Vec Str, U64)
+;; `(?P<name>re)` or `(?<name>re)`, `i` at the name.
+named (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (fuel:U64) : Res Str (Opt Node, Size, Vec Str, U64)
+;; A group, `i` just past `(`.
+paren (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (fuel:U64) : Res Str (Opt Node, Size, Vec Str, U64)
+;; One atom, before any repetition. `None` for `(?flags)`, which changes the
+;; flags and matches nothing.
+atom (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (fuel:U64) : Res Str (Opt Node, Size, Vec Str, U64)
+;; A concatenation, up to `|`, `)` or the end, with the flags as they stand at
+;; its end.
+seq (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (acc:Vec Node) (fuel:U64) : Res Str (Node, Size, Vec Str, U64)
+;; The branches of an alternation, in priority order.
+branches (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (acc:Vec Node) (fuel:U64) : Res Str (Node, Size, Vec Str)
+alt (p:&Str) (i:Size) (fl:U64) (names:Vec Str) (depth:Size) (fuel:U64) : Res Str (Node, Size, Vec Str)
+;; ---------------------------------------------------------------- compile
+;; Whether `x` can match the empty string.
+nullable (x:&Node) (fuel:U64) : Bool
+;; How many instructions `x` compiles to; `fuel` runs out only on a tree too
+;; large to compile, which then counts as too large.
+size_of (x:&Node) (fuel:U64) : Size
+emit (x:&Node) (prog:Vec Inst) (fuel:U64) : Vec Inst
+emit_all (xs:&Vec Node) (n:Size, n==len xs) (k:Size) (prog:Vec Inst) (fuel:U64) : Vec Inst
+;; Every branch but the last is `ISplit here next-branch`, the branch, and a
+;; jump to `out`.
+emit_alt (xs:&Vec Node) (n:Size) (k:Size) (out:Size) (prog:Vec Inst) (fuel:U64) : Vec Inst
+;; The byte every match must start with, 256 when there is none.
+first_byte (x:&Node) (fuel:U64) : Size
+;; Whether every match must start at the beginning of the subject.
+anchored_at (x:&Node) (fuel:U64) : Bool
+;; The pattern, compiled once for the functions under API below; `Er` names what is
+;; wrong and at which byte.
+compile (p:&Str) : Res Str Regex
+;; ---------------------------------------------------------------- run
+;; A thread list is one vector, so that it is updated in place: the count at 0,
+;; the dense program counters from 1, the sparse index from `1 + np`, and each
+;; counter's capture slots from `1 + 2np + pc*ns`. Arithmetic on these offsets
+;; wraps rather than carrying a proof, and `at` and `put` check the bound.
+at (v:&Vec Size) (i:Size) : Size
+put (v:Vec Size) (i:Size) (x:Size) : Vec Size
+zero (x:Size) : Size
+unset (x:Size) : Size
+slot_base (np:Size) (ns:Size) (pc:Size) : Size
+has (l:&Vec Size) (np:Size) (pc:Size) : Bool
+mark (l:Vec Size) (np:Size) (pc:Size) : Vec Size
+write_slots (l:Vec Size) (base:Size) (caps:&Vec Size) (n:Size, n==len caps) (j:Size) : Vec Size
+read_slots (l:&Vec Size) (base:Size) (ns:Size) (j:Size) (acc:Vec Size) : Vec Size
+holds (a:&Look) (s:&Str) (n:Size) (pos:Size) : Bool
+;; Add the thread at `pc` to `l`, following jumps, splits, saves and assertions
+;; to the instructions that consume or match. A counter already in the list is
+;; not added again, which is what bounds a step by the size of the program.
+add (prog:&Vec Inst) (np:Size) (ns:Size) (s:&Str) (n:Size) (pos:Size) (l:Vec Size) (pc:Size) (caps:Vec Size) (fuel:U64) : Vec Size
+;; The position in `l` of its first matching thread, `count` when there is none.
+first_match (prog:&Vec Inst) (l:&Vec Size) (t:Size) (count:Size) : Size
+;; Step the threads before position `m` over the code point `c`, into `nl` at `next`.
+step (prog:&Vec Inst) (np:Size) (ns:Size) (s:&Str) (n:Size) (cl:&Vec Size) (nl:Vec Size) (t:Size) (m:Size) (c:Size) (next:Size) : Vec Size
+;; Advance to the next place `b` occurs, `n` when it does not.
+skip (s:&Str) (n:Size, n==len s) (i:Size) (b:Size) : Size
+;; The simulation, one code point at a time: a new thread at each position until
+;; something matches, the match of the highest-priority thread kept, and the
+;; threads below it dropped.
+scan (s:&Str) (n:Size, n==len s) (re:&Regex) (np:Size) (ns:Size) (pos:Size) (cl:Vec Size) (nl:Vec Size) (best:Vec Size) (matched:Bool) (fuel:U64) : Vec Size
+;; The capture slots of the leftmost-first match at or after `start`, two per
+;; group with 18446744073709551615 for one that did not take part; empty when
+;; there is no match.
+run (s:&Str) (re:&Regex) (start:Size) : Vec Size
+;; ---------------------------------------------------------------- API
+;; Whether `re` matches anywhere in `s`.
+matches (s:&Str) (re:&Regex) : Bool
+;; The leftmost-first match as a byte range, start included and end excluded.
+find (s:&Str) (re:&Regex) : Opt (Size, Size)
+;; Go's rule for empty matches: one right after the previous match is skipped,
+;; and after an empty match the search moves on one code point.
+all_from (s:&Str) (re:&Regex) (n:Size, n==len s) (pos:Size) (prev:Size) (acc:Vec (Size, Size)) (fuel:U64) : Vec (Size, Size)
+;; Every non-overlapping match, left to right, as `FindAllStringIndex(s, -1)`.
+find_all (s:&Str) (re:&Regex) : Vec (Size, Size)
+;; The text of each group, 0 being the whole match.
+texts (s:&Str) (c:&Vec Size) (n:Size, n==len c) (k:Size) (acc:Vec (Opt Str)) : Vec (Opt Str)
+;; The whole match and the text of each group in order, `None` for a group
+;; that did not take part.
+captures (s:&Str) (re:&Regex) : Opt (Vec (Opt Str))
+index_in (names:&Vec Str) (n:Size) (k:Size) (name:&Str) : Opt Size
+;; The number of the group called `name`.
+group (re:&Regex) (name:&Str) : Opt Size
+;; A decimal group number with no leading zero, as `Expand` reads one.
+group_number (name:&Str) : Opt Size
+;; The text of group `k` in the slots `c`, "" when it did not take part.
+group_text (s:&Str) (c:&Vec Size) (k:Size) : Str
+;; The first group called `name` that took part in the match, as `Expand` picks
+;; among groups sharing a name.
+taking_part (s:&Str) (c:&Vec Size) (names:&Vec Str) (n:Size) (k:Size) (name:&Str) : Opt Size
+;; `Regexp.Expand`'s template: `$1`, `${1}`, `$name`, `${name}`, `$$`. A name that
+;; is not a group expands to nothing; a `$` that starts no name is itself.
+;; What the `$` at `i` expands to, and where the template goes on after it.
+dollar (t:&Str) (i:Size) (s:&Str) (c:&Vec Size) (re:&Regex) : (Str, Size)
+expand (out:Str) (t:&Str) (n:Size) (i:Size) (s:&Str) (c:&Vec Size) (re:&Regex) (fuel:U64) : Str
+replace_from (s:&Str) (re:&Regex) (tpl:&Str) (n:Size, n==len s) (search:Size) (last:Size) (out:Str) (fuel:U64) : Str
+;; Every match replaced by the template, as `ReplaceAllString`.
+replace (s:&Str) (re:&Regex) (tpl:&Str) : Str
+pieces (s:&Str) (ms:&Vec (Size, Size)) (n:Size, n==len ms) (k:Size) (beg:Size) (end_at:Size) (acc:Vec Str) : Vec Str
+;; The text between matches, as `Split(s, -1)`.
+split (s:&Str) (re:&Regex) : Vec Str
+```
+
 ## Res
 
 ```

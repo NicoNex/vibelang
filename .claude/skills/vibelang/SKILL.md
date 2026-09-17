@@ -443,6 +443,7 @@ into it.
 | `Hash` | `fnv1a`, `mix` (splitmix64 finaliser), `combine` — not cryptographic |
 | `Rand` | `Rng`, `seed next below unit` — splitmix64, deterministic, not for secrets |
 | `Args` | `parse` into flags / `--k=v` options / positionals, `has_flag`, `option` |
+| `Regex` | Go's RE2 syntax on a linear-time Pike VM: `compile matches find find_all captures group replace split` |
 | `Text` | character classes, `join words pad_left repeat upper reverse …` |
 | `List`, `DictX`, `Set`, `Opt`, `Res` | combinators beyond the prelude |
 | `Math`, `Stats`, `Bits`, `Search`, `Time` | numeric helpers, statistics, binary search, calendar |
@@ -522,8 +523,8 @@ someone's time. Full list with sources: **`references/sharp-edges.md`**.
   hash map in insertion order: `insert` and `lookup` are O(1), `remove` shifts the entries.
 - **Anything that may alias is not freed at all.** Drops are deep, but a value a prelude
   call may hand out a piece of (`get`, `fold`, `max_by`, …) or that went to C is left alone.
-- **Building a string byte by byte is O(n²).** There is no byte buffer; every `concat`
-  copies. Slice whole ranges out of the input where you can.
+- **Grow a string with `push_str`, not `concat`.** `concat` copies both sides, so an
+  accumulator built with it is O(n²); `push_str acc &piece` appends in place.
 - **A nullary `ext c` function is never called.** `abort : E! Unit` then `abort ;` compiles
   and does nothing. Give the binding a parameter.
 - **A program that crashes** under `vibe run` prints `error[run.signal]`; a double free or a

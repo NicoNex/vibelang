@@ -16,7 +16,7 @@ code is, so the first step is never a search.
 
 ## Where the compiler is today
 
-2026-09-17. `cargo test -- --test-threads=1`: 158 tests across 12 binaries,
+2026-09-17. `cargo test -- --test-threads=1`: 169 tests across 12 binaries,
 green. `cargo clippy --all-targets -- -D warnings`: clean.
 
 A `.vibe` file goes to a native executable through C. What stands between the
@@ -113,6 +113,14 @@ Shipped since this list was first written, each with the item it closed:
     was killed by a signal.
   New prelude names: `byte_at`, `byte_str`, `wrap_add`, `wrap_sub`, `wrap_mul`,
   `show_exact`.
+- **Regular expressions**, `lib/regex.vibe` (`docs/regex-design.md`): Go's RE2
+  syntax and leftmost-first semantics on a Pike VM, linear in the subject for
+  every pattern, passing `--prove`. It agrees with Go's `regexp` on 25,000
+  random patterns and subjects — `find_all`, `captures`, `replace`, `split` —
+  through the differential test in `lib/check/regex_go/`. Writing it found, and
+  fixed: `vibe fmt` moving every comment after a `!f x` two tokens early, into
+  the declaration above; and a named function given to a prelude call (`map f`)
+  leaking the closure it becomes, once per call.
 
 ---
 
@@ -308,6 +316,15 @@ Carried from §16, with what has changed since:
 ---
 
 ## Found writing the standard library, still open
+
+- **`Regex` has no Unicode tables**: `\p{...}` and `\pL` are refused and `(?i)`
+  folds ASCII only. Tables generated from UnicodeData are data, not engine
+  changes. It runs one engine — no one-pass, backtracker or lazy DFA — and it
+  runs on the boxed runtime, so a scan costs microseconds a byte where Go's
+  costs nanoseconds.
+- **A call's result used only as a match scrutinee is not freed**: `?f x |(a, b)
+  -> ...` leaks the tuple `f` built. `Regex.decode` packs its pair into one
+  `Size` because of it.
 
 - **A nullary `ext c` binding is never called.** `abort : E! Unit` then `abort ;`
   compiles and does nothing, the same shape as the nullary declaration below.

@@ -41,3 +41,10 @@
 /examples/loop
 /tests/push_str
 /tests/drop_named_fn
+!/lib/check/regex_go/
+/lib/check/regex_go/*
+!/lib/check/regex_go/main.go
+!/lib/check/regex_go/gen.go
+!/lib/check/regex_go/diff.vibe
+!/lib/check/regex_go/corpus.txt
+!/lib/check/regex_go/syntax.txt

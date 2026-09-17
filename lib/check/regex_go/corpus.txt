@@ -1,0 +1,33 @@
+a	banana	X~
+an	banana	<$0>~
+(a)(n)?	banana	$2$1~
+a*	baaab	-~
+	abc	-~
+x*	abc	-~
+(?P<first>\w+)\s(?P<second>\w+)	hello world	${second} ${first}~
+[a-c]+	zzabcabz	#~
+^	ab	^~
+$	ab	$~
+\bfoo\b	foo foobar foo	X~
+(?i)HeLLo	say hello HELLO	!~
+a|ab|abc	abc	.~
+(a|ab)(c|bcd)(d*)	abcd	$1-$2-$3~
+.	hé€	.~
+[^a]	abé	_~
+a{2,3}	aaaaaaa	-~
+a{2,}?	aaaa	-~
+(a*)*	b	-~
+(a*)+$	aab	-~
+\d+	x12y345	<$0>~
+[[:alpha:]]+	ab12cd	*~
+(?m)^\w+$	ab~
+cd	-~
+(	abc	-~
+a**	abc	-~
+x{2}{3}	xxxxxx	-~
+[a	abc	-~
+\Q.*\E	a.*b	!~
+(?s).+	ab	-~
+\x41\x{42}	AB	-~
+$1	ab	$1~
+(a)	ab	$10$1x ${1}x $x $$ $~

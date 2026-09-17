@@ -1,0 +1,95 @@
+mod RegexCheck
+
+;; Every expected value here is what Go's regexp gives for the same call;
+;; lib/check/regex_go/ is the differential test that compares the two at scale.
+expect (name:&Str) (ok:Bool) : E! Unit =
+  ?ok |True  -> ()
+      |False -> warn (fmt "regex_check: {} failed\n" name) ;
+                exit 1
+  end
+
+spans (pat:&Str) (s:&Str) : Str =
+  ?Regex.compile pat
+   |Er e  -> "ERR"
+   |Ok re -> fold (\acc m -> push_str acc &(span &m)) "" &(Regex.find_all s &re)
+  end
+
+span (m:&(Size, Size)) : Str =
+  ?m |(a, b) -> fmt "{}-{} " a b
+  end
+
+groups (pat:&Str) (s:&Str) : Str =
+  ?Regex.compile pat
+   |Er e  -> "ERR"
+   |Ok re -> ?Regex.captures s &re
+              |None    -> "nil"
+              |Some gs -> fold (\acc g -> push_str acc &(one &g)) "" &gs
+             end
+  end
+
+one (g:&Opt Str) : Str =
+  ?g |Some t -> fmt "[{}]" t
+     |None   -> "-"
+  end
+
+replaced (pat:&Str) (s:&Str) (tpl:&Str) : Str =
+  ?Regex.compile pat
+   |Er e  -> "ERR"
+   |Ok re -> Regex.replace s &re tpl
+  end
+
+pieces (pat:&Str) (s:&Str) : Str =
+  ?Regex.compile pat
+   |Er e  -> "ERR"
+   |Ok re -> fold (\acc p -> push_str acc &(fmt "[{}]" p))
+                  "" &(Regex.split s &re)
+  end
+
+found (pat:&Str) (s:&Str) : Opt (Size, Size) =
+  ?Regex.compile pat
+   |Er e  -> None
+   |Ok re -> Regex.find s &re
+  end
+
+matches (pat:&Str) (s:&Str) : Bool =
+  ?Regex.compile pat
+   |Er e  -> False
+   |Ok re -> Regex.matches s &re
+  end
+
+group_of (pat:&Str) (name:&Str) : Opt Size =
+  ?Regex.compile pat
+   |Er e  -> None
+   |Ok re -> Regex.group &re name
+  end
+
+rejected (pat:&Str) : Bool =
+  ?Regex.compile pat
+   |Er e  -> True
+   |Ok re -> False
+  end
+
+main : E! Unit =
+  expect "matches" (matches "b+" "abbc" && !(matches "^b" "abbc") && matches "" "") ;
+  expect "find" (found "b+" "abbc"==Some (1, 3) && found "x" "abc"==None) ;
+  expect "find_all" (spans "a" "banana"=="1-2 3-4 5-6 " && spans "[a-c]+" "zzabcabz"=="2-7 ") ;
+  expect "empty matches" (spans "a*" "baaab"=="0-0 1-4 5-5 " && spans "" "abc"=="0-0 1-1 2-2 3-3 ") ;
+  expect "leftmost-first" (spans "a|ab|abc" "abc"=="0-1 " && groups "(a|ab)(c|bcd)(d*)" "abcd"=="[abcd][a][bcd][]") ;
+  expect "lazy" (spans "a{2,}?" "aaaa"=="0-2 2-4 " && groups "(.*?)+c" "xxc"=="[xxc][xx]") ;
+  expect "empty loop" (groups "(a*)*" "b"=="[][]" && groups "(a*)+$" "aab"=="[][]") ;
+  expect "non-participating" (groups "(a)|(b)" "b"=="[b]-[b]" && groups "x(y)?" "x"=="[x]-") ;
+  expect "anchors" (spans "^" "ab"=="0-0 " && spans "$" "ab"=="2-2 " && spans "\\bfoo\\b" "foo foobar foo"=="0-3 11-14 ") ;
+  expect "multiline" (spans "(?m)^\\w+$" "ab\ncd"=="0-2 3-5 " && spans "^\\w+$" "ab\ncd"=="") ;
+  expect "dot and newline" (spans "." "a\nb"=="0-1 2-3 " && spans "(?s)." "a\nb"=="0-1 1-2 2-3 ") ;
+  expect "utf-8" (spans "." "hé€"=="0-1 1-3 3-6 " && spans "[^a]" "abé"=="1-2 2-4 ") ;
+  expect "case folding" (spans "(?i)HeLLo" "say hello HELLO"=="4-9 10-15 " && spans "(?i)[a-c]+" "xAbCx"=="1-4 ") ;
+  expect "classes" (spans "\\d+" "x12y345"=="1-3 4-7 " && spans "[[:alpha:]]+" "ab12cd"=="0-2 4-6 " && spans "[^\\D]" "a1"=="1-2 ") ;
+  expect "escapes" (spans "\\x41\\x{42}" "AB"=="0-2 " && spans "\\Q.*\\E" "a.*b"=="1-3 " && spans "\\012" "a\nb"=="1-2 ") ;
+  expect "counted" (spans "a{2,3}" "aaaaaaa"=="0-3 3-6 " && spans "x{,3}" "x{,3}"=="0-5 ") ;
+  expect "captures" (groups "(?P<first>\\w+)\\s(?P<second>\\w+)" "hello world"=="[hello world][hello][world]") ;
+  expect "group" (group_of "(?P<k>a)(?<v>b)" "v"==Some 2 && group_of "(a)" "x"==None && group_of "(?P<n>a)(?P<n>b)" "n"==Some 1) ;
+  expect "replace" (replaced "(?P<first>\\w+)\\s(?P<second>\\w+)" "hello world" "${second} ${first}"=="world hello" && replaced "a*" "baaab" "-"=="-b-b-" && replaced "(a)" "ab" "$10$1x ${1}x $x $$ $"==" ax  $ $b") ;
+  expect "split" (pieces "a" "banana"=="[b][n][n][]" && pieces "x*" "abc"=="[a][b][c]" && pieces "," ""=="[]") ;
+  expect "rejected" (rejected "(" && rejected "a**" && rejected "x{2}{3}" && rejected "[a" && rejected "[z-a]" && rejected "a{1001}" && rejected "\\8" && rejected "(?=a)" && rejected "\\pL" && rejected "\\x{110000}") ;
+  expect "accepted" (!(rejected "a{1000}") && !(rejected "[]a]") && !(rejected "\\_") && !(rejected "(?i-s:a)")) ;
+  out "ok\n"
