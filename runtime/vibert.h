@@ -159,6 +159,7 @@ VbVal vb_contains(VbVal s, VbVal p);
 VbVal vb_to_cstr(VbVal s);
 VbVal vb_from_cstr(VbVal p);
 VbVal vb_chr(VbVal c);
+VbVal vb_byte_str(VbVal b);
 VbVal vb_slice(VbVal i, VbVal j, VbVal s);
 VbVal vb_index_of(VbVal s, VbVal p);
 VbVal vb_replace(VbVal s, VbVal from, VbVal to);

@@ -593,16 +593,25 @@ VbVal vb_range(VbVal a, VbVal b) {
 
 /* ---------------------------------------------------------------- Str */
 
-VbVal vb_split(VbVal c, VbVal s) {
-  VbStr *x = vb_as_str(s);
-  char sep = (char)vb_as_int(c);
-  VbVec *w = vec_alloc(4);
-  size_t start = 0;
-  for (size_t i = 0; i <= x->n; i++) {
-    if (i == x->n || x->p[i] == sep) { vec_push(w, vb_str(x->p + start, i - start)); start = i + 1; }
+/* A code point as UTF-8, into `out`; returns the byte count. One that is not a
+   scalar value — a surrogate, or past U+10FFFF — is U+FFFD. */
+static size_t utf8(uint32_t c, char *out) {
+  if (c < 0x80) { out[0] = (char)c; return 1; }
+  if (c < 0x800) {
+    out[0] = (char)(0xC0 | c >> 6); out[1] = (char)(0x80 | (c & 0x3F));
+    return 2;
   }
-  return wrap_vec(w);
+  if (c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)) c = 0xFFFD;
+  if (c < 0x10000) {
+    out[0] = (char)(0xE0 | c >> 12); out[1] = (char)(0x80 | (c >> 6 & 0x3F));
+    out[2] = (char)(0x80 | (c & 0x3F));
+    return 3;
+  }
+  out[0] = (char)(0xF0 | c >> 18); out[1] = (char)(0x80 | (c >> 12 & 0x3F));
+  out[2] = (char)(0x80 | (c >> 6 & 0x3F)); out[3] = (char)(0x80 | (c & 0x3F));
+  return 4;
 }
+
 VbVal vb_lines(VbVal s) {
   VbStr *x = vb_as_str(s);
   VbVec *w = vec_alloc(8);
@@ -615,7 +624,11 @@ VbVal vb_lines(VbVal s) {
       start = i + 1;
     }
   }
-  if (start < x->n) vec_push(w, vb_str(x->p + start, x->n - start));
+  if (start < x->n) {
+    size_t end = x->n;
+    if (x->p[end - 1] == '\r') end--;
+    vec_push(w, vb_str(x->p + start, end - start));
+  }
   return wrap_vec(w);
 }
 /* Copy a value in depth, so the copy owns everything it points at and both can
@@ -701,12 +714,26 @@ static size_t str_find(const VbStr *x, const VbStr *y, size_t from) {
   }
   return SIZE_MAX;
 }
+/* The separator is a character, so it is matched as its UTF-8 bytes, not cut
+   down to one. */
+VbVal vb_split(VbVal c, VbVal s) {
+  VbStr *x = vb_as_str(s);
+  char buf[4];
+  VbStr sep = {utf8((uint32_t)vb_as_uint(c), buf), buf};
+  VbVec *w = vec_alloc(4);
+  size_t start = 0;
+  for (size_t i; (i = str_find(x, &sep, start)) != SIZE_MAX; start = i + sep.n)
+    vec_push(w, vb_str(x->p + start, i - start));
+  vec_push(w, vb_str(x->p + start, x->n - start));
+  return wrap_vec(w);
+}
 VbVal vb_contains(VbVal s, VbVal p) {
   return vb_bool(str_find(vb_as_str(s), vb_as_str(p), 0) != SIZE_MAX);
 }
 VbVal vb_to_cstr(VbVal s) { return vb_cstr_val(vb_as_str(s)->p); }
 VbVal vb_from_cstr(VbVal p) { return vb_strz((const char *)vb_as_ptr(p)); }
-VbVal vb_chr(VbVal c) { char b = (char)vb_as_int(c); return vb_str(&b, 1); }
+VbVal vb_chr(VbVal c) { char b[4]; return vb_str(b, utf8((uint32_t)vb_as_uint(c), b)); }
+VbVal vb_byte_str(VbVal b) { char c = (char)vb_as_uint(b); return vb_str(&c, 1); }
 /* A substring is a copy, never a pointer into the argument: the prelude may
    not hand out an interior pointer as an owned value (docs/aliasing-audit.md). */
 VbVal vb_slice(VbVal i, VbVal j, VbVal s) {
@@ -776,11 +803,11 @@ static void show_into(Sb *acc, VbVal v) {
     case VB_UINT: sb_push(acc, tmp, (size_t)snprintf(tmp, sizeof tmp, "%llu", (unsigned long long)v.v.u)); break;
     case VB_FLOAT: sb_push(acc, tmp, (size_t)snprintf(tmp, sizeof tmp, "%g", v.v.f)); break;
     case VB_BOOL: sb_push(acc, v.v.b ? "True" : "False", v.v.b ? 4 : 5); break;
-    case VB_CHAR: { char c = (char)v.v.c; sb_push(acc, &c, 1); break; }
+    case VB_CHAR: sb_push(acc, tmp, utf8(v.v.c, tmp)); break;
     case VB_STR: { VbStr *s = (VbStr *)v.v.p; sb_push(acc, s->p, s->n); break; }
     case VB_CSTR: { const char *s = (const char *)v.v.p; sb_push(acc, s ? s : "", s ? strlen(s) : 0); break; }
     case VB_PTR: sb_push(acc, tmp, (size_t)snprintf(tmp, sizeof tmp, "0x%llx", (unsigned long long)(uintptr_t)v.v.p)); break;
-    case VB_CLOS: { VbClos *c = (VbClos *)v.v.p; sb_push(acc, "<", 1); sb_push(acc, c->name, strlen(c->name)); sb_push(acc, ">", 1); break; }
+    case VB_CLOS: { VbClos *c = (VbClos *)v.v.p; sb_push(acc, "<", 1); if (c->name) sb_push(acc, c->name, strlen(c->name)); sb_push(acc, ">", 1); break; }
     case VB_VEC: {
       VbVec *s = (VbVec *)v.v.p;
       sb_push(acc, "[", 1);
@@ -1082,42 +1109,44 @@ static int g_argc = 0;
 static char **g_argv = NULL;
 void vb_set_args(int argc, char **argv) { g_argc = argc; g_argv = argv; }
 
-VbVal vb_read(VbVal path) {
-  const char *p = vb_as_str(path)->p;
-  FILE *fh = fopen(p, "rb");
-  if (!fh) { fprintf(stderr, "✗ read ⊨ cannot open %s\n", p); exit(66); }
-  fseek(fh, 0, SEEK_END);
-  long n = ftell(fh);
-  fseek(fh, 0, SEEK_SET);
-  if (n < 0) n = 0;
-  char *buf = vb_alloc((size_t)n + 1);
-  size_t got = fread(buf, 1, (size_t)n, fh);
-  fclose(fh);
-  return str_take(buf, got);
-}
-/* Reads all of standard input. ponytail: doubling buffer with a copy on each
-   growth, so peak memory is about twice the input. Stream it if a program ever has to filter more than it can hold. */
-VbVal vb_read_stdin(void) {
+/* All of a stream, to its end. No `ftell`: a pipe, `/dev/stdin` or a FIFO has
+   no size to ask for, and `long` is 32 bits on Windows.
+   ponytail: doubling buffer with a copy on each growth, so peak memory is about
+   twice the input. Stream it if a program ever has to filter more than it can
+   hold. */
+static VbVal read_all(FILE *fh, const char *what) {
   size_t cap = 65536, n = 0;
   char *buf = vb_alloc(cap);
   for (;;) {
-    size_t got = fread(buf + n, 1, cap - n, stdin);
-    n += got;
+    n += fread(buf + n, 1, cap - n, fh);
     if (n < cap) break; /* short read: end of file, or an error */
+    if (cap > SIZE_MAX / 2) { fputs("vibe: out of memory\n", stderr); exit(70); }
     char *bigger = realloc(buf, cap * 2);
     if (!bigger) { fputs("vibe: out of memory\n", stderr); exit(70); }
     buf = bigger;
     cap *= 2;
   }
+  if (ferror(fh)) { fprintf(stderr, "✗ read ⊨ cannot read %s\n", what); exit(66); }
   return str_take(buf, n);
 }
+VbVal vb_read(VbVal path) {
+  const char *p = vb_as_str(path)->p;
+  FILE *fh = fopen(p, "rb");
+  if (!fh) { fprintf(stderr, "✗ read ⊨ cannot open %s\n", p); exit(66); }
+  VbVal r = read_all(fh, p);
+  fclose(fh);
+  return r;
+}
+VbVal vb_read_stdin(void) { return read_all(stdin, "standard input"); }
 VbVal vb_write(VbVal path, VbVal data) {
   const char *p = vb_as_str(path)->p;
   VbStr *d = vb_as_str(data);
   FILE *fh = fopen(p, "wb");
   if (!fh) { fprintf(stderr, "✗ write ⊨ cannot open %s\n", p); exit(73); }
-  fwrite(d->p, 1, d->n, fh);
-  fclose(fh);
+  /* A full disk shows at `fwrite` or only at `fclose`; either way the file is
+     not what the program wrote, which is not a success to report. */
+  bool ok = fwrite(d->p, 1, d->n, fh) == d->n;
+  if (fclose(fh) != 0 || !ok) { fprintf(stderr, "✗ write ⊨ cannot write %s\n", p); exit(73); }
   return vb_unit();
 }
 VbVal vb_out(VbVal s) { VbStr *x = vb_as_str(s); fwrite(x->p, 1, x->n, stdout); fputc('\n', stdout); return vb_unit(); }

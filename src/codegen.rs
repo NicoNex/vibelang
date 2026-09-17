@@ -77,7 +77,7 @@ fn builtin(name: &str) -> Option<(usize, String)> {
         "from_cstr" => t(1, "vb_from_cstr($0)"),
         "chr" => t(1, "vb_chr($0)"),
         "byte_at" => t(2, "vb_byte_at($0, $1, $P)"),
-        "byte_str" => t(1, "vb_chr($0)"),
+        "byte_str" => t(1, "vb_byte_str($0)"),
         "wrap_add" => t(2, "vb_uint(vb_as_uint($0) + vb_as_uint($1))"),
         "wrap_sub" => t(2, "vb_uint(vb_as_uint($0) - vb_as_uint($1))"),
         "wrap_mul" => t(2, "vb_uint(vb_as_uint($0) * vb_as_uint($1))"),
