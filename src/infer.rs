@@ -398,6 +398,8 @@ fn effect_of(t: &T) -> Option<T> {
 
 pub fn infer(c: &mut Checker, e: &Expr, path: &str) -> R<T> {
     match &e.kind {
+        // Past `i64::MAX` a literal fits only an unsigned 64-bit type.
+        ExprKind::Int(n) if *n > i64::MAX as i128 => Ok(T::con("U64")),
         ExprKind::Int(_) => Ok(c.fresh(Kind::Num)),
         ExprKind::Float(_) => Ok(c.fresh(Kind::Float)),
         ExprKind::Str(_) => Ok(T::con("Str")),
@@ -872,8 +874,12 @@ fn bind_pattern(c: &mut Checker, p: &Pat, expected: &T, span: Span, path: &str) 
             c.define(n, Scheme::mono(expected.clone()));
             Ok(())
         }
-        Pat::Int(_) => {
-            let n = c.fresh(Kind::Num);
+        Pat::Int(v) => {
+            let n = if *v > i64::MAX as i128 {
+                T::con("U64")
+            } else {
+                c.fresh(Kind::Num)
+            };
             c.unify(expected, &n, span, " (integer pattern)")
         }
         Pat::Float(_) => {
