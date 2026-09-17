@@ -434,7 +434,13 @@ VbVal vb_filter(VbVal f, VbVal v) {
 }
 VbVal vb_fold(VbVal f, VbVal z, VbVal v) {
   VbVec *s = vb_as_vec(v);
-  for (size_t i = 0; i < s->n; i++) z = apply_lent(vb_apply1(f, z), s->a[i]);
+  for (size_t i = 0; i < s->n; i++) {
+    /* The partial application holding `z` is this loop's alone. Its drop is
+       shallow, so `z` itself goes on to the call. */
+    VbVal g = vb_apply1(f, z);
+    z = apply_lent(g, s->a[i]);
+    vb_dispose(g);
+  }
   return z;
 }
 VbVal vb_each(VbVal f, VbVal v) {
@@ -446,7 +452,12 @@ VbVal vb_sum(VbVal v) {
   VbVec *s = vb_as_vec(v);
   if (s->n == 0) return vb_int(0);
   VbVal acc = s->a[0];
-  for (size_t i = 1; i < s->n; i++) acc = vb_add(acc, s->a[i]);
+  for (size_t i = 1; i < s->n; i++) {
+    VbVal next = vb_add(acc, s->a[i]);
+    /* A partial sum of strings is a fresh string; the first is an element. */
+    if (i > 1) vb_dispose(acc);
+    acc = next;
+  }
   return acc;
 }
 /* The first element whose key compares strictly beyond every earlier one in
@@ -588,9 +599,11 @@ VbVal vb_dup(VbVal v) {
     case VB_CLOS: {
       VbClos *x = v.v.p;
       VbClos *c = vb_alloc(sizeof(VbClos));
-      c->fn = x->fn; c->name = x->name; c->arity = x->arity; c->nargs = x->nargs;
-      c->args = x->arity ? vb_alloc(sizeof(VbVal) * x->arity) : NULL;
-      for (uint32_t i = 0; i < x->nargs; i++) c->args[i] = vb_dup(x->args[i]);
+      *c = *x;
+      c->args = x->arity ? vb_alloc(vals_size(x->arity)) : NULL;
+      /* Shallow, as `vb_dispose` is for a closure: a deep copy of captures
+         that nothing frees would only leak them. */
+      for (uint32_t i = 0; i < x->nargs; i++) c->args[i] = x->args[i];
       VbVal r; r.tag = VB_CLOS; r.v.p = c; return r;
     }
     /* A scalar is already a copy; a C pointer is not ours to duplicate. */
@@ -893,7 +906,7 @@ VbVal vb_seq(VbVal v) {
   VbVec *w = vec_alloc(s->n);
   for (size_t i = 0; i < s->n; i++) {
     VbObj *o = vb_as_obj(s->a[i]);
-    if (o->tag != 0) return s->a[i]; /* the first Er wins */
+    if (o->tag != 0) { vb_free(w->a); vb_free(w); return s->a[i]; } /* the first Er wins */
     vec_push(w, o->f[0]);
   }
   return vb_ok(wrap_vec(w));
