@@ -131,7 +131,7 @@ pub fn check(m: &Module, ck: &Checked, mode: Mode, cache: &mut Cache) -> Vec<Dia
         .with_path(&m.name)
         .with_fix("install z3, or drop --prove to leave obligations undischarged")];
     }
-    let out: Vec<Diag> = obs.iter().filter_map(|o| discharge(o, cache)).collect();
+    let out: Vec<Diag> = discharge_all(&obs, cache).into_iter().flatten().collect();
     cache.flush();
     out
 }
@@ -145,11 +145,16 @@ fn have_z3() -> bool {
         .is_ok()
 }
 
-/// Whether z3 closes this obligation on its own. A missing solver is reported
-/// as "not proved" rather than as an error, so `vibe proof --prove` degrades to
+/// Which obligations z3 closes, in order. A missing solver is reported as "not
+/// proved" rather than as an error, so `vibe proof --prove` degrades to
 /// listing everything instead of claiming a proof it did not get.
-pub fn proved(o: &Ob) -> bool {
-    discharge(o, &mut Cache::off()).is_none()
+pub fn proved_all(obs: &[Ob], cache: &mut Cache) -> Vec<bool> {
+    let out = discharge_all(obs, cache)
+        .into_iter()
+        .map(|d| d.is_none())
+        .collect();
+    cache.flush();
+    out
 }
 
 /// Proof certificates, keyed by the hash of the SMT text (spec §16.5). The text
@@ -165,14 +170,6 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn off() -> Cache {
-        Cache {
-            path: None,
-            proved: HashSet::new(),
-            added: false,
-        }
-    }
-
     /// The cache for a source file: a sibling `.vibe-proofs`, one hash a line.
     pub fn beside(src: &Path) -> Cache {
         let path = src.with_file_name(".vibe-proofs");
@@ -210,13 +207,53 @@ impl Cache {
     }
 }
 
-fn discharge(o: &Ob, cache: &mut Cache) -> Option<Diag> {
-    let text = smt(o);
-    let key = crate::patch::hash(&text);
-    if cache.proved.contains(&key) {
-        return None;
+/// Every obligation's verdict, in order: `None` when it is proved. What the
+/// cache does not already hold goes to z3, one process per obligation, run on
+/// as many threads as there are cores.
+fn discharge_all(obs: &[Ob], cache: &mut Cache) -> Vec<Option<Diag>> {
+    let asks: Vec<(String, String)> = obs
+        .iter()
+        .map(|o| {
+            let text = smt(o);
+            let key = crate::patch::hash(&text);
+            (text, key)
+        })
+        .collect();
+    let open: Vec<usize> = (0..obs.len())
+        .filter(|&i| !cache.proved.contains(&asks[i].1))
+        .collect();
+    let mut verdicts: Vec<Option<Diag>> = (0..obs.len()).map(|_| None).collect();
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let chunk = open.len().div_ceil(workers).max(1);
+    let answered: Vec<(usize, Option<Diag>)> = std::thread::scope(|sc| {
+        let handles: Vec<_> = open
+            .chunks(chunk)
+            .map(|part| {
+                let asks = &asks;
+                sc.spawn(move || {
+                    part.iter()
+                        .map(|&i| (i, discharge(&obs[i], &asks[i].0)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("a solver thread does not panic"))
+            .collect()
+    });
+    for (i, v) in answered {
+        if v.is_none() {
+            cache.proved.insert(asks[i].1.clone());
+            cache.added = true;
+        }
+        verdicts[i] = v;
     }
-    let out = match z3(&text) {
+    verdicts
+}
+
+fn discharge(o: &Ob, text: &str) -> Option<Diag> {
+    let out = match z3(text) {
         Ok(s) => s,
         Err(e) => {
             return Some(
@@ -226,8 +263,6 @@ fn discharge(o: &Ob, cache: &mut Cache) -> Option<Diag> {
         }
     };
     if out.starts_with("unsat") {
-        cache.proved.insert(key);
-        cache.added = true;
         return None;
     }
     // `unknown` is not a counterexample: the solver ran out of budget, and

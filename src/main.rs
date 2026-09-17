@@ -225,7 +225,15 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         return Ok(ExitCode::SUCCESS);
     }
     if o.cmd == "proof" {
-        print!("{}", proof(&module, &checked, o.prove));
+        print!(
+            "{}",
+            proof(
+                &module,
+                &checked,
+                o.prove,
+                &mut refine::Cache::beside(&o.file)
+            )
+        );
         return Ok(ExitCode::SUCCESS);
     }
     if o.cmd == "patch" {
@@ -315,11 +323,16 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
 /// `vibe proof` (§13.3): the open obligations, one line each, addressed by the
 /// same semantic path the diagnostics use. With `--prove` the ones z3 closes
 /// are dropped, so what is left is exactly the work remaining.
-fn proof(m: &ast::Module, ck: &infer::Checked, prove: bool) -> String {
+fn proof(m: &ast::Module, ck: &infer::Checked, prove: bool, cache: &mut refine::Cache) -> String {
     let (obs, skipped) = refine::obligations(m, ck);
     let mut out = refine::caveats(&obs, skipped);
-    for o in &obs {
-        if prove && refine::proved(o) {
+    let proved = if prove {
+        refine::proved_all(&obs, cache)
+    } else {
+        vec![false; obs.len()]
+    };
+    for (o, done) in obs.iter().zip(proved) {
+        if done {
             continue;
         }
         out.push_str(&format!("{}\t{}\t{}\n", o.path, o.code, o.msg));
