@@ -159,7 +159,12 @@ fn cstring(s: &str) -> String {
     o
 }
 
-pub fn generate(m: &Module, ck: &Checked, file: &str) -> Result<String, Vec<Diag>> {
+pub fn generate(
+    m: &Module,
+    ck: &Checked,
+    ownership: crate::own::Analysis,
+    file: &str,
+) -> Result<String, Vec<Diag>> {
     let mut arity = HashMap::new();
     for f in m.funs() {
         arity.insert(f.name.clone(), f.arity());
@@ -178,9 +183,9 @@ pub fn generate(m: &Module, ck: &Checked, file: &str) -> Result<String, Vec<Diag
         cur_fn: String::new(),
         cur_params: Vec::new(),
         cur_path: String::new(),
-        inplace: crate::own::inplace_updates(m, ck),
+        inplace: ownership.inplace,
         pending: Vec::new(),
-        drops: crate::own::drop_points(m, ck).into_iter().fold(
+        drops: ownership.drops.into_iter().fold(
             HashMap::new(),
             |mut acc: HashMap<_, Vec<_>>, d| {
                 acc.entry((d.at.file, d.at.line, d.at.col))

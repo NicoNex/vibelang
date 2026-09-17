@@ -42,11 +42,12 @@ pub fn render(m: &Module, ck: &Checked, mode: Mode) -> String {
     out
 }
 
-/// The drop table as text, one site a line, in source order. This is a reading
-/// tool for work in progress: the backend does not act on it yet
-/// (docs/static-drop-roadmap.md).
+/// The drop table as text, one site a line, in source order: where codegen
+/// frees each value (docs/static-drop-roadmap.md).
 fn drops(m: &Module, ck: &Checked) -> String {
-    let mut out: String = crate::own::drop_points(m, ck)
+    let ownership = crate::own::analyse(m, ck);
+    let mut out: String = ownership
+        .drops
         .iter()
         .map(|d| match d.when {
             crate::own::DropWhen::ScopeEnd => format!("{}.body: drop {}\n", d.path, d.name),
@@ -60,7 +61,7 @@ fn drops(m: &Module, ck: &Checked) -> String {
         .collect();
     // The count is the point: it is how much of the program's memory the
     // compiler declines to free because it cannot prove nobody else holds it.
-    let n = crate::own::shared_suppressed(m, ck);
+    let n = ownership.suppressed;
     if n > 0 {
         out.push_str(&format!(
             "{n} drop(s) suppressed: the value may alias one the caller owns\n"

@@ -25,14 +25,20 @@ use crate::infer::Checked;
 use crate::types::{is_num, is_special, PRELUDE_SHARES, PRELUDE_SIGS};
 use std::collections::{HashMap, HashSet};
 
-pub fn check(m: &Module, ck: &Checked) -> Vec<Diag> {
-    run(m, ck).0
-}
-
-/// Spans of `{r with ...}` updates whose base is a uniquely owned value, so
-/// codegen can mutate in place instead of copying (spec §4.3).
-pub fn inplace_updates(m: &Module, ck: &Checked) -> HashSet<(usize, usize, usize)> {
-    run(m, ck).1
+/// Everything the ownership pass finds, from one walk over the module.
+pub struct Analysis {
+    pub errors: Vec<Diag>,
+    /// Spans of `{r with ...}` updates whose base is a uniquely owned value, so
+    /// codegen can mutate in place instead of copying (spec §4.3).
+    pub inplace: HashSet<(usize, usize, usize)>,
+    /// Where every owned value dies, in source order. The same traversal that
+    /// reports affine misuse computes it, so the two cannot disagree. Codegen
+    /// emits a free at each one.
+    pub drops: Vec<DropSite>,
+    /// How many drops the maybe-shared bit suppressed. The count is the
+    /// distance between what this frees and what it could free if aliasing
+    /// were checked rather than assumed (docs/aliasing-audit.md).
+    pub suppressed: usize,
 }
 
 /// One place an owned value stops being its scope's to free: the binder's name,
@@ -62,29 +68,7 @@ pub enum DropWhen {
     Temp,
 }
 
-/// Where every owned value dies. The same traversal that reports affine misuse
-/// computes it, so the two cannot disagree. Codegen emits a free at each one.
-pub fn drop_points(m: &Module, ck: &Checked) -> Vec<DropSite> {
-    let mut v = run(m, ck).2;
-    v.sort_by_key(|d| (d.at.file, d.at.line, d.at.col, d.name.clone()));
-    v
-}
-
-/// How many drops the maybe-shared bit suppressed. The count is the distance
-/// between what this frees and what it could free if aliasing were checked
-/// rather than assumed (docs/aliasing-audit.md).
-pub fn shared_suppressed(m: &Module, ck: &Checked) -> usize {
-    run(m, ck).3
-}
-
-type Analysis = (
-    Vec<Diag>,
-    HashSet<(usize, usize, usize)>,
-    Vec<DropSite>,
-    usize,
-);
-
-fn run(m: &Module, ck: &Checked) -> Analysis {
+pub fn analyse(m: &Module, ck: &Checked) -> Analysis {
     let sigs = borrowed_params(m);
     // `escape::releasable` answers whether a call may put a pointer somewhere
     // this frame cannot see; a value that reaches one is not freed here.
@@ -168,7 +152,7 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
             sigs: &sigs,
             escaping,
             leaves,
-            exts: reaches_c.clone(),
+            exts: &reaches_c,
             fun: f.name.clone(),
             arity: f.arity(),
             shared: borrows.iter().map(|b| (*b).to_string()).collect(),
@@ -193,7 +177,13 @@ fn run(m: &Module, ck: &Checked) -> Analysis {
         drops.append(&mut st.drops);
         suppressed += st.suppressed;
     }
-    (out, inplace, drops, suppressed)
+    drops.sort_by_key(|d| (d.at.file, d.at.line, d.at.col, d.name.clone()));
+    Analysis {
+        errors: out,
+        inplace,
+        drops,
+        suppressed,
+    }
 }
 
 /// Argument positions the callee declared `&`, by callee name. Passing an
@@ -395,7 +385,7 @@ struct State<'a> {
     /// that reaches one (`escape::releasable`). C keeps what it likes for as
     /// long as it likes, so nothing this frame lent to such a call is freed
     /// here (spec §4.6, §10.1).
-    exts: HashSet<String>,
+    exts: &'a HashSet<String>,
     /// This function's name and how many arguments a saturated call takes: a
     /// call matching both is the back edge codegen compiles to `continue`.
     fun: String,

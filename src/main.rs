@@ -240,7 +240,8 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         .iter()
         .flat_map(|u| view::canon(&u.module, &checked, &u.src, &u.comments, u.file))
         .collect();
-    semantic.append(&mut own::check(&module, &checked));
+    let mut ownership = own::analyse(&module, &checked);
+    semantic.append(&mut ownership.errors);
     // The C boundary is a language rule, not a backend detail (§10.3).
     semantic.append(&mut codegen::boundary_errors(&module));
     semantic.append(&mut total::check(&module));
@@ -265,7 +266,7 @@ fn run(argv: &[String]) -> Result<ExitCode, Fail> {
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or("out".into());
-    let c_src = codegen::generate(&module, &checked, &stem)
+    let c_src = codegen::generate(&module, &checked, ownership, &stem)
         .map_err(|ds| Fail::Diags(diags(&ds, &files, o.fmt)))?;
     let exe = o.out.clone().unwrap_or_else(|| o.file.with_extension(""));
 
