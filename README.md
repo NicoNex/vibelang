@@ -151,13 +151,39 @@ How much of this is delivered rather than intended is the next section. The comp
 
 ## Status
 
-**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, deep drops for vectors and records, a dictionary, bit operations, a deep and generic `dup`, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, record fields resolved per use site, four projection views, the whole CLI above. 151 tests, green.
+**Works** — Hindley–Milner inference, ADTs, records, exhaustive matching, effects (`E!`), affine ownership, termination checking, refinement obligations discharged with z3 and cached, implicit drop with no GC, deep drops for vectors and records, a dictionary, bit operations, a deep and generic `dup`, C emission and its runtime, `ext c` / `exp c`, multi-file programs where every module is its own namespace, record fields resolved per use site, four projection views, the whole CLI above, a standard library in `lib/`. 158 tests, green.
 
 **Partial** — inference is not bidirectional, so a lambda parameter takes no type from the signature it is passed to, and a `.field` there has to be unambiguous; refinements on prelude builtins are hardcoded; a proof about a float is a proof about a mathematical real; a dictionary is an association vector, so a lookup is a linear scan; a closure's captures are not freed with it, and a value that may alias one the caller owns is not freed at all — `vibe view --drops` counts both; every closure is on the heap; values are dynamically tagged, so any performance claim today is a claim about a boxed interpreter.
 
 **Not yet** — a native backend.
 
 The full list, with a file and a line for every item, is [`docs/remaining-work.md`](docs/remaining-work.md). Moving a line from one list to the next is how this section gets edited.
+
+## What a library costs
+
+Seven standard-library modules — `Json`, `Csv`, `Path`, `Encoding`, `Hash`, `Rand`, `Args`,
+828 lines — were written by Claude Opus 5 through the skill in `.claude/skills/vibelang`, each
+one passing `vibe check --prove` and its own runnable check. Output tokens, net of the work
+spent fixing the compiler bugs the same session found:
+
+| module | lines | output tokens |
+|---|---:|---:|
+| `Json` — parser, renderer, full `\u` / UTF-8 | 388 | ~18.7k |
+| `Csv` — RFC 4180 | 113 | ~7.0k |
+| `Path` | 94 | ~5.3k |
+| `Encoding` — hex, base64 | 137 | ~4.4k |
+| `Hash` + `Rand` | 47 | ~4.7k |
+| `Args` | 49 | ~2.0k |
+| **total** | **828** | **~42k** |
+
+The whole session came to ~141k output tokens. The other ~99k went into the language:
+13 compiler and runtime defects, from three double frees to a hole in exhaustiveness
+checking, each fixed with a regression test and listed in
+[`docs/remaining-work.md`](docs/remaining-work.md). Once the compiler stopped getting in the
+way, a proved module cost a few thousand tokens.
+
+One session, split by timestamp from its log, so read the figures as estimates, not a
+benchmark. The phase-0 comparison against another language is still to be done.
 
 ## Read more
 
