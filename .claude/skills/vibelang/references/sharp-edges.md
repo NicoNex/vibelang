@@ -25,9 +25,10 @@ Contents:
 **A dictionary is a linear scan.** `Dict k v` (`dict insert lookup remove keys`) is a vector
 of pairs underneath: O(n) per lookup, O(n²) to build. A set is a `Dict k Unit`.
 
-**No byte buffer.** A string grows by `concat`, which copies, so building one a byte at a
-time is O(n²). Slice whole ranges out of the input (`slice a b s`) instead of appending bytes
-one by one where the shape allows it.
+**Grow a string with `push_str`, not `concat`.** `concat` copies both sides, so building a
+string a piece at a time with it is O(n²). `push_str acc &piece` consumes `acc` and appends
+in place when the frame holds it alone — a tail-call accumulator, a `fold` lambda's
+accumulator — which is linear. A byte is `push_str acc &(byte_str b)`.
 
 **No `U32 -> Char`.** `chr` takes a `Char` and `ord` gives a `U32`, but nothing goes back.
 Use `byte_str : U8 -> Str` to make a byte, and `byte_at : &Str -> Size -> U8` to read one.

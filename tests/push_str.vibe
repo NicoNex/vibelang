@@ -1,0 +1,17 @@
+mod PushStr
+
+;; `acc` is owned and handed straight to `push_str`, so it grows in place:
+;; linear, where `concat` copied the whole string on every step.
+go (k:U64) (acc:Str) : Str =
+  ?k |0 -> acc
+     |_ -> go (k - 1) (push_str acc "ab")
+  end
+
+;; `w` may be the string `vs` still holds, so `push_str` must copy it.
+aliased (vs:Vec Str) : Str =
+  let w = get &vs 0 in
+  let x = push_str w "!" in
+  fmt "{} {}" (get &vs 0) x
+
+main : E! Unit =
+  out (fmt "{} {}" (len &(go 1000000 (dup ""))) (aliased ["hi"]))

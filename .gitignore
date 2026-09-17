@@ -39,3 +39,4 @@
 /tests/edges
 *.dSYM
 /examples/loop
+/tests/push_str

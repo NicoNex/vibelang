@@ -61,6 +61,7 @@ static VbVal str_take(char *buf, size_t n) {
   VbStr *o = vb_alloc(sizeof(VbStr));
   o->n = n;
   o->p = buf;
+  o->cap = n + 1;
   buf[n] = 0;
   return box(VB_STR, o);
 }
@@ -709,6 +710,26 @@ VbVal vb_concat(VbVal a, VbVal b) {
   return str_take(buf, x->n + y->n);
 }
 static bool is_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+/* `push_str` on a string that may be part of another value: a fresh one. */
+VbVal vb_push_str(VbVal s, VbVal t) { return vb_concat(s, t); }
+/* On a string the frame holds alone (own.rs decides): grown in place, doubling,
+   so n appends cost O(n). */
+VbVal vb_push_str_owned(VbVal s, VbVal t) {
+  VbStr *x = vb_as_str(s), *y = vb_as_str(t);
+  size_t k = y->n, need = x->n + k + 1;
+  if (need < k) oom();
+  if (need > x->cap) {
+    size_t cap = x->cap > SIZE_MAX / 2 ? need : x->cap * 2;
+    if (cap < need) cap = need;
+    x->p = grow(x->p, cap);
+    x->cap = cap;
+  }
+  /* `y` is read after the grow: were it `x` itself, its pointer moved too. */
+  memcpy(x->p + x->n, y->p, k);
+  x->n += k;
+  x->p[x->n] = 0;
+  return s;
+}
 VbVal vb_trim(VbVal s) {
   VbStr *x = vb_as_str(s);
   size_t i = 0, j = x->n;

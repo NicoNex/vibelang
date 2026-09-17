@@ -419,6 +419,16 @@ fn the_runtime_holds_at_the_edges() {
     assert_eq!(out.trim(), "False True Er Overflow None None None Some 4294967295");
 }
 
+/// `push_str` appends to a string it consumes: in place for an accumulator the
+/// frame holds alone, so two million bytes are built in linear time, and as a
+/// copy for a string that may be part of another value, which stays unchanged.
+#[test]
+fn push_str_grows_an_owned_string_and_copies_a_shared_one() {
+    let (ok, out) = vibe(&["run", "tests/push_str.vibe"]);
+    assert!(ok, "push_str.vibe failed to build or run:\n{out}");
+    assert_eq!(out.trim(), "2000000 hi hi!");
+}
+
 /// Two drops the checker used to place twice: a payload moved out of an owned
 /// scrutinee was freed again with the scrutinee, and a self-tail-call inside a
 /// nested match freed its locals both at the back edge and at the scope end.

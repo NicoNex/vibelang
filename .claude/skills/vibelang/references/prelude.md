@@ -234,6 +234,7 @@ drop         : Size -> &Vec a -> Vec a
 split        : Char -> &Str -> Vec Str
 lines        : &Str -> Vec Str
 concat       : &Str -> &Str -> Str
+push_str     : Str -> &Str -> Str
 trim         : &Str -> Str
 starts_with  : &Str -> &Str -> Bool
 contains     : &Str -> &Str -> Bool
@@ -247,6 +248,9 @@ lower        : &Str -> Str
 byte_at      : &Str -> Size -> U8
 byte_str     : U8 -> Str
 ```
+
+`push_str s t` consumes `s` and appends `t` to it, in place when the frame holds `s` alone,
+so an accumulator built with it is linear where one built with `concat` is O(n²).
 
 A `Str` is bytes, and `len`, `slice` and `index_of` count bytes. `byte_at s i` carries the
 same obligation as `get`, `i < len s`; `byte_str` is the one-byte string. Together they are

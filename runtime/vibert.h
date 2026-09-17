@@ -42,7 +42,8 @@ typedef struct VbVal {
   } v;
 } VbVal;
 
-typedef struct { size_t n; char *p; } VbStr;
+/* `cap`: bytes allocated at `p`, NUL included, so an owned string can grow. */
+typedef struct { size_t n; char *p; size_t cap; } VbStr;
 typedef struct { size_t n, cap; VbVal *a; } VbVec;
 
 /* Description of a constructor or record, emitted as static data by vibec. */
@@ -155,6 +156,8 @@ VbVal vb_split(VbVal c, VbVal s);
 VbVal vb_lines(VbVal s);
 VbVal vb_dup(VbVal v);
 VbVal vb_concat(VbVal a, VbVal b);
+VbVal vb_push_str(VbVal s, VbVal t);
+VbVal vb_push_str_owned(VbVal s, VbVal t);
 VbVal vb_trim(VbVal s);
 VbVal vb_starts_with(VbVal s, VbVal p);
 VbVal vb_contains(VbVal s, VbVal p);

@@ -320,8 +320,10 @@ Carried from §16, with what has changed since:
   conjunction is a disjunction, and only the whole one is sound.
 - **Nested constructor patterns are not combined** by `match.nonexhaustive`:
   `|Some (Ok x) |Some (Er e) |None` needs a `|_`. Conservative, not unsound.
-- **No byte buffer and no `U32 -> Char`.** Every string built a byte at a time is
-  O(n²); `Json`, `Csv` and `Encoding` all carry a `ponytail:` note for it.
+- **No `U32 -> Char`, and the libraries still build strings with `concat`.**
+  `push_str` appends in place now, so a string built a piece at a time can be
+  linear; `Json`, `Csv` and `Encoding` have not moved to it, and each still
+  carries its `ponytail:` note about O(n²).
 - **`lib/check/io_check.vibe` writes to `/tmp/claude-1000/...`**, a path from the
   machine it was written on, and fails anywhere else.
 - **`Text.digit_value`'s `ord c - 48`** is counted as an obligation the solver

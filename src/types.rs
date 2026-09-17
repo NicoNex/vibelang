@@ -192,6 +192,9 @@ pub const PRELUDE_SIGS: &[(&str, &str)] = &[
     ("split", "Char -> &Str -> Vec Str"),
     ("lines", "&Str -> Vec Str"),
     ("concat", "&Str -> &Str -> Str"),
+    // Appends to a string it consumes: in place when the frame holds it alone,
+    // so building one a piece at a time is linear, not O(n²).
+    ("push_str", "Str -> &Str -> Str"),
     ("trim", "&Str -> Str"),
     ("starts_with", "&Str -> &Str -> Bool"),
     ("contains", "&Str -> &Str -> Bool"),

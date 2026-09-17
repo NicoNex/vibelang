@@ -580,7 +580,8 @@ impl State<'_> {
             // Reading a field reads through the value; it does not consume it.
             Field(x, _) => self.walk(x, Mode::Borrow, owned),
             App(h, args) => {
-                // `push v x` / `set v i x` / `insert d k v` / `remove d k` on a
+                // `push v x` / `set v i x` / `insert d k v` / `remove d k` /
+                // `push_str s t` on a
                 // collection this frame owns alone and has not handed on — a
                 // name, or a value just computed that nothing else holds —
                 // changes it in place: the old spine is unreachable once the
@@ -596,7 +597,7 @@ impl State<'_> {
                         Field(..) | Borrow(_) => false,
                         _ => !self.maybe_shared(first),
                     };
-                    if matches!(hn.as_str(), "push" | "set" | "insert" | "remove") && alone {
+                    if matches!(hn.as_str(), "push" | "set" | "insert" | "remove" | "push_str") && alone {
                         self.inplace.insert((e.span.file, e.span.line, e.span.col));
                     }
                 }

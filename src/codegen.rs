@@ -70,6 +70,7 @@ fn builtin(name: &str) -> Option<(usize, String)> {
         "remove" => t(2, "vb_remove($0, $1)"),
         "keys" => t(1, "vb_keys($0)"),
         "concat" => t(2, "vb_concat($0, $1)"),
+        "push_str" => t(2, "vb_push_str($0, $1)"),
         "trim" => t(1, "vb_trim($0)"),
         "starts_with" => t(2, "vb_starts_with($0, $1)"),
         "contains" => t(2, "vb_contains($0, $1)"),
@@ -1171,7 +1172,7 @@ impl<'a> Gen<'a> {
                     if args.len() == ar {
                         let (vs, temps) = self.args_with_temps(args, out);
                         let mut b = tpl;
-                        if matches!(n.as_str(), "push" | "set" | "insert" | "remove")
+                        if matches!(n.as_str(), "push" | "set" | "insert" | "remove" | "push_str")
                             && self.inplace.contains(&(span.file, span.line, span.col))
                         {
                             b = b.replacen(&format!("vb_{}(", n), &format!("vb_{}_owned(", n), 1);
