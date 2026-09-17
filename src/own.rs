@@ -22,7 +22,7 @@
 use crate::ast::*;
 use crate::diag::{Diag, Span};
 use crate::infer::Checked;
-use crate::types::{is_num, is_special, PRELUDE_SHARES, PRELUDE_SIGS};
+use crate::types::{is_special, PRELUDE_SHARES, PRELUDE_SIGS};
 use std::collections::{HashMap, HashSet};
 
 /// Everything the ownership pass finds, from one walk over the module.
@@ -337,13 +337,7 @@ fn names_in(e: &Expr, out: &mut HashSet<String>) {
 fn is_affine(t: &Ty) -> bool {
     match t {
         Ty::Ref(_) => false,
-        Ty::Con(n, _) => {
-            !(is_num(n)
-                || matches!(
-                    n.as_str(),
-                    "Bool" | "Char" | "Unit" | "Nat" | "Size" | "CStr" | "Ptr"
-                ))
-        }
+        Ty::Con(n, _) => !crate::types::is_scalar_name(n),
         Ty::Var(_) => true,
         Ty::Tuple(ts) => ts.iter().any(is_affine),
         Ty::Fun(..) | Ty::Eff(_) => false,

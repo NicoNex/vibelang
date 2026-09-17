@@ -443,10 +443,6 @@ impl<'a> Gen<'a> {
         t
     }
 
-    /// Which record a `.field` read or a record literal belongs to. Inference
-    /// decided it from the base's type and wrote it down per span; the bare
-    /// name is the fallback for the sites it did not reach, and it is only ever
-    /// right when one record declares the field (`Data::field_ambiguous`).
     /// Free everything the enclosing scopes are about to lose, innermost first.
     /// `settle` is what makes the caller's claim to have read it already true.
     fn flush(&self, out: &mut String) {
@@ -612,33 +608,30 @@ impl<'a> Gen<'a> {
                         for c in self.pending.iter().rev().filter(|c| !back.contains(c)) {
                             out.push_str(&format!("vb_dispose({});\n", c));
                         }
-                        for (p, t) in self.cur_params.clone().iter().zip(tmps.iter()) {
+                        for (p, t) in self.cur_params.iter().zip(tmps.iter()) {
                             out.push_str(&format!("{} = {};\n", p, t));
                         }
                         out.push_str("continue;\n");
                         return;
                     }
                 }
-                let v = self.ex(e, out);
-                let v = if self.pending.is_empty() {
-                    v
-                } else {
-                    self.settle(v, out)
-                };
-                self.flush(out);
-                out.push_str(&format!("vbret = {};\nbreak;\n", v));
+                self.tail_value(e, out);
             }
-            _ => {
-                let v = self.ex(e, out);
-                let v = if self.pending.is_empty() {
-                    v
-                } else {
-                    self.settle(v, out)
-                };
-                self.flush(out);
-                out.push_str(&format!("vbret = {};\nbreak;\n", v));
-            }
+            _ => self.tail_value(e, out),
         }
+    }
+
+    /// Return `e` from the loop the body compiles to, after the frees pending
+    /// in the enclosing scopes.
+    fn tail_value(&mut self, e: &Expr, out: &mut String) {
+        let v = self.ex(e, out);
+        let v = if self.pending.is_empty() {
+            v
+        } else {
+            self.settle(v, out)
+        };
+        self.flush(out);
+        out.push_str(&format!("vbret = {};\nbreak;\n", v));
     }
 
     /// Shared by tail and value position. `dest` is `None` in tail position.
@@ -1204,16 +1197,7 @@ impl<'a> Gen<'a> {
             match c_unbox(t, &format!("a[{i}]")) {
                 Some(v) => cargs.push(v),
                 None => {
-                    self.errors.push(
-                        Diag::error(
-                            sig.span,
-                            "ffi.type",
-                            &format!("`{}` cannot cross the C boundary", ty_show(t)),
-                        )
-                        .with_fix(
-                            "use a scalar, Bool, Char, Str, CStr or `Ptr a` at the C boundary",
-                        ),
-                    );
+                    self.errors.push(ffi_arg_diag(sig.span, t));
                     cargs.push("0".into());
                 }
             }
@@ -1226,14 +1210,7 @@ impl<'a> Gen<'a> {
             match c_box(&inner, &call) {
                 Some(b) => format!("return {b};"),
                 None => {
-                    self.errors.push(
-                        Diag::error(
-                            sig.span,
-                            "ffi.type",
-                            &format!("`{}` cannot come back from C", ty_show(&inner)),
-                        )
-                        .with_fix("return a scalar, Bool, Char, CStr or `Ptr a`"),
-                    );
+                    self.errors.push(ffi_ret_diag(sig.span, &inner));
                     "return vb_unit();".to_string()
                 }
             }
@@ -1253,16 +1230,7 @@ impl<'a> Gen<'a> {
             match c_unbox(t, &v) {
                 Some(s) => cargs.push(s),
                 None => {
-                    self.errors.push(
-                        Diag::error(
-                            a.span,
-                            "ffi.type",
-                            &format!("`{}` cannot cross the C boundary", ty_show(t)),
-                        )
-                        .with_fix(
-                            "use a scalar, Bool, Char, Str, CStr or `Ptr a` at the C boundary",
-                        ),
-                    );
+                    self.errors.push(ffi_arg_diag(a.span, t));
                     cargs.push("0".into());
                 }
             }
@@ -1287,14 +1255,7 @@ impl<'a> Gen<'a> {
             match c_box(&inner, &call) {
                 Some(b) => out.push_str(&format!("VbVal {} = {};\n", d, b)),
                 None => {
-                    self.errors.push(
-                        Diag::error(
-                            sig.span,
-                            "ffi.type",
-                            &format!("`{}` cannot come back from C", ty_show(&inner)),
-                        )
-                        .with_fix("return a scalar, Bool, Char, CStr or `Ptr a`"),
-                    );
+                    self.errors.push(ffi_ret_diag(sig.span, &inner));
                     out.push_str(&format!("VbVal {} = vb_unit();\n", d));
                 }
             }
@@ -1304,6 +1265,26 @@ impl<'a> Gen<'a> {
 }
 
 // --------------------------------------------------------------- helpers
+
+/// A parameter type that has no C representation.
+fn ffi_arg_diag(span: Span, t: &Ty) -> Diag {
+    Diag::error(
+        span,
+        "ffi.type",
+        &format!("`{}` cannot cross the C boundary", ty_show(t)),
+    )
+    .with_fix("use a scalar, Bool, Char, Str, CStr or `Ptr a` at the C boundary")
+}
+
+/// A result type C cannot hand back.
+fn ffi_ret_diag(span: Span, t: &Ty) -> Diag {
+    Diag::error(
+        span,
+        "ffi.type",
+        &format!("`{}` cannot come back from C", ty_show(t)),
+    )
+    .with_fix("return a scalar, Bool, Char, CStr or `Ptr a`")
+}
 
 fn indent(s: &str, n: usize) -> String {
     let pad = " ".repeat(n);
@@ -1620,28 +1601,14 @@ pub fn boundary_errors(m: &Module) -> Vec<Diag> {
             for t in &ps {
                 if c_unbox(t, "x").is_none() {
                     out.push(
-                        Diag::error(
-                            sig.span,
-                            "ffi.type",
-                            &format!("`{}` cannot cross the C boundary", ty_show(t)),
-                        )
-                        .with_path(&format!("{}.{}", m.name, sig.name))
-                        .with_fix(
-                            "use a scalar, Bool, Char, Str, CStr or `Ptr a` at the C boundary",
-                        ),
+                        ffi_arg_diag(sig.span, t).with_path(&format!("{}.{}", m.name, sig.name)),
                     );
                 }
             }
             let inner = strip_eff(&ret);
             if !is_unit(&inner) && c_box(&inner, "x").is_none() {
                 out.push(
-                    Diag::error(
-                        sig.span,
-                        "ffi.type",
-                        &format!("`{}` cannot come back from C", ty_show(&inner)),
-                    )
-                    .with_path(&format!("{}.{}", m.name, sig.name))
-                    .with_fix("return a scalar, Bool, Char, CStr or `Ptr a`"),
+                    ffi_ret_diag(sig.span, &inner).with_path(&format!("{}.{}", m.name, sig.name)),
                 );
             }
         }
@@ -1698,4 +1665,25 @@ pub fn header(m: &Module, ck: &Checked) -> String {
     }
     o.push_str("\n#ifdef __cplusplus\n}\n#endif\n#endif\n");
     o
+}
+
+#[cfg(test)]
+mod prelude_table {
+    use super::*;
+
+    /// A prelude name needs a signature (types.rs) and a C template (here), and
+    /// nothing else ties the two together: a name added to one and not the
+    /// other, or given two arities, fails here rather than in a user's build.
+    #[test]
+    fn every_prelude_signature_has_a_template_of_the_same_arity() {
+        for (name, _) in crate::types::PRELUDE_SIGS {
+            let ty = crate::infer::prelude_ty(name).expect("parses");
+            let (ar, _) = builtin(name).unwrap_or_else(|| panic!("`{name}` has no C template"));
+            assert_eq!(
+                ar,
+                fn_arity(&strip_eff(ty)),
+                "`{name}`: template arity differs from its signature"
+            );
+        }
+    }
 }

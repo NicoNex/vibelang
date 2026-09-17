@@ -1049,14 +1049,7 @@ fn record_pattern(c: &mut Checker, p: &Pat, scope: Span) {
 /// name, empty when there is no single head; `None` means not affine.
 fn affine_base(t: &T) -> Option<String> {
     match t {
-        T::Con(n, _) => {
-            let scalar = crate::types::is_num(n)
-                || matches!(
-                    n.as_str(),
-                    "Bool" | "Char" | "Unit" | "Nat" | "Size" | "CStr" | "Ptr"
-                );
-            (!scalar).then(|| n.clone())
-        }
+        T::Con(n, _) => (!crate::types::is_scalar_name(n)).then(|| n.clone()),
         T::Var(_) => Some(String::new()),
         T::Tuple(ts) => ts
             .iter()

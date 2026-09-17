@@ -80,6 +80,15 @@ pub enum Kind {
 const INT_TYPES: &[&str] = &["U8", "U16", "U32", "U64", "I8", "I16", "I32", "I64"];
 const FLOAT_TYPES: &[&str] = &["F32", "F64"];
 
+/// A type whose values are copied rather than moved (spec §4.2).
+pub fn is_scalar_name(n: &str) -> bool {
+    is_num(n)
+        || matches!(
+            n,
+            "Bool" | "Char" | "Unit" | "Nat" | "Size" | "CStr" | "Ptr"
+        )
+}
+
 pub fn is_num(n: &str) -> bool {
     INT_TYPES.contains(&n) || FLOAT_TYPES.contains(&n)
 }
