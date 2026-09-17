@@ -366,6 +366,20 @@ impl<'a> Gen<'a> {
         o
     }
 
+    /// The positions of a module function's parameters it consumes: every one
+    /// not written `&`.
+    fn owned_params(&self, n: &str) -> Vec<usize> {
+        let Some(f) = self.m.funs().find(|f| f.name == n) else {
+            return Vec::new();
+        };
+        f.params
+            .iter()
+            .flat_map(|p| p.names.iter().map(move |_| !matches!(p.ty, Some(Ty::Ref(_)))))
+            .enumerate()
+            .filter_map(|(i, owned)| owned.then_some(i))
+            .collect()
+    }
+
     /// The C variables to free at `span`, for one kind of site. A name with no
     /// variable in scope is not this scope's to free and is skipped.
     fn drops_at(&self, span: Span, when: crate::own::DropWhen, only: Option<&str>) -> Vec<String> {
@@ -804,7 +818,7 @@ impl<'a> Gen<'a> {
                     let (tag, ar) = (ci.tag, ci.args.len());
                     self.need_wrapper.insert(n.clone());
                     let _ = tag;
-                    return format!("vb_clos(vbw_{}, {}, {})", cname(n), cstring(n), ar);
+                    return closure(&format!("vbw_{}", cname(n)), n, ar, 0..ar);
                 }
                 self.errors.push(Diag::error(
                     e.span,
@@ -879,7 +893,7 @@ impl<'a> Gen<'a> {
             return c;
         }
         if let Some(ar) = self.arity.get(n).copied() {
-            return format!("vb_clos(vbf_{}, {}, {})", cname(n), cstring(n), ar.max(1));
+            return closure(&format!("vbf_{}", cname(n)), n, ar.max(1), self.owned_params(n));
         }
         if let Some(sig) = self.ck.ext.get(n) {
             let ar = fn_arity(&sig.ty);
@@ -893,7 +907,9 @@ impl<'a> Gen<'a> {
                 return b;
             }
             self.need_wrapper.insert(n.to_string());
-            return format!("vb_clos(vbw_{}, {}, {})", cname(n), cstring(n), ar);
+            let borrows = crate::infer::prelude_ty(n).map(crate::own::ty_borrows).unwrap_or_default();
+            let owns = (0..ar).filter(|i| borrows.get(*i) == Some(&false));
+            return closure(&format!("vbw_{}", cname(n)), n, ar, owns);
         }
         self.errors.push(Diag::error(
             span,
@@ -1105,6 +1121,14 @@ impl<'a> Gen<'a> {
     }
 
     fn app(&mut self, head: &Expr, args: &[Expr], span: Span, out: &mut String) -> String {
+        // A saturated constructor is an object, not a closure applied to it.
+        if let ExprKind::Ctor(n) = &head.kind {
+            if let Some(ci) = self.ck.data.ctors.get(n).cloned() {
+                if args.len() == ci.args.len() {
+                    return self.ctor_call(n, ci.tag, args, out);
+                }
+            }
+        }
         if let ExprKind::Var(n) = &head.kind {
             if self.lookup(n).is_none() {
                 // fmt is variadic by rule, not by signature.
@@ -1122,16 +1146,7 @@ impl<'a> Gen<'a> {
                 }
                 if let Some(ci) = self.ck.data.ctors.get(n).cloned() {
                     if args.len() == ci.args.len() {
-                        let (vs, temps) = self.args_with_temps(args, out);
-                        let call = format!(
-                            "vb_obj(&vbi_{}, {}, {}{}{})",
-                            cname(n),
-                            ci.tag,
-                            vs.len(),
-                            if vs.is_empty() { "" } else { ", " },
-                            vs.join(", ")
-                        );
-                        return self.after_call(call, &temps, out);
+                        return self.ctor_call(n, ci.tag, args, out);
                     }
                 }
                 if let Some(sig) = self.ck.ext.get(n).cloned() {
@@ -1155,14 +1170,10 @@ impl<'a> Gen<'a> {
                     if args.len() == ar {
                         let (vs, temps) = self.args_with_temps(args, out);
                         let mut b = tpl;
-                        if matches!(n.as_str(), "push" | "set")
+                        if matches!(n.as_str(), "push" | "set" | "insert" | "remove")
                             && self.inplace.contains(&(span.file, span.line, span.col))
                         {
-                            b = b.replacen("vb_push(", "vb_push_owned(", 1).replacen(
-                                "vb_set(",
-                                "vb_set_owned(",
-                                1,
-                            );
+                            b = b.replacen(&format!("vb_{}(", n), &format!("vb_{}_owned(", n), 1);
                         }
                         for (i, v) in vs.iter().enumerate() {
                             b = b.replace(&format!("${}", i), v);
@@ -1184,6 +1195,19 @@ impl<'a> Gen<'a> {
         }
         let _ = span;
         cur
+    }
+
+    fn ctor_call(&mut self, n: &str, tag: usize, args: &[Expr], out: &mut String) -> String {
+        let (vs, temps) = self.args_with_temps(args, out);
+        let call = format!(
+            "vb_obj(&vbi_{}, {}, {}{}{})",
+            cname(n),
+            tag,
+            vs.len(),
+            if vs.is_empty() { "" } else { ", " },
+            vs.join(", ")
+        );
+        self.after_call(call, &temps, out)
     }
 
     /// The closure form of an `ext c` symbol: unbox the arguments, call the C
@@ -1284,6 +1308,18 @@ fn ffi_ret_diag(span: Span, t: &Ty) -> Diag {
         &format!("`{}` cannot come back from C", ty_show(t)),
     )
     .with_fix("return a scalar, Bool, Char, CStr or `Ptr a`")
+}
+
+/// A function as a value. `owns` lists the parameters it consumes, so that a
+/// prelude function handing it a value it was only lent copies that one first;
+/// one that consumes none is a plain `vb_clos`, as a lambda is.
+fn closure(f: &str, name: &str, arity: usize, owns: impl IntoIterator<Item = usize>) -> String {
+    let bits = owns.into_iter().filter(|i| *i < 64).fold(0u64, |m, i| m | 1 << i);
+    if bits == 0 {
+        format!("vb_clos({}, {}, {})", f, cstring(name), arity)
+    } else {
+        format!("vb_fn({}, {}, {}, 0x{:x}u)", f, cstring(name), arity, bits)
+    }
 }
 
 fn indent(s: &str, n: usize) -> String {

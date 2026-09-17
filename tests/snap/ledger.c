@@ -26,11 +26,6 @@ static VbVal vbf_Ledger_top(VbVal *a);
 static VbVal vbf_Ledger_load(VbVal *a);
 static VbVal vbf_Ledger_main(VbVal *a);
 
-static VbVal vbw_Er(VbVal *a) { (void)a; return vb_obj(&vbi_Er, 1, 1, a[0]); }
-static VbVal vbw_Ledger_Bad(VbVal *a) { (void)a; return vb_obj(&vbi_Ledger_Bad, 0, 1, a[0]); }
-static VbVal vbw_Ledger_Num(VbVal *a) { (void)a; return vb_obj(&vbi_Ledger_Num, 1, 1, a[0]); }
-static VbVal vbw_Ok(VbVal *a) { (void)a; return vb_obj(&vbi_Ok, 0, 1, a[0]); }
-
 #line 10 "ledger"
 static VbVal vbf_Ledger_parse(VbVal *a) {
   (void)a;
@@ -55,18 +50,14 @@ static VbVal vbf_Ledger_parse(VbVal *a) {
       }
       else if (1) {
         VbVal v___10 = t6;
-        VbVal t11 = vb_apply1(vb_clos(vbw_Ledger_Num, "Ledger.Num", 1), vb_dup(v_ln_1));
-        VbVal t12 = vb_apply1(vb_clos(vbw_Er, "Er", 1), t11);
-        vbret = t12;
+        vbret = vb_obj(&vbi_Er, 1, 1, vb_obj(&vbi_Ledger_Num, 1, 1, vb_dup(v_ln_1)));
         break;
       }
       else { vb_fail("Ledger.parse.match", "no match arm applied"); }
     }
     else if (1) {
-      VbVal v___13 = t2;
-      VbVal t14 = vb_apply1(vb_clos(vbw_Ledger_Bad, "Ledger.Bad", 1), vb_dup(v_ln_1));
-      VbVal t15 = vb_apply1(vb_clos(vbw_Er, "Er", 1), t14);
-      vbret = t15;
+      VbVal v___11 = t2;
+      vbret = vb_obj(&vbi_Er, 1, 1, vb_obj(&vbi_Ledger_Bad, 0, 1, vb_dup(v_ln_1)));
       break;
     }
     else { vb_fail("Ledger.parse.match", "no match arm applied"); }
@@ -77,34 +68,31 @@ static VbVal vbf_Ledger_parse(VbVal *a) {
 #line 19 "ledger"
 static VbVal vbf_Ledger_mk(VbVal *a) {
   (void)a;
-  VbVal v_s_16 = a[0];
-  VbVal v_n_17 = a[1];
-  VbVal v_v_18 = a[2];
+  VbVal v_s_12 = a[0];
+  VbVal v_n_13 = a[1];
+  VbVal v_v_14 = a[2];
   VbVal vbret = vb_unit();
   for (;;) {
     #line 20 "ledger"
-    VbVal t19 = vb_bool(false);
-    if (vb_as_bool(vb_bool(vb_cmp(v_n_17, vb_int(0)) > 0))) {
-      t19 = vb_bool(vb_cmp(v_v_18, vb_float(0.0)) > 0);
+    VbVal t15 = vb_bool(false);
+    if (vb_as_bool(vb_bool(vb_cmp(v_n_13, vb_int(0)) > 0))) {
+      t15 = vb_bool(vb_cmp(v_v_14, vb_float(0.0)) > 0);
     }
-    VbVal t20 = t19;
-    if (vb_eq(t20, vb_bool(true))) {
-      VbVal t21 = vb_obj(&vbi_Ledger_Tx, 0, 3, v_s_16, v_n_17, v_v_18);
+    VbVal t16 = t15;
+    if (vb_eq(t16, vb_bool(true))) {
+      VbVal t17 = vb_obj(&vbi_Ledger_Tx, 0, 3, v_s_12, v_n_13, v_v_14);
       {
-        VbVal v_sku_22 = vb_field(t21, 0);
-        VbVal v_qty_23 = vb_field(t21, 1);
-        VbVal v_price_24 = vb_field(t21, 2);
-        vb_require(vb_as_bool(vb_bool(vb_cmp(v_qty_23, vb_int(0)) > 0)), "Ledger.Tx.invariant", "qty > 0");
-        vb_require(vb_as_bool(vb_bool(vb_cmp(v_price_24, vb_float(0.0)) > 0)), "Ledger.Tx.invariant", "price > 0");
+        VbVal v_sku_18 = vb_field(t17, 0);
+        VbVal v_qty_19 = vb_field(t17, 1);
+        VbVal v_price_20 = vb_field(t17, 2);
+        vb_require(vb_as_bool(vb_bool(vb_cmp(v_qty_19, vb_int(0)) > 0)), "Ledger.Tx.invariant", "qty > 0");
+        vb_require(vb_as_bool(vb_bool(vb_cmp(v_price_20, vb_float(0.0)) > 0)), "Ledger.Tx.invariant", "price > 0");
       }
-      VbVal t25 = vb_apply1(vb_clos(vbw_Ok, "Ok", 1), t21);
-      vbret = t25;
+      vbret = vb_obj(&vbi_Ok, 0, 1, t17);
       break;
     }
-    else if (vb_eq(t20, vb_bool(false))) {
-      VbVal t26 = vb_apply1(vb_clos(vbw_Ledger_Bad, "Ledger.Bad", 1), v_s_16);
-      VbVal t27 = vb_apply1(vb_clos(vbw_Er, "Er", 1), t26);
-      vbret = t27;
+    else if (vb_eq(t16, vb_bool(false))) {
+      vbret = vb_obj(&vbi_Er, 1, 1, vb_obj(&vbi_Ledger_Bad, 0, 1, v_s_12));
       break;
     }
     else { vb_fail("Ledger.mk.match", "no match arm applied"); }
@@ -115,10 +103,10 @@ static VbVal vbf_Ledger_mk(VbVal *a) {
 #line 25 "ledger"
 static VbVal vbf_Ledger_amt(VbVal *a) {
   (void)a;
-  VbVal v_t_28 = a[0];
+  VbVal v_t_21 = a[0];
   VbVal vbret = vb_unit();
   for (;;) {
-    vbret = vb_mul(vb_field(v_t_28, 2), vb_to_f64(vb_field(v_t_28, 1)));
+    vbret = vb_mul(vb_field(v_t_21, 2), vb_to_f64(vb_field(v_t_21, 1)));
     break;
   }
   return vbret;
@@ -127,10 +115,10 @@ static VbVal vbf_Ledger_amt(VbVal *a) {
 #line 26 "ledger"
 static VbVal vbf_Ledger_total(VbVal *a) {
   (void)a;
-  VbVal v_ts_29 = a[0];
+  VbVal v_ts_22 = a[0];
   VbVal vbret = vb_unit();
   for (;;) {
-    vbret = vb_sum(vb_map(vb_clos(vbf_Ledger_amt, "Ledger.amt", 1), v_ts_29));
+    vbret = vb_sum(vb_map(vb_clos(vbf_Ledger_amt, "Ledger.amt", 1), v_ts_22));
     break;
   }
   return vbret;
@@ -139,13 +127,13 @@ static VbVal vbf_Ledger_total(VbVal *a) {
 #line 28 "ledger"
 static VbVal vbf_Ledger_mean(VbVal *a) {
   (void)a;
-  VbVal v_ts_30 = a[0];
-  vb_require(vb_as_bool(vb_bool(vb_cmp(vb_len(v_ts_30), vb_int(0)) > 0)), "Ledger.mean.pre", "len ts > 0");
+  VbVal v_ts_23 = a[0];
+  vb_require(vb_as_bool(vb_bool(vb_cmp(vb_len(v_ts_23), vb_int(0)) > 0)), "Ledger.mean.pre", "len ts > 0");
   VbVal vbret = vb_unit();
   for (;;) {
-    VbVal t31_a[] = {v_ts_30};
-    VbVal t31 = vbf_Ledger_total(t31_a);
-    vbret = vb_div(t31, vb_to_f64(vb_len(v_ts_30)), "Ledger.mean.div");
+    VbVal t24_a[] = {v_ts_23};
+    VbVal t24 = vbf_Ledger_total(t24_a);
+    vbret = vb_div(t24, vb_to_f64(vb_len(v_ts_23)), "Ledger.mean.div");
     break;
   }
   return vbret;
@@ -154,11 +142,11 @@ static VbVal vbf_Ledger_mean(VbVal *a) {
 #line 29 "ledger"
 static VbVal vbf_Ledger_top(VbVal *a) {
   (void)a;
-  VbVal v_ts_32 = a[0];
-  vb_require(vb_as_bool(vb_bool(vb_cmp(vb_len(v_ts_32), vb_int(0)) > 0)), "Ledger.top.pre", "len ts > 0");
+  VbVal v_ts_25 = a[0];
+  vb_require(vb_as_bool(vb_bool(vb_cmp(vb_len(v_ts_25), vb_int(0)) > 0)), "Ledger.top.pre", "len ts > 0");
   VbVal vbret = vb_unit();
   for (;;) {
-    vbret = vb_dup(vb_max_by(vb_clos(vbf_Ledger_amt, "Ledger.amt", 1), v_ts_32, "Ledger.top.max_by"));
+    vbret = vb_dup(vb_max_by(vb_clos(vbf_Ledger_amt, "Ledger.amt", 1), v_ts_25, "Ledger.top.max_by"));
     break;
   }
   return vbret;
@@ -167,34 +155,34 @@ static VbVal vbf_Ledger_top(VbVal *a) {
 #line 31 "ledger"
 static VbVal vbf_Ledger_load(VbVal *a) {
   (void)a;
-  VbVal v_p_33 = a[0];
+  VbVal v_p_26 = a[0];
   VbVal vbret = vb_unit();
   for (;;) {
     #line 32 "ledger"
-    VbVal v_txt_34 = vb_read(v_p_33);
+    VbVal v_txt_27 = vb_read(v_p_26);
     #line 33 "ledger"
-    VbVal t35 = vb_lines(v_txt_34);
-    VbVal t36 = vb_map(vb_clos(vbf_Ledger_parse, "Ledger.parse", 1), t35);
-    vb_dispose(t35);
-    VbVal t37 = vb_seq(t36);
-    if (vb_tag(t37) == 1) {
-      VbVal v_e_38 = vb_field(t37, 0);
-      VbVal t39 = vb_apply1(vb_clos(vbw_Er, "Er", 1), v_e_38);
-      vb_dispose(v_txt_34);
-      vbret = t39;
+    VbVal t28 = vb_lines(v_txt_27);
+    VbVal t29 = vb_map(vb_clos(vbf_Ledger_parse, "Ledger.parse", 1), t28);
+    vb_dispose(t28);
+    VbVal t30 = vb_seq(t29);
+    if (vb_tag(t30) == 1) {
+      VbVal v_e_31 = vb_field(t30, 0);
+      VbVal t32 = vb_obj(&vbi_Er, 1, 1, v_e_31);
+      vb_dispose(v_txt_27);
+      vbret = t32;
       break;
     }
-    else if (vb_tag(t37) == 0 && vb_as_vec(vb_field(t37, 0))->n == 0) {
-      VbVal t40 = vb_apply1(vb_clos(vbw_Er, "Er", 1), vb_obj(&vbi_Ledger_Void, 2, 0));
-      vb_dispose(v_txt_34);
-      vbret = t40;
+    else if (vb_tag(t30) == 0 && vb_as_vec(vb_field(t30, 0))->n == 0) {
+      VbVal t33 = vb_obj(&vbi_Er, 1, 1, vb_obj(&vbi_Ledger_Void, 2, 0));
+      vb_dispose(v_txt_27);
+      vbret = t33;
       break;
     }
-    else if (vb_tag(t37) == 0) {
-      VbVal v_ts_41 = vb_field(t37, 0);
-      VbVal t42 = vb_apply1(vb_clos(vbw_Ok, "Ok", 1), v_ts_41);
-      vb_dispose(v_txt_34);
-      vbret = t42;
+    else if (vb_tag(t30) == 0) {
+      VbVal v_ts_34 = vb_field(t30, 0);
+      VbVal t35 = vb_obj(&vbi_Ok, 0, 1, v_ts_34);
+      vb_dispose(v_txt_27);
+      vbret = t35;
       break;
     }
     else { vb_fail("Ledger.load.match", "no match arm applied"); }
@@ -208,44 +196,44 @@ static VbVal vbf_Ledger_main(VbVal *a) {
   VbVal vbret = vb_unit();
   for (;;) {
     #line 40 "ledger"
-    VbVal t43 = vb_strz("ledger.csv");
-    VbVal t44_a[] = {t43};
-    VbVal t44 = vbf_Ledger_load(t44_a);
-    vb_dispose(t43);
-    VbVal v_r_45 = t44;
+    VbVal t36 = vb_strz("ledger.csv");
+    VbVal t37_a[] = {t36};
+    VbVal t37 = vbf_Ledger_load(t37_a);
+    vb_dispose(t36);
+    VbVal v_r_38 = t37;
     #line 41 "ledger"
-    VbVal t46 = v_r_45;
-    if (vb_tag(t46) == 1) {
-      VbVal v_e_47 = vb_field(t46, 0);
-      VbVal t48 = vb_show(v_e_47);
-      VbVal t49 = vb_warn(t48);
-      vb_dispose(t48);
-      vb_dispose(v_r_45);
-      vbret = t49;
+    VbVal t39 = v_r_38;
+    if (vb_tag(t39) == 1) {
+      VbVal v_e_40 = vb_field(t39, 0);
+      VbVal t41 = vb_show(v_e_40);
+      VbVal t42 = vb_warn(t41);
+      vb_dispose(t41);
+      vb_dispose(v_r_38);
+      vbret = t42;
       break;
     }
-    else if (vb_tag(t46) == 0) {
-      VbVal v_ts_50 = vb_field(t46, 0);
-      VbVal t51 = vb_strz("n={} tot={} avg={} top={}");
-      VbVal t52 = vb_len(v_ts_50);
-      VbVal t53_a[] = {v_ts_50};
-      VbVal t53 = vbf_Ledger_total(t53_a);
-      VbVal t54 = t53;
-      VbVal t55_a[] = {v_ts_50};
-      VbVal t55 = vbf_Ledger_mean(t55_a);
-      VbVal t56 = t55;
-      VbVal t57_a[] = {v_ts_50};
-      VbVal t57 = vbf_Ledger_top(t57_a);
-      VbVal t58 = vb_fmt(t51, 4, t52, t54, t56, vb_field(t57, 0));
-      vb_dispose(t51);
+    else if (vb_tag(t39) == 0) {
+      VbVal v_ts_43 = vb_field(t39, 0);
+      VbVal t44 = vb_strz("n={} tot={} avg={} top={}");
+      VbVal t45 = vb_len(v_ts_43);
+      VbVal t46_a[] = {v_ts_43};
+      VbVal t46 = vbf_Ledger_total(t46_a);
+      VbVal t47 = t46;
+      VbVal t48_a[] = {v_ts_43};
+      VbVal t48 = vbf_Ledger_mean(t48_a);
+      VbVal t49 = t48;
+      VbVal t50_a[] = {v_ts_43};
+      VbVal t50 = vbf_Ledger_top(t50_a);
+      VbVal t51 = vb_fmt(t44, 4, t45, t47, t49, vb_field(t50, 0));
+      vb_dispose(t44);
+      vb_dispose(t45);
+      vb_dispose(t47);
+      vb_dispose(t49);
+      VbVal t52 = t51;
+      VbVal t53 = vb_out(t52);
       vb_dispose(t52);
-      vb_dispose(t54);
-      vb_dispose(t56);
-      VbVal t59 = t58;
-      VbVal t60 = vb_out(t59);
-      vb_dispose(t59);
-      vb_dispose(v_r_45);
-      vbret = t60;
+      vb_dispose(v_r_38);
+      vbret = t53;
       break;
     }
     else { vb_fail("Ledger.main.match", "no match arm applied"); }

@@ -26,6 +26,13 @@ void *vb_alloc(size_t n) {
 
 void vb_free(void *p) { free(p); }
 
+/* The byte size of `n` values, refused rather than wrapped: `range 0 (shl 1 62)`
+   must run out of memory, not allocate one byte and write past it. */
+static size_t vals_size(size_t n) {
+  if (n > SIZE_MAX / sizeof(VbVal)) { fputs("vibe: out of memory\n", stderr); exit(70); }
+  return sizeof(VbVal) * n;
+}
+
 /* ---------------------------------------------------------- constructors */
 
 VbVal vb_unit(void) { VbVal v; v.tag = VB_UNIT; v.v.i = 0; return v; }
@@ -63,9 +70,10 @@ VbVal vb_obj(const VbInfo *info, uint32_t tag, uint32_t n, ...) {
   VbVal v; v.tag = VB_OBJ; v.v.p = o; return v;
 }
 
-VbVal vb_clos(VbFn fn, const char *name, uint32_t arity) {
+VbVal vb_clos(VbFn fn, const char *name, uint32_t arity) { return vb_fn(fn, name, arity, 0); }
+VbVal vb_fn(VbFn fn, const char *name, uint32_t arity, uint64_t owns) {
   VbClos *c = vb_alloc(sizeof(VbClos));
-  c->fn = fn; c->name = name; c->arity = arity; c->nargs = 0;
+  c->fn = fn; c->name = name; c->arity = arity; c->nargs = 0; c->owns = owns;
   c->args = arity ? vb_alloc(sizeof(VbVal) * arity) : NULL;
   VbVal v; v.tag = VB_CLOS; v.v.p = c; return v;
 }
@@ -173,9 +181,10 @@ VbObj *vb_as_obj(VbVal v) { expect(v, VB_OBJ, "expected a record or variant"); r
 VbVal vb_apply1(VbVal f, VbVal x) {
   if (f.tag != VB_CLOS) vb_fail("<runtime>", "this value is not a function");
   VbClos *c = (VbClos *)f.v.p;
+  if (c->nargs >= c->arity) vb_fail("<runtime>", "applied a function to more arguments than it takes");
   VbClos *n = vb_alloc(sizeof(VbClos));
   *n = *c;
-  n->args = vb_alloc(sizeof(VbVal) * (c->arity ? c->arity : 1));
+  n->args = vb_alloc(vals_size(c->arity));
   for (uint32_t i = 0; i < c->nargs; i++) n->args[i] = c->args[i];
   n->args[n->nargs++] = x;
   if (n->nargs == n->arity) {
@@ -191,6 +200,17 @@ VbVal vb_apply1(VbVal f, VbVal x) {
     return r;
   }
   VbVal v; v.tag = VB_CLOS; v.v.p = n; return v;
+}
+
+/* Apply `f` to a value the caller was only lent — an element of the `&Vec` that
+   `map`, `filter`, `fold`, `each`, `max_by`, `min_by` and `sort_by` walk. A
+   function that consumes that parameter frees it, which would free the
+   caller's element under it, so it is given a copy to consume instead. */
+static VbVal apply_lent(VbVal f, VbVal x) {
+  if (f.tag != VB_CLOS) vb_fail("<runtime>", "this value is not a function");
+  VbClos *c = (VbClos *)f.v.p;
+  bool owns = c->nargs >= 64 || (c->owns >> c->nargs & 1);
+  return vb_apply1(f, owns ? vb_dup(x) : x);
 }
 
 
@@ -308,17 +328,18 @@ VbVal vb_with(VbVal o, uint32_t nchanged, const uint32_t *idx, const VbVal *vals
 
 static VbVal wrap_vec(VbVec *w) { VbVal v; v.tag = VB_VEC; v.v.p = w; return v; }
 
+
 static VbVec *vec_alloc(size_t cap) {
   VbVec *w = vb_alloc(sizeof(VbVec));
   w->n = 0; w->cap = cap;
-  w->a = cap ? vb_alloc(sizeof(VbVal) * cap) : NULL;
+  w->a = cap ? vb_alloc(vals_size(cap)) : NULL;
   return w;
 }
 static void vec_push(VbVec *w, VbVal x) {
   if (w->n == w->cap) {
     size_t cap = w->cap ? w->cap * 2 : 8;
     /* The array is internal to this vector: no other value points at it. */
-    VbVal *a = realloc(w->a, sizeof(VbVal) * cap);
+    VbVal *a = realloc(w->a, vals_size(cap));
     if (!a) { fputs("vibe: out of memory\n", stderr); exit(70); }
     w->a = a; w->cap = cap;
   }
@@ -336,13 +357,16 @@ VbVal vb_vec_lit(uint32_t n, ...) {
   return wrap_vec(w);
 }
 
-/* `push` and `set` take the vector by value, so the old spine is already the
- * caller's to lose and its elements move rather than copy. The operations that
- * take `&Vec` — `rev`, `filter`, `sort_by`, `take`, `drop`, `concat_vec` —
- * cannot do that: the caller still owns the source and will free it, so each
- * element is copied with `vb_dup` and no two vectors point at one value
- * (docs/aliasing-audit.md, gap 3). That copy is what makes `vb_dispose` able to
- * be deep.
+/* The operations that take `&Vec` — `rev`, `filter`, `sort_by`, `take`,
+ * `drop`, `concat_vec` — cannot move the elements: the caller still owns the
+ * source and will free it, so each element is copied with `vb_dup` and no two
+ * vectors point at one value (docs/aliasing-audit.md, gap 3). That copy is what
+ * makes `vb_dispose` able to be deep.
+ *
+ * `push`, `set`, `insert` and `remove` take the collection by value, but own.rs
+ * picks these copying forms exactly when that value may still be part of
+ * another one (`push (get vv 0) x`), so they copy too and free nothing. The
+ * `_owned` forms below are the ones for a collection the frame holds alone.
  *
  * ponytail: the copy is unconditional. It is dead work when the source dies at
  * the call, and the drop table already computes last use — eliding it there is
@@ -351,7 +375,7 @@ VbVal vb_vec_lit(uint32_t n, ...) {
 VbVal vb_push(VbVal v, VbVal x) {
   VbVec *s = vb_as_vec(v);
   VbVec *w = vec_alloc(s->n + 1);
-  for (size_t i = 0; i < s->n; i++) vec_push(w, s->a[i]);
+  for (size_t i = 0; i < s->n; i++) vec_push(w, vb_dup(s->a[i]));
   vec_push(w, x);
   return wrap_vec(w);
 }
@@ -388,8 +412,7 @@ VbVal vb_set(VbVal v, VbVal i, VbVal x, const char *path) {
   uint64_t k = vb_as_uint(i);
   vb_require(k < s->n, path, "i < len xs");
   VbVec *w = vec_alloc(s->n);
-  for (size_t j = 0; j < s->n; j++) vec_push(w, s->a[j]);
-  w->a[k] = x;
+  for (size_t j = 0; j < s->n; j++) vec_push(w, j == k ? x : vb_dup(s->a[j]));
   return wrap_vec(w);
 }
 VbVal vb_len(VbVal v) {
@@ -399,24 +422,24 @@ VbVal vb_len(VbVal v) {
 VbVal vb_map(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
   VbVec *w = vec_alloc(s->n);
-  for (size_t i = 0; i < s->n; i++) vec_push(w, vb_apply1(f, s->a[i]));
+  for (size_t i = 0; i < s->n; i++) vec_push(w, apply_lent(f, s->a[i]));
   return wrap_vec(w);
 }
 VbVal vb_filter(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
   VbVec *w = vec_alloc(s->n);
   for (size_t i = 0; i < s->n; i++)
-    if (vb_as_bool(vb_apply1(f, s->a[i]))) vec_push(w, vb_dup(s->a[i]));
+    if (vb_as_bool(apply_lent(f, s->a[i]))) vec_push(w, vb_dup(s->a[i]));
   return wrap_vec(w);
 }
 VbVal vb_fold(VbVal f, VbVal z, VbVal v) {
   VbVec *s = vb_as_vec(v);
-  for (size_t i = 0; i < s->n; i++) z = vb_apply1(vb_apply1(f, z), s->a[i]);
+  for (size_t i = 0; i < s->n; i++) z = apply_lent(vb_apply1(f, z), s->a[i]);
   return z;
 }
 VbVal vb_each(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
-  for (size_t i = 0; i < s->n; i++) vb_apply1(f, s->a[i]);
+  for (size_t i = 0; i < s->n; i++) apply_lent(f, s->a[i]);
   return vb_unit();
 }
 VbVal vb_sum(VbVal v) {
@@ -431,9 +454,9 @@ VbVal vb_sum(VbVal v) {
 static VbVal extreme_by(VbVal f, VbVal v, const char *path, int sign) {
   VbVec *s = vb_as_vec(v);
   vb_require(s->n > 0, path, "len xs > 0");
-  size_t best = 0; VbVal bk = vb_apply1(f, s->a[0]);
+  size_t best = 0; VbVal bk = apply_lent(f, s->a[0]);
   for (size_t i = 1; i < s->n; i++) {
-    VbVal k = vb_apply1(f, s->a[i]);
+    VbVal k = apply_lent(f, s->a[i]);
     if (vb_cmp(k, bk) * sign > 0) { best = i; bk = k; }
   }
   return s->a[best];
@@ -459,7 +482,7 @@ VbVal vb_sort_by(VbVal f, VbVal v) {
   VbVec *s = vb_as_vec(v);
   KeyVal *kv = vb_alloc(sizeof(KeyVal) * (s->n ? s->n : 1));
   KeyVal *tmp = vb_alloc(sizeof(KeyVal) * (s->n ? s->n : 1));
-  for (size_t i = 0; i < s->n; i++) { kv[i].val = s->a[i]; kv[i].key = vb_apply1(f, s->a[i]); }
+  for (size_t i = 0; i < s->n; i++) { kv[i].val = s->a[i]; kv[i].key = apply_lent(f, s->a[i]); }
   merge_sort(kv, tmp, s->n);
   VbVec *w = vec_alloc(s->n);
   for (size_t i = 0; i < s->n; i++) vec_push(w, vb_dup(kv[i].val));
@@ -498,7 +521,8 @@ VbVal vb_drop(VbVal n, VbVal v) {
 }
 VbVal vb_range(VbVal a, VbVal b) {
   uint64_t lo = vb_as_uint(a), hi = vb_as_uint(b);
-  VbVec *w = vec_alloc(hi > lo ? hi - lo : 0);
+  if (hi > lo && hi - lo > SIZE_MAX) { fputs("vibe: out of memory\n", stderr); exit(70); }
+  VbVec *w = vec_alloc(hi > lo ? (size_t)(hi - lo) : 0);
   for (uint64_t i = lo; i < hi; i++) vec_push(w, vb_uint(i));
   return wrap_vec(w);
 }
@@ -807,20 +831,44 @@ static size_t dict_find(VbVec *d, VbVal k) {
   return d->n;
 }
 
-/* Takes the dictionary by value, so the entries move rather than copy and the
-   old spine is this function's to free. An entry the new key displaces is
-   nobody's after this, so it goes too. */
+/* The copying forms, for a dictionary that may still be part of another value:
+   every entry but the displaced one is copied, and nothing is freed. */
+static VbVec *dict_copy_without(VbVec *s, size_t at, size_t extra) {
+  VbVec *w = vec_alloc(s->n + extra);
+  for (size_t i = 0; i < s->n; i++)
+    if (i != at) vec_push(w, vb_dup(s->a[i]));
+  return w;
+}
 VbVal vb_insert(VbVal d, VbVal k, VbVal v) {
   VbVec *s = vb_as_vec(d);
-  size_t at = dict_find(s, k);
-  VbVec *w = vec_alloc(s->n + 1);
-  for (size_t i = 0; i < s->n; i++) {
-    if (i == at) vb_dispose(s->a[i]); else vec_push(w, s->a[i]);
-  }
+  VbVec *w = dict_copy_without(s, dict_find(s, k), 1);
   vec_push(w, vb_obj(&vb_info_entry, 0, 2, k, v));
-  vb_free(s->a);
-  vb_free(s);
   return wrap_vec(w);
+}
+VbVal vb_remove(VbVal d, VbVal k) {
+  VbVec *s = vb_as_vec(d);
+  return wrap_vec(dict_copy_without(s, dict_find(s, k), 0));
+}
+
+/* The in-place forms, for a dictionary the frame holds alone (own.rs decides):
+   the entry a key displaces is nobody's after this, so it goes, and the rest
+   keep their order. */
+static void dict_unlink(VbVec *s, size_t at) {
+  if (at == s->n) return;
+  vb_dispose(s->a[at]);
+  memmove(s->a + at, s->a + at + 1, (s->n - at - 1) * sizeof *s->a);
+  s->n--;
+}
+VbVal vb_insert_owned(VbVal d, VbVal k, VbVal v) {
+  VbVec *s = vb_as_vec(d);
+  dict_unlink(s, dict_find(s, k));
+  vec_push(s, vb_obj(&vb_info_entry, 0, 2, k, v));
+  return d;
+}
+VbVal vb_remove_owned(VbVal d, VbVal k) {
+  VbVec *s = vb_as_vec(d);
+  dict_unlink(s, dict_find(s, k));
+  return d;
 }
 
 /* Borrows, so the value comes back as a copy: handing out the entry's own
@@ -831,18 +879,6 @@ VbVal vb_lookup(VbVal d, VbVal k) {
   size_t at = dict_find(s, k);
   if (at == s->n) return vb_none();
   return vb_some(vb_dup(((VbObj *)s->a[at].v.p)->f[1]));
-}
-
-VbVal vb_remove(VbVal d, VbVal k) {
-  VbVec *s = vb_as_vec(d);
-  size_t at = dict_find(s, k);
-  VbVec *w = vec_alloc(s->n);
-  for (size_t i = 0; i < s->n; i++) {
-    if (i == at) vb_dispose(s->a[i]); else vec_push(w, s->a[i]);
-  }
-  vb_free(s->a);
-  vb_free(s);
-  return wrap_vec(w);
 }
 
 VbVal vb_keys(VbVal d) {
@@ -1070,5 +1106,6 @@ VbVal vb_get_checked(VbVal v, VbVal i) {
   VbVec *s = vb_as_vec(v);
   uint64_t k = vb_as_uint(i);
   if (k >= s->n) return vb_er(vb_obj(&vb_info_OutOfBounds, 2, 0));
-  return vb_ok(s->a[k]);
+  /* Borrows, so the element comes back as a copy, as `vb_lookup`'s does. */
+  return vb_ok(vb_dup(s->a[k]));
 }

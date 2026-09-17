@@ -55,7 +55,9 @@ typedef struct {
 typedef struct { const VbInfo *info; uint32_t tag; uint32_t n; VbVal *f; } VbObj;
 
 typedef VbVal (*VbFn)(VbVal *args);
-typedef struct { VbFn fn; const char *name; uint32_t arity, nargs; VbVal *args; } VbClos;
+/* `owns` has bit i set when the function consumes its i-th parameter. A lambda
+   has none: it reads its parameters and never frees them. */
+typedef struct { VbFn fn; const char *name; uint32_t arity, nargs; uint64_t owns; VbVal *args; } VbClos;
 
 /* --- lifecycle --- */
 void vb_init(void);
@@ -79,6 +81,7 @@ VbVal vb_str(const char *s, size_t n);
 VbVal vb_strz(const char *s);
 VbVal vb_obj(const VbInfo *info, uint32_t tag, uint32_t n, ...);
 VbVal vb_clos(VbFn fn, const char *name, uint32_t arity);
+VbVal vb_fn(VbFn fn, const char *name, uint32_t arity, uint64_t owns);
 
 /* --- unboxing, for the C boundary --- */
 int64_t vb_as_int(VbVal v);
@@ -119,6 +122,8 @@ VbVal vb_dict(void);
 VbVal vb_insert(VbVal d, VbVal k, VbVal v);
 VbVal vb_lookup(VbVal d, VbVal k);
 VbVal vb_remove(VbVal d, VbVal k);
+VbVal vb_insert_owned(VbVal d, VbVal k, VbVal v);
+VbVal vb_remove_owned(VbVal d, VbVal k);
 VbVal vb_keys(VbVal d);
 
 /* --- Vec --- */

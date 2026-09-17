@@ -156,6 +156,7 @@ pub fn analyse(m: &Module, ck: &Checked) -> Analysis {
             exts: &reaches_c,
             fun: f.name.clone(),
             arity: f.arity(),
+            accs: HashSet::new(),
             shared: borrows.iter().map(|b| (*b).to_string()).collect(),
             suppressed: 0,
         };
@@ -225,7 +226,7 @@ fn borrowed_params(m: &Module) -> HashMap<String, Vec<bool>> {
 }
 
 /// The parameters of an arrow type, each as "is it a borrow".
-fn ty_borrows(t: &Ty) -> Vec<bool> {
+pub fn ty_borrows(t: &Ty) -> Vec<bool> {
     let mut v = Vec::new();
     let mut cur = t;
     while let Ty::Fun(a, b) = cur {
@@ -393,6 +394,11 @@ struct State<'a> {
     /// call matching both is the back edge codegen compiles to `continue`.
     fun: String,
     arity: usize,
+    /// The accumulator of a lambda given to `fold`: `fold (\d w -> insert d
+    /// w 1) dict ws`. `vb_fold` hands it over owned and takes back what the
+    /// lambda returns, so an update to it may happen in place. Every other
+    /// lambda parameter is lent — `map` passes its elements — and is not.
+    accs: HashSet<String>,
 }
 
 impl State<'_> {
@@ -574,20 +580,33 @@ impl State<'_> {
             // Reading a field reads through the value; it does not consume it.
             Field(x, _) => self.walk(x, Mode::Borrow, owned),
             App(h, args) => {
-                // `push v x` / `set v i x` on a vector this frame owns alone
-                // and has not handed on grows or writes it in place: the old
-                // spine is unreachable once the call has it. A vector that may
-                // alias another value's element keeps the copy.
-                if let (Var(hn), Some(Var(v))) = (&h.kind, args.first().map(|a| &a.kind)) {
-                    if matches!(hn.as_str(), "push" | "set")
-                        && owned.contains(&v.as_str())
-                        && !self.moved.contains_key(v)
-                        && !self.shared.contains(v)
-                    {
+                // `push v x` / `set v i x` / `insert d k v` / `remove d k` on a
+                // collection this frame owns alone and has not handed on — a
+                // name, or a value just computed that nothing else holds —
+                // changes it in place: the old spine is unreachable once the
+                // call has it. One that may alias another value's element keeps
+                // the copy.
+                if let (Var(hn), Some(first)) = (&h.kind, args.first()) {
+                    let alone = match &first.kind {
+                        Var(v) => {
+                            (owned.contains(&v.as_str()) || self.accs.contains(v))
+                                && !self.moved.contains_key(v)
+                                && !self.shared.contains(v)
+                        }
+                        Field(..) | Borrow(_) => false,
+                        _ => !self.maybe_shared(first),
+                    };
+                    if matches!(hn.as_str(), "push" | "set" | "insert" | "remove") && alone {
                         self.inplace.insert((e.span.file, e.span.line, e.span.col));
                     }
                 }
                 self.walk(h, Mode::Borrow, owned);
+                let acc = match (&h.kind, args.first().map(|a| &a.kind)) {
+                    (Var(hn), Some(Lambda(ps, _))) if hn == "fold" => {
+                        ps.first().filter(|p| self.accs.insert((*p).clone())).cloned()
+                    }
+                    _ => None,
+                };
                 // A saturated self-call is not a call: codegen overwrites the
                 // parameters and loops (§11.2). A parameter still owned here is
                 // about to be unreachable, so it dies on this edge — after the
@@ -690,6 +709,9 @@ impl State<'_> {
                         }
                     }
                     self.walk(a, m, owned);
+                }
+                if let Some(p) = acc {
+                    self.accs.remove(&p);
                 }
                 if back_edge {
                     for n in owned {

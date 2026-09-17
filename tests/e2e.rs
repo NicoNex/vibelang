@@ -390,6 +390,22 @@ fn a_dictionary_associates_a_key_with_a_value() {
     assert_eq!(out.trim(), "2 1 20 0 2 2");
 }
 
+/// A value a prelude function was only lent stays the caller's. A named
+/// function that consumes its parameter is handed a copy of each element by
+/// `map`; a constructor used as a function wraps a copy; `push`, `set` and
+/// `insert` on a collection that is part of another one copy rather than free
+/// or move its pieces; `get_checked` returns a copy. Each used to free memory
+/// the caller went on to read.
+#[test]
+fn a_lent_value_is_never_freed_by_the_callee() {
+    let (ok, out) = vibe(&["run", "tests/lent.vibe"]);
+    assert!(ok, "lent.vibe failed to build or run:\n{out}");
+    assert_eq!(
+        out.trim(),
+        "[2, 3] [Lent.Box aa, Lent.Box bbb] [a, b] [z] 2 Ok bbb [aa, bbb] [[a]] 1"
+    );
+}
+
 /// Two drops the checker used to place twice: a payload moved out of an owned
 /// scrutinee was freed again with the scrutinee, and a self-tail-call inside a
 /// nested match freed its locals both at the back edge and at the scope end.

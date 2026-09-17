@@ -1,0 +1,25 @@
+mod Lent
+
+;; Every shape here once freed memory a caller still owned. A function that
+;; consumes its parameter used to be handed the elements of a borrowed vector
+;; as they were; a constructor used as a function kept them; `push`, `set` and
+;; `insert` on a collection inside another one freed or moved its pieces; and
+;; `get_checked` handed out an element the caller then freed as its own.
+type Box = Box Str
+
+eat (s:Str) : Size = len &s
+
+grow (vv:&Vec (Vec Str)) : Vec Str = push (get vv 0) "b"
+
+put (vv:&Vec (Vec Str)) : Vec Str = set (get vv 0) 0 "z"
+
+add (ds:&Vec (Dict Str Str)) : Dict Str Str = insert (get ds 0) "k" "v"
+
+pick (v:&Vec Str) : Res Fault Str = get_checked v 1
+
+main : E! Unit =
+  let v = ["aa", "bbb"] in
+  let vv = [["a"]] in
+  let ds = [insert dict "a" "1"] in
+  out (fmt "{} {} {} {} {} {} {} {} {}"
+           (map eat &v) (map Box &v) (grow &vv) (put &vv) (len &(add &ds)) (pick &v) v vv (len &ds))
