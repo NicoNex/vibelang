@@ -1,0 +1,10 @@
+mod Edges
+
+;; Values at the edge of what the runtime is given. NaN equals nothing; a tuple
+;; orders field by field; the smallest I64 divided by -1 is an overflow, not a
+;; trap; and a parse takes digits, in range, and nothing else.
+main : E! Unit =
+  let nan = sqrt (0.0 - 1.0) in
+  let lo = i64 (0 - 9223372036854775807 - 1) in
+  out (fmt "{} {} {} {} {} {} {}"
+           (nan==nan) ((1, 2)<(1, 3)) (div_checked lo (i64 (0 - 1))) (parse_u64 " -5") (parse_u32 "5000000000") (parse_i64 "99999999999999999999") (parse_u32 "4294967295"))

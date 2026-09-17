@@ -39,7 +39,7 @@ static VbVal vbf_Ledger_parse(VbVal *a) {
       VbVal v_q_4 = vb_as_vec(t2)->a[1];
       VbVal v_p_5 = vb_as_vec(t2)->a[2];
       #line 12 "ledger"
-      VbVal t6 = vb_obj(&vb_info_tuple, 0, 2, vb_parse_int(v_q_4, 0), vb_parse_f64(v_p_5));
+      VbVal t6 = vb_obj(&vb_info_tuple, 0, 2, vb_parse_int(v_q_4, 0, 32), vb_parse_f64(v_p_5));
       if (vb_tag(vb_field(t6, 0)) == 0 && vb_tag(vb_field(t6, 1)) == 0) {
         VbVal v_n_7 = vb_field(vb_field(t6, 0), 0);
         VbVal v_v_8 = vb_field(vb_field(t6, 1), 0);

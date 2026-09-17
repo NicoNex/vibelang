@@ -406,6 +406,18 @@ fn a_lent_value_is_never_freed_by_the_callee() {
     );
 }
 
+/// Values at the edge of what the runtime is given: NaN equals nothing, not
+/// everything; `<` on a tuple orders it field by field instead of failing; the
+/// smallest `I64` divided by -1 is `Overflow` where C would trap; a parse
+/// refuses leading space, a value out of the type's range, and a `-` on an
+/// unsigned type.
+#[test]
+fn the_runtime_holds_at_the_edges() {
+    let (ok, out) = vibe(&["run", "tests/edges.vibe"]);
+    assert!(ok, "edges.vibe failed to build or run:\n{out}");
+    assert_eq!(out.trim(), "False True Er Overflow None None None Some 4294967295");
+}
+
 /// Two drops the checker used to place twice: a payload moved out of an owned
 /// scrutinee was freed again with the scrutinee, and a self-tail-call inside a
 /// nested match freed its locals both at the back edge and at the scope end.

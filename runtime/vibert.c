@@ -1,5 +1,7 @@
 #include "vibert.h"
 
+#include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -142,13 +144,25 @@ int64_t vb_as_int(VbVal v) {
   switch (v.tag) {
     case VB_INT: return v.v.i;
     case VB_UINT: return (int64_t)v.v.u;
-    case VB_FLOAT: return (int64_t)v.v.f;
+    case VB_FLOAT:
+      /* Out of range, or NaN, the cast is undefined; a value is not invented. */
+      if (!(v.v.f >= -9223372036854775808.0 && v.v.f < 9223372036854775808.0))
+        vb_fail("<runtime>", "a float out of the integer range");
+      return (int64_t)v.v.f;
     case VB_BOOL: return v.v.b ? 1 : 0;
     case VB_CHAR: return (int64_t)v.v.c;
     default: vb_fail("<runtime>", "expected an integer"); return 0;
   }
 }
-uint64_t vb_as_uint(VbVal v) { return (uint64_t)vb_as_int(v); }
+uint64_t vb_as_uint(VbVal v) {
+  if (v.tag == VB_UINT) return v.v.u;
+  if (v.tag == VB_FLOAT) {
+    if (!(v.v.f > -1.0 && v.v.f < 18446744073709551616.0))
+      vb_fail("<runtime>", "a float out of the unsigned range");
+    return (uint64_t)v.v.f;
+  }
+  return (uint64_t)vb_as_int(v);
+}
 double vb_as_float(VbVal v) {
   switch (v.tag) {
     case VB_FLOAT: return v.v.f;
@@ -214,7 +228,13 @@ static VbVal apply_lent(VbVal f, VbVal x) {
 }
 
 
-/* ------------------------------------------------------------ arithmetic */
+/* ------------------------------------------------------------ arithmetic
+ *
+ * Signed arithmetic wraps, through `uint64_t`, where C would leave an overflow
+ * undefined: a program that has not proved its bounds gets a wrong number, not
+ * a compiler's licence to do anything. The `_checked` forms report it. */
+
+static int64_t wrap(uint64_t x) { return (int64_t)x; }
 
 static bool either_float(VbVal a, VbVal b) { return a.tag == VB_FLOAT || b.tag == VB_FLOAT; }
 static bool either_unsigned(VbVal a, VbVal b) { return a.tag == VB_UINT || b.tag == VB_UINT; }
@@ -223,7 +243,7 @@ VbVal vb_add(VbVal a, VbVal b) {
   if (a.tag == VB_STR && b.tag == VB_STR) return vb_concat(a, b);
   if (either_float(a, b)) return vb_float(vb_as_float(a) + vb_as_float(b));
   if (either_unsigned(a, b)) return vb_uint(vb_as_uint(a) + vb_as_uint(b));
-  return vb_int(vb_as_int(a) + vb_as_int(b));
+  return vb_int(wrap((uint64_t)vb_as_int(a) + (uint64_t)vb_as_int(b)));
 }
 VbVal vb_sub(VbVal a, VbVal b) {
   if (either_float(a, b)) return vb_float(vb_as_float(a) - vb_as_float(b));
@@ -232,12 +252,12 @@ VbVal vb_sub(VbVal a, VbVal b) {
     vb_require(x >= y, "<program>", "unsigned subtraction would wrap");
     return vb_uint(x - y);
   }
-  return vb_int(vb_as_int(a) - vb_as_int(b));
+  return vb_int(wrap((uint64_t)vb_as_int(a) - (uint64_t)vb_as_int(b)));
 }
 VbVal vb_mul(VbVal a, VbVal b) {
   if (either_float(a, b)) return vb_float(vb_as_float(a) * vb_as_float(b));
   if (either_unsigned(a, b)) return vb_uint(vb_as_uint(a) * vb_as_uint(b));
-  return vb_int(vb_as_int(a) * vb_as_int(b));
+  return vb_int(wrap((uint64_t)vb_as_int(a) * (uint64_t)vb_as_int(b)));
 }
 VbVal vb_div(VbVal a, VbVal b, const char *path) {
   if (either_float(a, b)) {
@@ -248,14 +268,44 @@ VbVal vb_div(VbVal a, VbVal b, const char *path) {
   int64_t y = vb_as_int(b);
   vb_require(y != 0, path, "b != 0");
   if (either_unsigned(a, b)) return vb_uint(vb_as_uint(a) / (uint64_t)y);
-  return vb_int(vb_as_int(a) / y);
+  int64_t x = vb_as_int(a);
+  if (x == INT64_MIN && y == -1) return vb_int(INT64_MIN); /* wraps, as `*` does */
+  return vb_int(x / y);
 }
 VbVal vb_neg(VbVal a) {
   if (a.tag == VB_FLOAT) return vb_float(-a.v.f);
-  return vb_int(-vb_as_int(a));
+  return vb_int(wrap(0u - (uint64_t)vb_as_int(a)));
 }
 
 int vb_cmp(VbVal a, VbVal b) {
+  if (a.tag == VB_UNIT && b.tag == VB_UNIT) return 0;
+  /* A tuple, a record or a variant orders by constructor, then field by field;
+     a vector element by element, then by length. */
+  if (a.tag == VB_OBJ && b.tag == VB_OBJ) {
+    VbObj *x = a.v.p, *y = b.v.p;
+    if (x->tag != y->tag) return x->tag < y->tag ? -1 : 1;
+    for (uint32_t i = 0; i < x->n && i < y->n; i++) {
+      int c = vb_cmp(x->f[i], y->f[i]);
+      if (c) return c;
+    }
+    return x->n == y->n ? 0 : (x->n < y->n ? -1 : 1);
+  }
+  if (a.tag == VB_VEC && b.tag == VB_VEC) {
+    VbVec *x = a.v.p, *y = b.v.p;
+    for (size_t i = 0; i < x->n && i < y->n; i++) {
+      int c = vb_cmp(x->a[i], y->a[i]);
+      if (c) return c;
+    }
+    return x->n == y->n ? 0 : (x->n < y->n ? -1 : 1);
+  }
+  if (a.tag == VB_PTR && b.tag == VB_PTR) {
+    uintptr_t x = (uintptr_t)a.v.p, y = (uintptr_t)b.v.p;
+    return x < y ? -1 : (x > y ? 1 : 0);
+  }
+  if (a.tag == VB_CSTR && b.tag == VB_CSTR) {
+    int c = strcmp(a.v.p ? a.v.p : "", b.v.p ? b.v.p : "");
+    return c < 0 ? -1 : (c > 0 ? 1 : 0);
+  }
   if (a.tag == VB_STR && b.tag == VB_STR) {
     VbStr *x = vb_as_str(a), *y = vb_as_str(b);
     size_t n = x->n < y->n ? x->n : y->n;
@@ -276,18 +326,21 @@ int vb_cmp(VbVal a, VbVal b) {
 }
 
 bool vb_eq(VbVal a, VbVal b) {
-  if (a.tag == VB_UNIT && b.tag == VB_UNIT) return true;
-  if (a.tag == VB_BOOL && b.tag == VB_BOOL) return a.v.b == b.v.b;
-  if (a.tag == VB_CHAR && b.tag == VB_CHAR) return a.v.c == b.v.c;
+  /* NaN is equal to nothing, itself included; `vb_cmp` cannot say that. */
+  if (either_float(a, b)) return vb_as_float(a) == vb_as_float(b);
+  if (a.tag == VB_STR && b.tag == VB_STR) {
+    VbStr *x = a.v.p, *y = b.v.p;
+    return x->n == y->n && memcmp(x->p, y->p, x->n) == 0;
+  }
   if (a.tag == VB_OBJ && b.tag == VB_OBJ) {
-    VbObj *x = vb_as_obj(a), *y = vb_as_obj(b);
+    VbObj *x = a.v.p, *y = b.v.p;
     if (x->tag != y->tag || x->n != y->n) return false;
     for (uint32_t i = 0; i < x->n; i++)
       if (!vb_eq(x->f[i], y->f[i])) return false;
     return true;
   }
   if (a.tag == VB_VEC && b.tag == VB_VEC) {
-    VbVec *x = vb_as_vec(a), *y = vb_as_vec(b);
+    VbVec *x = a.v.p, *y = b.v.p;
     if (x->n != y->n) return false;
     for (size_t i = 0; i < x->n; i++)
       if (!vb_eq(x->a[i], y->a[i])) return false;
@@ -792,7 +845,7 @@ VbVal vb_to_signed(VbVal v, int bits) {
   }
 }
 VbVal vb_to_unsigned(VbVal v, int bits) {
-  uint64_t x = v.tag == VB_FLOAT ? (uint64_t)v.v.f : (uint64_t)vb_as_int(v);
+  uint64_t x = vb_as_uint(v);
   switch (bits) {
     case 8: return vb_uint((uint8_t)x);
     case 16: return vb_uint((uint16_t)x);
@@ -912,23 +965,30 @@ VbVal vb_seq(VbVal v) {
   return vb_ok(wrap_vec(w));
 }
 
-VbVal vb_parse_int(VbVal s, int sign) {
+/* Digits, with a `-` in front for a signed type, and nothing else: `strtoll`
+   alone would also take leading space and a `+`, clamp what is out of range,
+   and let `strtoull` wrap " -5" to a huge number. `bits` bounds the result. */
+VbVal vb_parse_int(VbVal s, int sign, int bits) {
   VbStr *x = vb_as_str(s);
-  if (x->n == 0) return vb_none();
+  const char *p = x->p;
+  bool neg = sign && x->n > 0 && p[0] == '-';
+  if (x->n == (size_t)neg || p[neg] < '0' || p[neg] > '9') return vb_none();
   char *end = NULL;
+  errno = 0;
   if (sign) {
-    long long r = strtoll(x->p, &end, 10);
-    if (end != x->p + x->n) return vb_none();
+    long long r = strtoll(p, &end, 10);
+    int64_t lim = bits >= 64 ? INT64_MAX : (INT64_C(1) << (bits - 1)) - 1;
+    if (errno || end != p + x->n || r > lim || r < -lim - 1) return vb_none();
     return vb_some(vb_int((int64_t)r));
   }
-  if (x->p[0] == '-') return vb_none();
-  unsigned long long r = strtoull(x->p, &end, 10);
-  if (end != x->p + x->n) return vb_none();
+  unsigned long long r = strtoull(p, &end, 10);
+  uint64_t lim = bits >= 64 ? UINT64_MAX : (UINT64_C(1) << bits) - 1;
+  if (errno || end != p + x->n || r > lim) return vb_none();
   return vb_some(vb_uint((uint64_t)r));
 }
 VbVal vb_parse_f64(VbVal s) {
   VbStr *x = vb_as_str(s);
-  if (x->n == 0) return vb_none();
+  if (x->n == 0 || isspace((unsigned char)x->p[0])) return vb_none();
   char *end = NULL;
   double r = strtod(x->p, &end);
   if (end != x->p + x->n) return vb_none();
@@ -941,7 +1001,7 @@ VbVal vb_abs(VbVal a) {
   if (a.tag == VB_FLOAT) return vb_float(fabs(a.v.f));
   if (a.tag == VB_UINT) return a;
   int64_t x = vb_as_int(a);
-  return vb_int(x < 0 ? -x : x);
+  return vb_int(x < 0 ? wrap(0u - (uint64_t)x) : x);
 }
 /* Bit operations are functions, not operators: `&` is the borrow sigil and `|`
    separates match arms, and the two spellings that were left would have brought
@@ -992,7 +1052,7 @@ VbVal vb_shr(VbVal a, VbVal n) {
     return vb_uint(k >= 64 ? 0 : x >> k);
   }
   /* Signed: arithmetic, so the sign is kept. */
-  int64_t x = vb_as_int(a);
+  int64_t x = (int64_t)bits(a, "shr needs an integer");
   if (k >= 64) return vb_int(x < 0 ? -1 : 0);
   return vb_int(x >> k);
 }
@@ -1071,54 +1131,66 @@ VbVal vb_exit(VbVal code) { exit((int)vb_as_int(code)); }
 
 /* ------------------------------------------------------------- Checked */
 
+/* Plain C99 overflow tests: the `__builtin_*_overflow` family is GCC and
+   Clang's, and the emitted C is meant for MSVC too. */
+static bool add_overflows(int64_t x, int64_t y) {
+  return y > 0 ? x > INT64_MAX - y : x < INT64_MIN - y;
+}
+static bool sub_overflows(int64_t x, int64_t y) {
+  return y < 0 ? x > INT64_MAX + y : x < INT64_MIN + y;
+}
+static bool mul_overflows(int64_t x, int64_t y) {
+  if (x == 0 || y == 0) return false;
+  if (x > 0) return y > 0 ? x > INT64_MAX / y : y < INT64_MIN / x;
+  return y > 0 ? x < INT64_MIN / y : x < INT64_MAX / y;
+}
+static VbVal fault(const VbInfo *info, uint32_t tag) { return vb_er(vb_obj(info, tag, 0)); }
+static VbVal overflow(void) { return fault(&vb_info_Overflow, 0); }
+
 VbVal vb_add_checked(VbVal a, VbVal b) {
   if (either_float(a, b)) return vb_ok(vb_float(vb_as_float(a) + vb_as_float(b)));
   if (either_unsigned(a, b)) {
     uint64_t x = vb_as_uint(a), y = vb_as_uint(b);
-    if (x > UINT64_MAX - y) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
-    return vb_ok(vb_uint(x + y));
+    return x > UINT64_MAX - y ? overflow() : vb_ok(vb_uint(x + y));
   }
-  int64_t x = vb_as_int(a), y = vb_as_int(b), r;
-  if (__builtin_add_overflow(x, y, &r)) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
-  return vb_ok(vb_int(r));
+  int64_t x = vb_as_int(a), y = vb_as_int(b);
+  return add_overflows(x, y) ? overflow() : vb_ok(vb_int(x + y));
 }
 VbVal vb_sub_checked(VbVal a, VbVal b) {
   if (either_float(a, b)) return vb_ok(vb_float(vb_as_float(a) - vb_as_float(b)));
   if (either_unsigned(a, b)) {
     uint64_t x = vb_as_uint(a), y = vb_as_uint(b);
-    if (x < y) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
-    return vb_ok(vb_uint(x - y));
+    return x < y ? overflow() : vb_ok(vb_uint(x - y));
   }
-  int64_t x = vb_as_int(a), y = vb_as_int(b), r;
-  if (__builtin_sub_overflow(x, y, &r)) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
-  return vb_ok(vb_int(r));
+  int64_t x = vb_as_int(a), y = vb_as_int(b);
+  return sub_overflows(x, y) ? overflow() : vb_ok(vb_int(x - y));
 }
 VbVal vb_mul_checked(VbVal a, VbVal b) {
   if (either_float(a, b)) return vb_ok(vb_float(vb_as_float(a) * vb_as_float(b)));
   if (either_unsigned(a, b)) {
-    uint64_t x = vb_as_uint(a), y = vb_as_uint(b), r;
-    if (__builtin_mul_overflow(x, y, &r)) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
-    return vb_ok(vb_uint(r));
+    uint64_t x = vb_as_uint(a), y = vb_as_uint(b);
+    return x != 0 && y > UINT64_MAX / x ? overflow() : vb_ok(vb_uint(x * y));
   }
-  int64_t x = vb_as_int(a), y = vb_as_int(b), r;
-  if (__builtin_mul_overflow(x, y, &r)) return vb_er(vb_obj(&vb_info_Overflow, 0, 0));
-  return vb_ok(vb_int(r));
+  int64_t x = vb_as_int(a), y = vb_as_int(b);
+  return mul_overflows(x, y) ? overflow() : vb_ok(vb_int(x * y));
 }
 VbVal vb_div_checked(VbVal a, VbVal b) {
   if (either_float(a, b)) {
     double y = vb_as_float(b);
-    if (y == 0.0) return vb_er(vb_obj(&vb_info_DivZero, 1, 0));
+    if (y == 0.0) return fault(&vb_info_DivZero, 1);
     return vb_ok(vb_float(vb_as_float(a) / y));
   }
   int64_t y = vb_as_int(b);
-  if (y == 0) return vb_er(vb_obj(&vb_info_DivZero, 1, 0));
+  if (y == 0) return fault(&vb_info_DivZero, 1);
   if (either_unsigned(a, b)) return vb_ok(vb_uint(vb_as_uint(a) / (uint64_t)y));
-  return vb_ok(vb_int(vb_as_int(a) / y));
+  int64_t x = vb_as_int(a);
+  if (x == INT64_MIN && y == -1) return overflow();
+  return vb_ok(vb_int(x / y));
 }
 VbVal vb_get_checked(VbVal v, VbVal i) {
   VbVec *s = vb_as_vec(v);
   uint64_t k = vb_as_uint(i);
-  if (k >= s->n) return vb_er(vb_obj(&vb_info_OutOfBounds, 2, 0));
+  if (k >= s->n) return fault(&vb_info_OutOfBounds, 2);
   /* Borrows, so the element comes back as a copy, as `vb_lookup`'s does. */
   return vb_ok(vb_dup(s->a[k]));
 }

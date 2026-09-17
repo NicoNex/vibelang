@@ -179,7 +179,7 @@ VbVal vb_er(VbVal x);
 VbVal vb_some(VbVal x);
 VbVal vb_none(void);
 VbVal vb_seq(VbVal v);
-VbVal vb_parse_int(VbVal s, int sign);
+VbVal vb_parse_int(VbVal s, int sign, int bits);
 VbVal vb_parse_f64(VbVal s);
 
 /* --- Math --- */
