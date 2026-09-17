@@ -23,6 +23,60 @@ use crate::ast::*;
 use crate::diag::{Diag, Span};
 use std::collections::HashMap;
 
+/// The strongly connected component of each function, by Tarjan's algorithm,
+/// iterative so a long call chain cannot overflow the stack. O(functions +
+/// calls), where the reachability closure it replaces was cubic.
+fn call_components(calls: &[Vec<Call>], n: usize) -> Vec<usize> {
+    const UNSEEN: usize = usize::MAX;
+    let mut index = vec![UNSEEN; n];
+    let mut low = vec![0; n];
+    let mut on_stack = vec![false; n];
+    let mut comp = vec![UNSEEN; n];
+    let (mut next, mut ncomp) = (0, 0);
+    let mut stack = Vec::new();
+    for root in 0..n {
+        if index[root] != UNSEEN {
+            continue;
+        }
+        // (node, how many of its calls have been followed)
+        let mut work = vec![(root, 0usize)];
+        while let Some(&mut (v, ref mut k)) = work.last_mut() {
+            if *k == 0 && index[v] == UNSEEN {
+                index[v] = next;
+                low[v] = next;
+                next += 1;
+                stack.push(v);
+                on_stack[v] = true;
+            }
+            if let Some(c) = calls[v].get(*k) {
+                *k += 1;
+                let w = c.callee;
+                if index[w] == UNSEEN {
+                    work.push((w, 0));
+                } else if on_stack[w] {
+                    low[v] = low[v].min(index[w]);
+                }
+                continue;
+            }
+            work.pop();
+            if let Some(&(parent, _)) = work.last() {
+                low[parent] = low[parent].min(low[v]);
+            }
+            if low[v] == index[v] {
+                while let Some(w) = stack.pop() {
+                    on_stack[w] = false;
+                    comp[w] = ncomp;
+                    if w == v {
+                        break;
+                    }
+                }
+                ncomp += 1;
+            }
+        }
+    }
+    comp
+}
+
 /// Whether this function is allowed not to terminate: its declared result is
 /// effectful, so divergence is among the effects it announces.
 fn diverges(f: &FunDecl) -> bool {
@@ -46,30 +100,24 @@ pub fn check(m: &Module) -> Vec<Diag> {
     let params: Vec<Vec<String>> = funs.iter().map(|f| f.param_names()).collect();
     let calls: Vec<Vec<Call>> = funs.iter().map(|f| calls_in(&f.body, &index)).collect();
 
-    // Reachability closure over the call graph; `i` is recursive when it reaches itself.
+    // Strongly connected components of the call graph: `i` is recursive when
+    // its component has another member or it calls itself.
     let n = funs.len();
-    let mut reach = vec![vec![false; n]; n];
-    for (i, cs) in calls.iter().enumerate() {
-        for c in cs {
-            reach[i][c.callee] = true;
-        }
+    let comp = call_components(&calls, n);
+    let mut comp_size = vec![0usize; n];
+    for &c in &comp {
+        comp_size[c] += 1;
     }
-    for k in 0..n {
-        for i in 0..n {
-            for j in 0..n {
-                if reach[i][k] && reach[k][j] {
-                    reach[i][j] = true;
-                }
-            }
-        }
-    }
-    let same_group = |i: usize, j: usize| i == j || (reach[i][j] && reach[j][i]);
+    let recursive: Vec<bool> = (0..n)
+        .map(|i| comp_size[comp[i]] > 1 || calls[i].iter().any(|c| c.callee == i))
+        .collect();
+    let same_group = |i: usize, j: usize| comp[i] == comp[j];
 
     let mut ds = Vec::new();
     // Pass 1: a measure for every recursive function.
     let mut measures: Vec<Option<Vec<Lin>>> = vec![None; n];
     for i in 0..n {
-        if !reach[i][i] {
+        if !recursive[i] {
             continue; // not recursive: nothing to prove
         }
         if diverges(funs[i]) {
