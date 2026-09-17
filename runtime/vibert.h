@@ -130,8 +130,10 @@ VbVal vb_keys(VbVal d);
 VbVal vb_vec_new(void);
 VbVal vb_vec_lit(uint32_t n, ...);
 VbVal vb_push(VbVal v, VbVal x);
+VbVal vb_push_owned(VbVal v, VbVal x);
 VbVal vb_get(VbVal v, VbVal i, const char *path);
 VbVal vb_set(VbVal v, VbVal i, VbVal x, const char *path);
+VbVal vb_set_owned(VbVal v, VbVal i, VbVal x, const char *path);
 VbVal vb_len(VbVal v);
 VbVal vb_map(VbVal f, VbVal v);
 VbVal vb_filter(VbVal f, VbVal v);
@@ -160,12 +162,14 @@ VbVal vb_to_cstr(VbVal s);
 VbVal vb_from_cstr(VbVal p);
 VbVal vb_chr(VbVal c);
 VbVal vb_byte_str(VbVal b);
+VbVal vb_byte_at(VbVal s, VbVal i, const char *path);
 VbVal vb_slice(VbVal i, VbVal j, VbVal s);
 VbVal vb_index_of(VbVal s, VbVal p);
 VbVal vb_replace(VbVal s, VbVal from, VbVal to);
 VbVal vb_lower(VbVal s);
 VbVal vb_show(VbVal v);
 VbVal vb_fmt(VbVal f, uint32_t n, ...);
+VbVal vb_show_exact(VbVal a);
 
 /* --- conversions --- */
 VbVal vb_to_f64(VbVal v);
@@ -197,10 +201,6 @@ VbVal vb_max(VbVal a, VbVal b);
 VbVal vb_sqrt(VbVal a);
 VbVal vb_pow(VbVal a, VbVal b);
 VbVal vb_floor(VbVal a);
-VbVal vb_show_exact(VbVal a);
-VbVal vb_byte_at(VbVal s, VbVal i, const char *path);
-VbVal vb_push_owned(VbVal v, VbVal x);
-VbVal vb_set_owned(VbVal v, VbVal i, VbVal x, const char *path);
 
 /* --- IO --- */
 VbVal vb_read(VbVal path);
@@ -218,6 +218,6 @@ VbVal vb_sub_checked(VbVal a, VbVal b);
 VbVal vb_mul_checked(VbVal a, VbVal b);
 VbVal vb_div_checked(VbVal a, VbVal b);
 VbVal vb_get_checked(VbVal v, VbVal i);
-extern const VbInfo vb_info_Overflow, vb_info_DivZero, vb_info_OutOfBounds, vb_info_BadParse;
+extern const VbInfo vb_info_Overflow, vb_info_DivZero, vb_info_OutOfBounds;
 
 #endif /* VIBERT_H */
