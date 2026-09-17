@@ -357,6 +357,14 @@ enum Mode {
     Borrow,
 }
 
+/// What differs between the arms of a match. A new piece of per-path state goes
+/// here, so `fork`, `restore` and `join_into` carry it without a new copy of
+/// the save-and-merge code at every branch.
+struct PathState {
+    moved: HashMap<String, Span>,
+    mutated: HashMap<String, Span>,
+}
+
 struct State<'a> {
     moved: HashMap<String, Span>,
     /// Binders still owned when their scope ends: the drop table.
@@ -536,6 +544,30 @@ impl State<'_> {
             );
         } else {
             self.moved.insert(n.to_string(), span);
+        }
+    }
+
+    /// The per-path state a branch starts from.
+    fn fork(&self) -> PathState {
+        PathState {
+            moved: self.moved.clone(),
+            mutated: self.mutated.clone(),
+        }
+    }
+
+    fn restore(&mut self, p: &PathState) {
+        self.moved = p.moved.clone();
+        self.mutated = p.mutated.clone();
+    }
+
+    /// Fold this path into `acc`: a move or an update on any path holds after
+    /// the branch. The first one seen is the one a diagnostic names.
+    fn join_into(&mut self, acc: &mut PathState) {
+        for (k, v) in self.moved.drain() {
+            acc.moved.entry(k).or_insert(v);
+        }
+        for (k, v) in self.mutated.drain() {
+            acc.mutated.entry(k).or_insert(v);
         }
     }
 
@@ -736,15 +768,12 @@ impl State<'_> {
                 self.walk(scrut, Mode::Borrow, owned);
                 // Arms are alternatives: each starts from the state before the
                 // match, and a value moved in any arm is moved after it.
-                let before = self.moved.clone();
-                let mut after = before.clone();
-                // An in-place update in one arm is not seen by its siblings.
-                let updated_before = self.mutated.clone();
-                let mut updated_after = updated_before.clone();
+                // Moves and in-place updates are both per path.
+                let before = self.fork();
+                let mut after = self.fork();
                 let mut kept: Vec<(String, Span)> = Vec::new();
                 for (p, body) in arms {
-                    self.moved = before.clone();
-                    self.mutated = updated_before.clone();
+                    self.restore(&before);
                     let bound = p.names();
                     // The scrutinee is read, not consumed, so a payload the
                     // pattern names is a pointer into a value someone else
@@ -788,12 +817,7 @@ impl State<'_> {
                             kept.push(((*n).to_string(), body.span));
                         }
                     }
-                    for (k, v) in self.moved.drain() {
-                        after.entry(k).or_insert(v);
-                    }
-                    for (k, v) in self.mutated.drain() {
-                        updated_after.entry(k).or_insert(v);
-                    }
+                    self.join_into(&mut after);
                 }
                 // An arm that still owns a value another arm consumed frees it
                 // where the arm ends: after the match, the consuming path would
@@ -805,12 +829,11 @@ impl State<'_> {
                 // Upgrade path: drop a payload separately once a value can be
                 // taken apart, which needs Task 8's per-type `_Drop_T`.
                 for (n, at) in kept {
-                    if after.contains_key(&n) {
+                    if after.moved.contains_key(&n) {
                         self.drop_site(&n, at, DropWhen::ScopeEnd);
                     }
                 }
-                self.moved = after;
-                self.mutated = updated_after;
+                self.restore(&after);
             }
             Int(_) | Float(_) | Str(_) | Char(_) | Bool(_) | Unit | Ctor(_) => {}
         }
