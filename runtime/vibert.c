@@ -45,6 +45,12 @@ VbVal vb_str(const char *s, size_t n) {
   o->p[n] = 0;
   VbVal v; v.tag = VB_STR; v.v.p = o; return v;
 }
+/* `vb_str` copies, so a buffer built only to be copied is freed here. */
+static VbVal str_take(char *buf, size_t n) {
+  VbVal r = vb_str(buf, n);
+  free(buf);
+  return r;
+}
 VbVal vb_strz(const char *s) { return vb_str(s ? s : "", s ? strlen(s) : 0); }
 
 VbVal vb_obj(const VbInfo *info, uint32_t tag, uint32_t n, ...) {
@@ -620,7 +626,7 @@ VbVal vb_replace(VbVal s, VbVal from, VbVal to) {
       memcpy(buf + w, t->p, t->n); w += t->n; i += f->n;
     } else buf[w++] = x->p[i++];
   }
-  return vb_str(buf, n);
+  return str_take(buf, n);
 }
 /* ponytail: ASCII only. Upgrade path is a UTF-8 case table, when a program that
    needs one exists. */
@@ -631,7 +637,7 @@ VbVal vb_lower(VbVal s) {
     char c = x->p[i];
     buf[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
   }
-  return vb_str(buf, x->n);
+  return str_take(buf, x->n);
 }
 
 static void sb_push(VbVec *acc, const char *s, size_t n) {
@@ -640,7 +646,7 @@ static void sb_push(VbVec *acc, const char *s, size_t n) {
 static VbVal sb_done(VbVec *acc) {
   char *buf = vb_alloc(acc->n + 1);
   for (size_t i = 0; i < acc->n; i++) buf[i] = (char)acc->a[i].v.c;
-  return vb_str(buf, acc->n);
+  return str_take(buf, acc->n);
 }
 
 static void show_into(VbVec *acc, VbVal v) {
@@ -949,11 +955,10 @@ VbVal vb_read(VbVal path) {
   char *buf = vb_alloc((size_t)n + 1);
   size_t got = fread(buf, 1, (size_t)n, fh);
   fclose(fh);
-  return vb_str(buf, got);
+  return str_take(buf, got);
 }
 /* Reads all of standard input. ponytail: doubling buffer with a copy on each
-   growth, on a bump allocator that never frees, so peak memory is about twice
-   the input. Stream it if a program ever has to filter more than it can hold. */
+   growth, so peak memory is about twice the input. Stream it if a program ever has to filter more than it can hold. */
 VbVal vb_read_stdin(void) {
   size_t cap = 65536, n = 0;
   char *buf = vb_alloc(cap);
@@ -963,10 +968,11 @@ VbVal vb_read_stdin(void) {
     if (n < cap) break; /* short read: end of file, or an error */
     char *bigger = vb_alloc(cap * 2);
     memcpy(bigger, buf, n);
+    free(buf);
     buf = bigger;
     cap *= 2;
   }
-  return vb_str(buf, n);
+  return str_take(buf, n);
 }
 VbVal vb_write(VbVal path, VbVal data) {
   const char *p = vb_as_str(path)->p;
