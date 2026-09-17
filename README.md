@@ -175,6 +175,7 @@ spent fixing the compiler bugs the same session found:
 | `Hash` + `Rand` | 47 | ~4.7k |
 | `Args` | 49 | ~2.0k |
 | **total** | **828** | **~42k** |
+| `Regex` — Go's RE2 syntax, Pike VM, differential test against Go | 1,287 | ~123k |
 
 The whole session came to ~141k output tokens. The other ~99k went into the language:
 13 compiler and runtime defects, from three double frees to a hole in exhaustiveness
@@ -182,7 +183,14 @@ checking, each fixed with a regression test and listed in
 [`docs/remaining-work.md`](docs/remaining-work.md). Once the compiler stopped getting in the
 way, a proved module cost a few thousand tokens.
 
-One session, split by timestamp from its log, so read the figures as estimates, not a
+`Regex` came later, in a session of its own, and is counted the same way: every response
+from the first file written for it to its commit, less the two stretches spent fixing the
+compiler bugs it found (`vibe fmt` moving comments, a leaked closure). Its figure is higher
+per line for two reasons worth knowing: it includes the model's reasoning as well as the
+code, and it includes making 25,000 random cases agree with Go's `regexp` — the work that
+turned a matcher that looked right into one that is.
+
+Each session was split by timestamp from its log, so read the figures as estimates, not a
 benchmark. The phase-0 comparison against another language is still to be done.
 
 ## Read more
