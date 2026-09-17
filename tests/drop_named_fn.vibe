@@ -1,0 +1,13 @@
+mod DropNamedFn
+
+;; `map zero` builds a closure for the call, as `map (\x -> 0)` does; it is
+;; dropped when the call returns, not kept for ever.
+zero (x:Size) : Size = 0
+
+spin (k:U64) (acc:Size) : Size =
+  ?k |0 -> acc
+     |_ -> spin (k - 1) (acc + len &(map zero &(range 0 2)))
+  end
+
+main : E! Unit =
+  out &(show (spin 3 0))

@@ -236,6 +236,18 @@ pub fn ty_borrows(t: &Ty) -> Vec<bool> {
     v
 }
 
+/// Whether the prelude function `n` takes a function as its argument `i`.
+fn takes_fn(n: &str, i: usize) -> bool {
+    let mut cur = crate::infer::prelude_ty(n);
+    for _ in 0..i {
+        cur = match cur {
+            Some(Ty::Fun(_, b)) => Some(b),
+            _ => None,
+        };
+    }
+    matches!(cur, Some(Ty::Fun(a, _)) if matches!(**a, Ty::Fun(..)))
+}
+
 /// Every name a body can yield as its result, with the span it sits at.
 fn borrow_out<'a>(e: &'a Expr, borrows: &[&str], out: &mut Vec<(&'a str, Span, &'static str)>) {
     use ExprKind::*;
@@ -646,6 +658,25 @@ impl State<'_> {
                     // `fmt "{}" (fold f acc v)` the fold is read, but `acc` is
                     // still handed to it.
                     let m = if lent { Mode::Borrow } else { Mode::Own };
+                    // A module function or a constructor named as a value is a
+                    // closure built for this call, the same as a lambda, when the
+                    // prelude function takes a function in that position:
+                    // `map zero &v` allocated one no name held and nothing freed.
+                    let named_fn = !keeps_closures
+                        && match &a.kind {
+                            Var(v) => v.contains('.') && self.sigs.contains_key(v),
+                            Ctor(_) => true,
+                            _ => false,
+                        }
+                        && matches!(&h.kind, Var(n) if takes_fn(n, i));
+                    if named_fn {
+                        self.drops.push(DropSite {
+                            name: String::new(),
+                            at: a.span,
+                            path: self.path.clone(),
+                            when: DropWhen::Temp,
+                        });
+                    }
                     if matches!(a.kind, Lambda(..)) {
                         if keeps_closures {
                             let mut captured = HashSet::new();

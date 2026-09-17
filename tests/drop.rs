@@ -209,3 +209,21 @@ fn a_call_inside_a_borrow_position_does_not_make_its_arguments_borrows() {
         "only what `out` borrowed is freed, and `\"ok\"` is not freed twice:\n{d}"
     );
 }
+
+/// A module function named as a value, `map zero &v`, builds a closure for the
+/// call just as a lambda does. The lambda's was freed when the call returned;
+/// the named function's was not, so a loop grew by one closure per iteration —
+/// 65 MB over a million where the lambda stayed at 1.5 MB.
+#[test]
+fn a_named_function_given_to_the_prelude_is_freed_after_the_call() {
+    let c = emit_c("tests/drop_named_fn.vibe", "drop_named_fn");
+    let line = c
+        .lines()
+        .find(|l| l.contains("= vb_fn(vbf_DropNamedFn_zero"))
+        .expect("the closure is built");
+    let t = line.split_whitespace().nth(1).expect("a temporary");
+    assert!(
+        c.contains(&format!("vb_dispose({t});")),
+        "`{t}` is never freed:\n{c}"
+    );
+}

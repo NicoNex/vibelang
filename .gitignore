@@ -40,3 +40,4 @@
 *.dSYM
 /examples/loop
 /tests/push_str
+/tests/drop_named_fn
