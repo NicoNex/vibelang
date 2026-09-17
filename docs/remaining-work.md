@@ -317,6 +317,11 @@ Carried from §16, with what has changed since:
 
 ## Found writing the standard library, still open
 
+- **The skill's token protocol is untested.** `.claude/skills/vibelang/SKILL.md`
+  opens with a recipe for working through `--sig-only`, `patch`, `proof` and
+  `--diag=struct`, built from measured sizes. Still to do: an A/B run of the same
+  tasks by subagents with the old and new skill, counting tokens and whether
+  `--prove` passes, and moving the long teaching examples out of `SKILL.md`.
 - **`Regex` has no Unicode tables**: `\p{...}` and `\pL` are refused and `(?i)`
   folds ASCII only. Tables generated from UnicodeData are data, not engine
   changes. It runs one engine — no one-pass, backtracker or lazy DFA — and it

@@ -24,6 +24,28 @@ GC, exhaustive, and free of the division, index and overflow faults a solver cou
 the places where today's compiler is narrower than the spec. Everything here compiles
 against the compiler in this tree.
 
+## Spend as few tokens as the compiler lets you
+
+The CLI projects a program so you never have to read or write more of it than the task
+touches. Measured on `lib/regex.vibe`: the file is ~14k tokens, `--sig-only` ~1.7k, one
+`vibe patch` node ~50. Work in this order:
+
+1. **Load context** with `vibe view --sig-only f.vibe`, then `vibe patch f.vibe Mod.fn` for
+   the one body you need (it prints the node and its hash). Do not read a whole `.vibe`.
+2. **Find callers/callees** with `vibe deps f.vibe | grep name`.
+3. **Look up the library** with `vibe view --sig-only lib/<module>.vibe`, or `grep -A40
+   '^## Module' references/stdlib.md`. Do not load `stdlib.md` whole; check it before
+   writing a helper.
+4. **Write dense code**: one line per declaration where it fits, no alignment, no body
+   type annotations. `vibe fmt` lays it out; do not read the file back afterwards.
+5. **Change an existing declaration** with `vibe patch f.vibe <path> <hash> '<node>'`
+   rather than reading and rewriting the file: it replaces one node, re-checks, and
+   refuses an edit that stops compiling.
+6. **Verify** with `vibe check --prove f.vibe --diag=struct` (the shortest rendering);
+   `vibe proof --prove f.vibe` lists only what is still open, one line each. Apply the
+   `fix:` line as written instead of reasoning about the obligation.
+7. **Look up an error code** with `grep -A15 'code' references/errors.md`, not the file.
+
 ## The loop — never hand over unverified Vibelang
 
 ```bash
